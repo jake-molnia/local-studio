@@ -543,6 +543,16 @@ const CONTROLLER_THINKING_LEVEL_MAP = {
   max: "max",
 } as const;
 
+const CONTROLLER_RESPONSES_THINKING_LEVEL_MAP = {
+  off: "off",
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+} as const;
+
 export function modelsToPiModels(models: AgentModel[]) {
   return models.map((model) => {
     const deepSeekReasoning = isDeepSeekReasoningModel(model) && !isControllerBackedModel(model);
@@ -555,9 +565,15 @@ export function modelsToPiModels(models: AgentModel[]) {
       input: model.vision ? ["text", "image"] : ["text"],
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
+      ...(model.api ? { api: model.api } : {}),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       ...(model.controllerUrl && model.reasoning
-        ? { thinkingLevelMap: CONTROLLER_THINKING_LEVEL_MAP }
+        ? {
+            thinkingLevelMap:
+              model.api === "openai-responses"
+                ? CONTROLLER_RESPONSES_THINKING_LEVEL_MAP
+                : CONTROLLER_THINKING_LEVEL_MAP,
+          }
         : deepSeekReasoning
           ? {
               thinkingLevelMap: {
