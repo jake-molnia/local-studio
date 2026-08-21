@@ -13,6 +13,11 @@ and server surfaces.
 — signed and notarized; updates itself from GitHub releases. All versions on the
 [releases page](https://github.com/jake-molnia/local-studio/releases).
 
+**[Download the rolling nightly build](https://github.com/jake-molnia/local-studio/releases/tag/nightly)**
+— built unsigned from every push to `main`. Nightly installs require manual
+approval in macOS Privacy & Security and cannot use in-app auto-update until the
+build is signed.
+
 It is built from two modules that share one controller API:
 
 - [`controller/`](controller/README.md) — Bun/Hono backend. Owns model lifecycle
@@ -237,9 +242,10 @@ symlinks to `scripts/project.mjs`; they do not contain separate automation logic
 
 ## Releases
 
-Every pull request into `main` must pass CI. Merging a pull request does not
-publish a release. A release starts when a version tag matching `vX.Y.Z` is
-pushed for the current `main` commit; the tag supplies the packaged app version.
+Every pull request into `main` must pass CI. Every push to `main` refreshes the
+unsigned rolling `nightly` prerelease and its manually installable DMG. A stable
+release starts when a version tag matching `vX.Y.Z` is pushed for the current
+`main` commit; the tag supplies the packaged app version.
 
 ```bash
 git checkout main

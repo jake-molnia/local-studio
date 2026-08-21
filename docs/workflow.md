@@ -21,10 +21,22 @@ npm run check
 GitHub CI repeats the repository gates and creates an unsigned exact-commit
 desktop artifact. Required CI checks must pass before a pull request is merged.
 
-## Releases
+## Nightly releases
 
-Merging to `main` never releases automatically. To release the current `main`
-commit, choose the next semantic version and push an exact `vX.Y.Z` tag:
+Every push to `main` publishes a rolling `nightly` prerelease. The workflow
+builds unsigned DMG, ZIP and updater metadata assets from the exact `main`
+commit, moves the `nightly` tag to that commit, and replaces the prior nightly
+assets.
+
+Install the nightly DMG manually. Because the app is unsigned, macOS requires
+approval in System Settings under Privacy & Security. Electron's macOS updater
+cannot install unsigned updates, so automatic in-app updates remain unavailable
+for nightly builds until signing is enabled.
+
+## Stable releases
+
+To publish a stable release for the current `main` commit, choose the next
+semantic version and push an exact `vX.Y.Z` tag:
 
 ```bash
 git checkout main
