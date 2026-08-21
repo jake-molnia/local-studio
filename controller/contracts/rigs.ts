@@ -110,6 +110,7 @@ export const RigNodeCreateSchema = Schema.Struct({
   memory_gb: Schema.optional(Schema.NullOr(Schema.Number)),
   accelerators: Schema.optional(Schema.Array(RigAcceleratorInputSchema)),
   notes: Schema.optional(Schema.NullOr(Schema.String)),
+  api_key: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 export const RigNodeUpdateSchema = Schema.Struct({
@@ -123,4 +124,5 @@ export const RigNodeUpdateSchema = Schema.Struct({
   memory_gb: Schema.optional(Schema.NullOr(Schema.Number)),
   accelerators: Schema.optional(Schema.Array(RigAcceleratorInputSchema)),
   notes: Schema.optional(Schema.NullOr(Schema.String)),
+  api_key: Schema.optional(Schema.NullOr(Schema.String)),
 });
