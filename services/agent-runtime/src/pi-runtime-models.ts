@@ -601,6 +601,12 @@ export function modelsToPiModels(models: AgentModel[]) {
             : {}),
       compat: {
         ...VLLM_OPENAI_COMPAT,
+        ...(model.api === "openai-responses"
+          ? {
+              supportsOpenAIGrammarTools: true,
+              supportsToolSearch: true,
+            }
+          : {}),
         ...(deepSeekReasoning
           ? {
               thinkingFormat: "deepseek",

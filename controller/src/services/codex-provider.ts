@@ -443,6 +443,7 @@ export class CodexProviderService {
                 : "You are a helpful assistant.",
             include: [...new Set([...include, "reasoning.encrypted_content"])],
           };
+          delete upstreamBody["max_output_tokens"];
           delete upstreamBody["stream_options"];
           const sessionId =
             typeof request["prompt_cache_key"] === "string"
@@ -468,10 +469,11 @@ export class CodexProviderService {
             signal,
           });
           if (!upstream.ok || !upstream.body) {
-            const response = new Response(upstream.body, {
+            const errorBody = await upstream.text();
+            const response = new Response(errorBody, {
               status: upstream.status,
               headers: {
-                "Content-Type": upstream.headers.get("content-type") ?? "application/json",
+                "Content-Type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
               },
             });
             return { response, completion: Promise.resolve(null) };
