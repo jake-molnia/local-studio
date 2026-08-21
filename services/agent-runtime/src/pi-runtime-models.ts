@@ -1,7 +1,9 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
+import { getGlobalSingleton } from "./instances";
 import { getApiSettings, type ApiSettings } from "./settings-service";
 import { resolveDataDir } from "./data-dir";
 import { listProviderAgentModels, refreshProviderHub } from "./provider-hub";
@@ -16,6 +18,24 @@ import { resolveModelVision } from "../../../controller/contracts/model-capabili
 
 const PROVIDER_ID = "local-studio";
 const USER_PI_PREFIX = "user-pi-";
+
+type PiModelsRefreshQueue = { tail: Promise<void> };
+
+function refreshQueue(): PiModelsRefreshQueue {
+  return getGlobalSingleton("piModelsRefreshQueue", () => ({ tail: Promise.resolve() }));
+}
+
+async function writePrivateJson(file: string, value: unknown): Promise<void> {
+  const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await writeFile(temporary, JSON.stringify(value, null, 2), "utf-8");
+    await chmod(temporary, 0o600).catch(() => undefined);
+    await rename(temporary, file);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+}
 
 function userPiModelsPath(): string {
   const agentDir = process.env["PI_CODING_AGENT_DIR"]?.trim();
@@ -283,8 +303,7 @@ async function savePersistedControllers(
   const unique = [
     ...new Map(normalized.map((controller) => [controller.url, controller])).values(),
   ];
-  await writeFile(controllersPath(agentDir), JSON.stringify(unique, null, 2), "utf-8");
-  await chmod(controllersPath(agentDir), 0o600).catch(() => undefined);
+  await writePrivateJson(controllersPath(agentDir), unique);
 }
 
 /** How long a single controller gets to answer /v1/models before it is
@@ -448,8 +467,7 @@ async function writePiModelsConfig(
   }
 
   const modelsPath = path.join(agentDir, "models.json");
-  await writeFile(modelsPath, JSON.stringify({ providers }, null, 2), "utf-8");
-  await chmod(modelsPath, 0o600).catch(() => undefined);
+  await writePrivateJson(modelsPath, { providers });
   return agentDir;
 }
 
@@ -464,7 +482,7 @@ export function resolvePiModelSelection(modelId: string): { providerId: string; 
   return { providerId: PROVIDER_ID, modelId };
 }
 
-export async function refreshPiModels(
+async function refreshPiModelsUnlocked(
   requestedControllers?: PiControllerModelsRequest[],
 ): Promise<{ models: AgentModel[]; agentDir: string }> {
   const settings = await getApiSettings();
@@ -504,6 +522,21 @@ export async function refreshPiModels(
       : new Error("No controllers returned models.");
   }
   return { models: allModels, agentDir: writtenAgentDir };
+}
+
+export function refreshPiModels(
+  requestedControllers?: PiControllerModelsRequest[],
+): Promise<{ models: AgentModel[]; agentDir: string }> {
+  const queue = refreshQueue();
+  const run = queue.tail.then(
+    () => refreshPiModelsUnlocked(requestedControllers),
+    () => refreshPiModelsUnlocked(requestedControllers),
+  );
+  queue.tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 async function collectProviderAgentModels(): Promise<AgentModel[]> {
   await refreshProviderHub().catch(() => undefined);
