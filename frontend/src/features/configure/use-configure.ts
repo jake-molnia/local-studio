@@ -5,13 +5,21 @@ import api from "@/lib/api/client";
 import type { RigNodePayload } from "@/lib/api/rigs";
 import { readPageCache, writePageCache } from "@/lib/page-data-cache";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import type { Rig, RigsPayload } from "@/lib/types";
+import type { Rig, RigsPayload, WorkerStatus } from "@/lib/types";
+import {
+  getSelectedWorkerId,
+  setSelectedWorkerId,
+  WORKER_SELECTION_EVENT,
+} from "@/lib/api/worker-selection";
 
 const RIGS_CACHE_KEY = "configure:rigs";
 
 export interface ConfigureState {
   rigs: Rig[];
   localNodeId: string;
+  workers: readonly WorkerStatus[];
+  selectedWorkerId: string;
+  selectWorker: (workerId: string) => void;
   loading: boolean;
   refreshing: boolean;
   error: string | null;
@@ -30,14 +38,20 @@ export function useConfigure(): ConfigureState {
   const [loading, setLoading] = useState(rigsPayload === null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workers, setWorkers] = useState<readonly WorkerStatus[]>([]);
+  const [selectedWorkerId, setWorkerId] = useState(getSelectedWorkerId);
 
   const reload = useCallback(async () => {
     setRefreshing(true);
     setError(null);
     try {
-      const rigs = await api.getRigs();
+      const [rigs, workerPayload] = await Promise.all([
+        api.getRigs(),
+        api.getWorkers().catch(() => null),
+      ]);
       writePageCache(RIGS_CACHE_KEY, rigs);
       setRigsPayload(rigs);
+      setWorkers(workerPayload?.workers ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -49,6 +63,21 @@ export function useConfigure(): ConfigureState {
   useMountSubscription(() => {
     void reload();
   }, [reload]);
+
+  useMountSubscription(() => {
+    const sync = () => setWorkerId(getSelectedWorkerId());
+    window.addEventListener(WORKER_SELECTION_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(WORKER_SELECTION_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  const selectWorker = useCallback((workerId: string) => {
+    setSelectedWorkerId(workerId);
+    setWorkerId(workerId);
+  }, []);
 
   const applyRig = useCallback((rig: Rig) => {
     setRigsPayload((current) => {
@@ -106,6 +135,9 @@ export function useConfigure(): ConfigureState {
   return {
     rigs: rigsPayload?.rigs ?? [],
     localNodeId: rigsPayload?.local_node_id ?? "local",
+    workers,
+    selectedWorkerId,
+    selectWorker,
     loading,
     refreshing,
     error,

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ErrorBox } from "@/ui";
+import { ErrorBox, Select, StatusPill } from "@/ui";
 import { Monitor, Server, type LucideIcon } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { SettingsLayout, type SettingsSectionDef } from "@/features/settings/settings-ui";
@@ -87,6 +87,28 @@ export default function ConfigurePage() {
     window.history.replaceState(null, "", `${window.location.pathname}${query}#${next}`);
   };
 
+  const selectedWorker = state.workers.find((worker) => worker.id === state.selectedWorkerId);
+  const workerStatus = (
+    <div className="flex items-center gap-2">
+      {selectedWorker ? (
+        <StatusPill tone={selectedWorker.healthy ? "good" : "danger"}>
+          {selectedWorker.healthy ? "online" : "offline"}
+        </StatusPill>
+      ) : null}
+      <Select
+        aria-label="Management Worker"
+        value={state.selectedWorkerId}
+        onChange={(event) => state.selectWorker(event.target.value)}
+        placeholder="Select Worker"
+        className="min-w-44"
+        options={state.workers.map((worker) => ({
+          value: worker.id,
+          label: worker.name,
+        }))}
+      />
+    </div>
+  );
+
   return (
     <SettingsLayout
       sections={CONFIGURE_SECTIONS}
@@ -94,9 +116,7 @@ export default function ConfigurePage() {
       title="Configure"
       width="wide"
       loading={state.refreshing || state.loading}
-      // Every section owns its own reload control, sitting next to the data it
-      // refreshes. A second one in the page chrome only raises the question of
-      // which one you are supposed to press.
+      status={state.workers.length > 0 ? workerStatus : undefined}
       showRefresh={false}
       onReload={state.reload}
       onSelectSection={selectSection}

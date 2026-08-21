@@ -24,6 +24,7 @@ export interface NodeFormState {
   role: RigNodeRole;
   hostname: string;
   address: string;
+  api_key: string;
   memory_gb: string;
   accelerator_name: string;
   accelerator_count: string;
@@ -40,6 +41,7 @@ const EMPTY_FORM: NodeFormState = {
   role: "worker",
   hostname: "",
   address: "",
+  api_key: "",
   memory_gb: "",
   accelerator_name: "",
   accelerator_count: "1",
@@ -69,6 +71,7 @@ export function nodeToForm(node: RigNode): NodeFormState {
     role: node.role,
     hostname: node.hostname ?? "",
     address: node.address ?? "",
+    api_key: "",
     memory_gb: node.memory_gb === null ? "" : String(node.memory_gb),
     accelerator_name: accelerator?.name ?? "",
     accelerator_count: String(accelerator?.count ?? 1),
@@ -86,6 +89,7 @@ const formToPayload = (form: NodeFormState): RigNodePayload & { name: string } =
     role: form.role,
     hostname: form.hostname.trim() || null,
     address: form.address.trim() || null,
+    ...(form.api_key.trim() ? { api_key: form.api_key.trim() } : {}),
     memory_gb: form.memory_gb.trim() ? Number(form.memory_gb) : null,
     accelerators: acceleratorName
       ? [
@@ -284,6 +288,16 @@ export function NodeFormModal({
               placeholder="192.168.1.90"
             />
           </FormField>
+          {detected ? null : (
+            <FormField label="Controller API key (optional)">
+              <Input
+                type="password"
+                value={form.api_key}
+                onChange={(event) => set("api_key", event.target.value)}
+                placeholder="Stored by the Head"
+              />
+            </FormField>
+          )}
           {detected ? null : (
             <FormField label="System memory (GB, optional)">
               <Input
