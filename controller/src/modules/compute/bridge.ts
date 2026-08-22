@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { Effect } from "effect";
 import type { Config } from "../../config/env";
 import { resolveBinary } from "../../core/command";
@@ -215,6 +215,17 @@ export const recipeToLaunchInput = (
   const toolCallParser = recipe.tool_call_parser ?? getDefaultToolCallParser(recipe) ?? null;
   const reasoningParser = recipe.reasoning_parser ?? getDefaultReasoningParser(recipe) ?? null;
   const dockerImage = recipe.runtime.kind === "docker" ? recipe.runtime.ref : null;
+  const binary = resolveRecipeBinary(recipe, config);
+  const recipeEnvironment = recipe.env_vars ?? {};
+  const environment =
+    recipe.runtime.kind === "managed_venv" && binary
+      ? {
+          ...recipeEnvironment,
+          ["PATH"]: [dirname(binary), recipeEnvironment["PATH"] ?? process.env["PATH"]]
+            .filter((entry): entry is string => Boolean(entry))
+            .join(delimiter),
+        }
+      : recipeEnvironment;
   return {
     name: LLM_INSTANCE,
     engine: recipe.backend as EngineId,
@@ -239,9 +250,9 @@ export const recipeToLaunchInput = (
       reasoningParser,
     },
     extraArgs: serializeRecipeExtraArguments(recipe),
-    env: recipe.env_vars ?? {},
+    env: environment,
     dockerImage,
-    binary: resolveRecipeBinary(recipe, config),
+    binary,
     ...(override ? { commandOverride: override } : {}),
   };
 };
