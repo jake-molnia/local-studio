@@ -58,6 +58,38 @@ const ROLE_OPTIONS: Array<{ value: RigNodeRole; label: string }> = [
   { value: "worker", label: "Worker — lends GPUs to a head" },
 ];
 
+function formError(
+  form: NodeFormState,
+  groups:
+    | { options: Array<{ id: string; label: string }>; defaultRigId: string | null }
+    | undefined,
+  creatingGroup: boolean,
+  connectingHead: boolean,
+): string | null {
+  if (!form.name.trim()) return "Give this machine a name";
+  if (connectingHead && !form.address.trim()) return "Enter the Head controller URL";
+  if (groups && !connectingHead && creatingGroup && !form.group_name.trim()) {
+    return "Name the new group";
+  }
+  return null;
+}
+
+function drawerStatus(connectingHead: boolean, detected: boolean | undefined): string {
+  if (connectingHead) return "Head controller connection";
+  if (detected) return "Detected — hardware details are re-read on every load";
+  return "Manual machine profile";
+}
+
+function formIntroduction(connectingHead: boolean, detected: boolean | undefined): string {
+  if (connectingHead) {
+    return "Connect this desktop to a Head on your local network. The desktop runtime, tools, and chat files stay on this Mac.";
+  }
+  if (detected) {
+    return "Only the name and how this machine is used are required. The name, type, role, address and notes are yours; everything else is re-detected.";
+  }
+  return "Only the name and how this machine is used are required. Everything else is optional.";
+}
+
 function isRigNodeRole(value: string): value is RigNodeRole {
   return RIG_NODE_ROLES.some((role) => role === value);
 }
@@ -171,6 +203,7 @@ export function NodeFormModal({
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const connectingHead = Boolean(groups) && form.role === "head";
 
   const set = <K extends keyof NodeFormState>(key: K, value: NodeFormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -185,18 +218,15 @@ export function NodeFormModal({
   };
 
   const submit = async () => {
-    if (!form.name.trim()) {
-      setError("Give this machine a name");
-      return;
-    }
-    if (groups && creatingGroup && !form.group_name.trim()) {
-      setError("Name the new group");
+    const validationError = formError(form, groups, creatingGroup, connectingHead);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await onSubmit(formToPayload(form), groupChoice());
+      await onSubmit(formToPayload(form), connectingHead ? null : groupChoice());
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -208,18 +238,14 @@ export function NodeFormModal({
     <ResourceDrawer
       title={title}
       onClose={onClose}
-      status={
-        detected
-          ? "Detected — hardware details are re-read on every load"
-          : "Manual machine profile"
-      }
+      status={drawerStatus(connectingHead, detected)}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button variant="primary" loading={saving} onClick={() => void submit()}>
-            Save machine
+            {connectingHead ? "Connect to Head" : "Save machine"}
           </Button>
         </>
       }
@@ -227,29 +253,25 @@ export function NodeFormModal({
     >
       <div className="space-y-4">
         <div className="rounded-[var(--rad-lg)] bg-(--surface-3) px-3 py-2.5 text-[length:var(--fs-sm)] leading-relaxed text-(--ui-muted)">
-          Only the name and how this machine is used are required.
-          {detected
-            ? " The name, type, role, address and notes are yours; everything else is re-detected."
-            : " Everything else is optional."}
+          {formIntroduction(connectingHead, detected)}
         </div>
 
-        {/* A seven-option picker that ate the top third of the sheet as a 4x2
-            grid of illustrated cards. It is a one-time choice — it gets one
-            row, with the picture alongside as confirmation of the pick. */}
-        <FormField label="Machine type">
-          <div className="flex items-center gap-3">
-            <MachineImage node={previewNode(form)} className="h-11 w-16" />
-            <Select
-              value={form.hardware_type}
-              onChange={(event) => set("hardware_type", event.target.value as RigHardwareType)}
-              options={RIG_HARDWARE_TYPES.map((type) => ({
-                value: type,
-                label: RIG_HARDWARE_TYPE_LABELS[type],
-              }))}
-              className="min-w-0 flex-1"
-            />
-          </div>
-        </FormField>
+        {connectingHead ? null : (
+          <FormField label="Machine type">
+            <div className="flex items-center gap-3">
+              <MachineImage node={previewNode(form)} className="h-11 w-16" />
+              <Select
+                value={form.hardware_type}
+                onChange={(event) => set("hardware_type", event.target.value as RigHardwareType)}
+                options={RIG_HARDWARE_TYPES.map((type) => ({
+                  value: type,
+                  label: RIG_HARDWARE_TYPE_LABELS[type],
+                }))}
+                className="min-w-0 flex-1"
+              />
+            </div>
+          </FormField>
+        )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormField
@@ -272,7 +294,20 @@ export function NodeFormModal({
               options={ROLE_OPTIONS}
             />
           </FormField>
-          {detected ? null : (
+          {connectingHead ? (
+            <FormField
+              label="Head controller URL"
+              required
+              description="The LAN URL where this desktop can reach the Head controller."
+            >
+              <Input
+                value={form.address}
+                onChange={(event) => set("address", event.target.value)}
+                placeholder="http://192.168.1.90:8080"
+                inputMode="url"
+              />
+            </FormField>
+          ) : detected ? null : (
             <FormField label="Hostname (optional)" description="The machine's network hostname.">
               <Input
                 value={form.hostname}
@@ -281,14 +316,16 @@ export function NodeFormModal({
               />
             </FormField>
           )}
-          <FormField label="Network address (optional)" description="LAN IP or Tailscale name.">
-            <Input
-              value={form.address}
-              onChange={(event) => set("address", event.target.value)}
-              placeholder="192.168.1.90"
-            />
-          </FormField>
-          {detected ? null : (
+          {connectingHead ? null : (
+            <FormField label="Network address (optional)" description="LAN IP or Tailscale name.">
+              <Input
+                value={form.address}
+                onChange={(event) => set("address", event.target.value)}
+                placeholder="192.168.1.90"
+              />
+            </FormField>
+          )}
+          {detected || connectingHead ? null : (
             <FormField label="Controller API key (optional)">
               <Input
                 type="password"
@@ -298,7 +335,7 @@ export function NodeFormModal({
               />
             </FormField>
           )}
-          {detected ? null : (
+          {detected || connectingHead ? null : (
             <FormField label="System memory (GB, optional)">
               <Input
                 type="number"
@@ -308,7 +345,7 @@ export function NodeFormModal({
               />
             </FormField>
           )}
-          {groups ? (
+          {groups && !connectingHead ? (
             <>
               <FormField
                 label="Group"
@@ -339,7 +376,7 @@ export function NodeFormModal({
           ) : null}
         </div>
 
-        {detected ? null : (
+        {detected || connectingHead ? null : (
           <div className="rounded-[var(--rad-lg)] bg-(--surface-3) p-3">
             <div className="mb-3">
               <h3 className="text-[length:var(--fs-base)] font-medium text-(--ui-fg)">
@@ -383,14 +420,16 @@ export function NodeFormModal({
           </div>
         )}
 
-        <FormField label="Notes (optional)">
-          <Textarea
-            value={form.notes}
-            onChange={(event) => set("notes", event.target.value)}
-            rows={2}
-            placeholder="Worker rank 1, launched over LAN SSH"
-          />
-        </FormField>
+        {connectingHead ? null : (
+          <FormField label="Notes (optional)">
+            <Textarea
+              value={form.notes}
+              onChange={(event) => set("notes", event.target.value)}
+              rows={2}
+              placeholder="Worker rank 1, launched over LAN SSH"
+            />
+          </FormField>
+        )}
 
         {error ? <p className="text-[length:var(--fs-sm)] text-(--ui-danger)">{error}</p> : null}
       </div>

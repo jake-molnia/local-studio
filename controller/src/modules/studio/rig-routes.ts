@@ -96,7 +96,7 @@ export const registerStudioRigRoutes = defineRoutes((app, context) => {
     context.eventManager.publish(new Event(CONTROLLER_EVENTS.RIG_UPDATED, {}));
   const loadRigsWithLocalNode = Effect.gen(function* () {
     const rigs = yield* listRigs;
-    const detected = yield* buildDetectedNode();
+    const detected = yield* buildDetectedNode(context.config.controller_mode);
     const refreshed = refreshLocalNode(rigs, detected);
     if (refreshed) {
       yield* saveRig(refreshed);
