@@ -22,6 +22,10 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.19.0
+
       - id: nightly-version
         name: Resolve nightly version
         run: |
@@ -32,15 +36,13 @@ jobs:
               break
             fi
           done < <(git tag --list "v*" --sort=-v:refname)
-          latest_tag="${latest_tag:-v0.0.0}"
-          stable_version="${latest_tag#v}"
+          stable_version="$(node -p "require('./frontend/package.json').version")"
+          if [[ -n "$latest_tag" ]]; then
+            stable_version="${latest_tag#v}"
+          fi
           IFS=. read -r major minor patch <<< "$stable_version"
           version="${major}.${minor}.$((patch + 1))-nightly.${GITHUB_RUN_NUMBER}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 22.19.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -49,19 +51,27 @@ jobs:
       - name: Install repository dependencies
         run: npm run setup
 
-      - name: Build unsigned nightly assets
+      - name: Build unsigned nightly app
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           NIGHTLY_VERSION: ${{ steps.nightly-version.outputs.version }}
         run: >-
-          npm --prefix frontend run desktop:dist --
+          npm --prefix frontend run desktop:pack --
           --config.mac.identity=null
           --config.mac.hardenedRuntime=false
-          --config.mac.notarize=false
-          --config.dmg.sign=false
           --config.extraMetadata.version="$NIGHTLY_VERSION"
           --config.extraMetadata.localStudioCommit=${{ github.sha }}
-          --publish never
+
+      - name: Sign nightly assets
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NIGHTLY_VERSION: ${{ steps.nightly-version.outputs.version }}
+        run: >-
+          node scripts/project.mjs sign-release
+          --version "$NIGHTLY_VERSION"
+          --commit "${{ github.sha }}"
+          --prepackaged "frontend/dist-desktop/mac-arm64/Local Studio.app"
 
       - name: Stage nightly assets
         env:
@@ -70,13 +80,16 @@ jobs:
           output="frontend/dist-desktop"
           staging="release-nightly"
           base="Local Studio-${NIGHTLY_VERSION}-arm64"
+          published_base="Local-Studio-${NIGHTLY_VERSION}-arm64"
           mkdir -p "$staging"
-          cp "$output/${base}.dmg" "$staging/${base}.dmg"
-          cp "$output/${base}.dmg.blockmap" "$staging/${base}.dmg.blockmap"
-          cp "$output/${base}-mac.zip" "$staging/${base}-mac.zip"
-          cp "$output/${base}-mac.zip.blockmap" "$staging/${base}-mac.zip.blockmap"
+          cp "$output/${base}.dmg" "$staging/${published_base}.dmg"
+          cp "$output/${base}.dmg.blockmap" "$staging/${published_base}.dmg.blockmap"
+          cp "$output/${base}-mac.zip" "$staging/${published_base}-mac.zip"
+          cp "$output/${base}-mac.zip.blockmap" "$staging/${published_base}-mac.zip.blockmap"
           cp "$output/latest-mac.yml" "$staging/latest-mac.yml"
           cp "$output/${base}.dmg" "$staging/Local-Studio-Nightly-arm64.dmg"
+          grep -F "url: ${published_base}-mac.zip" "$staging/latest-mac.yml"
+          grep -F "url: ${published_base}.dmg" "$staging/latest-mac.yml"
 
       - name: Publish rolling nightly release
         env:
@@ -85,9 +98,9 @@ jobs:
         run: |
           notes="$RUNNER_TEMP/nightly-notes.md"
           printf '%s\n\n%s\n\n%s\n' \
-            "Unsigned rolling build of main at $GITHUB_SHA." \
+            "Developer ID signed rolling build of main at $GITHUB_SHA." \
             "Version: $NIGHTLY_VERSION" \
-            "macOS will require manual approval in System Settings → Privacy & Security. In-app auto-update is unavailable until nightly builds are signed." \
+            "This build is signed but not notarized. macOS may require manual approval in System Settings → Privacy & Security." \
             > "$notes"
 
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" >/dev/null 2>&1; then
