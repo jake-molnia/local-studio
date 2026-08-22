@@ -14,6 +14,33 @@ import {
 
 const RIGS_CACHE_KEY = "configure:rigs";
 
+const withWorkerHardware = (
+  payload: RigsPayload,
+  workers: readonly WorkerStatus[],
+): RigsPayload => {
+  const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+  return {
+    ...payload,
+    rigs: payload.rigs.map((rig) => ({
+      ...rig,
+      nodes: rig.nodes.map((node) => {
+        const hardware = workerById.get(node.id)?.hardware;
+        if (!hardware) return node;
+        return {
+          ...node,
+          hardware_type: hardware.hardware_type,
+          hostname: hardware.hostname,
+          os: hardware.os,
+          cpu_model: hardware.cpu_model,
+          cpu_cores: hardware.cpu_cores,
+          memory_gb: hardware.memory_gb,
+          accelerators: [...hardware.accelerators],
+        };
+      }),
+    })),
+  };
+};
+
 export interface ConfigureState {
   rigs: Rig[];
   localNodeId: string;
@@ -49,9 +76,16 @@ export function useConfigure(): ConfigureState {
         api.getRigs(),
         api.getWorkers().catch(() => null),
       ]);
-      writePageCache(RIGS_CACHE_KEY, rigs);
-      setRigsPayload(rigs);
-      setWorkers(workerPayload?.workers ?? []);
+      const nextWorkers = workerPayload?.workers ?? [];
+      const nextRigs = withWorkerHardware(rigs, nextWorkers);
+      const selected = getSelectedWorkerId();
+      if (selected && !nextWorkers.some((worker) => worker.id === selected)) {
+        setSelectedWorkerId("");
+        setWorkerId("");
+      }
+      writePageCache(RIGS_CACHE_KEY, nextRigs);
+      setRigsPayload(nextRigs);
+      setWorkers(nextWorkers);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

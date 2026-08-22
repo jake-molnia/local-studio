@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ErrorBox, Select, StatusPill } from "@/ui";
+import { ErrorBox } from "@/ui";
 import { Monitor, Server, type LucideIcon } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { SettingsLayout, type SettingsSectionDef } from "@/features/settings/settings-ui";
 import { ServerContent } from "@/features/logs/server-view";
+import { ManagementWorkerSelect } from "@/features/federation/management-worker";
 import { useConfigure } from "./use-configure";
 import { MachinesSection } from "./machines-section";
 import {
@@ -87,26 +88,12 @@ export default function ConfigurePage() {
     window.history.replaceState(null, "", `${window.location.pathname}${query}#${next}`);
   };
 
-  const selectedWorker = state.workers.find((worker) => worker.id === state.selectedWorkerId);
   const workerStatus = (
-    <div className="flex items-center gap-2">
-      {selectedWorker ? (
-        <StatusPill tone={selectedWorker.healthy ? "good" : "danger"}>
-          {selectedWorker.healthy ? "online" : "offline"}
-        </StatusPill>
-      ) : null}
-      <Select
-        aria-label="Management Worker"
-        value={state.selectedWorkerId}
-        onChange={(event) => state.selectWorker(event.target.value)}
-        placeholder="Select Worker"
-        className="min-w-44"
-        options={state.workers.map((worker) => ({
-          value: worker.id,
-          label: worker.name,
-        }))}
-      />
-    </div>
+    <ManagementWorkerSelect
+      workers={state.workers}
+      selectedWorkerId={state.selectedWorkerId}
+      onSelect={state.selectWorker}
+    />
   );
 
   return (

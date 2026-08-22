@@ -4,7 +4,7 @@ import {
   type WorkerModel,
   type WorkerStatus,
 } from "@local-studio/contracts/federation";
-import type { RigNode } from "@local-studio/contracts/rigs";
+import { RigsPayloadSchema, type RigNode } from "@local-studio/contracts/rigs";
 import { Effect, Schema } from "effect";
 import type { Logger } from "../../core/logger";
 import type { RigNodeCredentialStore } from "../../stores/rig-node-credential-store";
@@ -116,10 +116,12 @@ export class WorkerPool {
     }).pipe(Effect.ensuring(Effect.sync(() => clearTimeout(timeout))));
   }
 
-  public statuses(): Effect.Effect<WorkerStatus[]> {
+  public statuses(includeHardware = false): Effect.Effect<WorkerStatus[]> {
     return this.targets().pipe(
       Effect.flatMap((targets) =>
-        Effect.forEach(targets, (target) => this.probe(target), { concurrency: "unbounded" }),
+        Effect.forEach(targets, (target) => this.probe(target, includeHardware), {
+          concurrency: "unbounded",
+        }),
       ),
       Effect.catch((error) => {
         this.logger.warn("Could not load Worker configuration", { error: String(error) });
@@ -162,9 +164,9 @@ export class WorkerPool {
     else this.activeStreams.set(workerId, next);
   }
 
-  private probe(target: WorkerTarget): Effect.Effect<WorkerStatus> {
+  private probe(target: WorkerTarget, includeHardware: boolean): Effect.Effect<WorkerStatus> {
     const checkedAt = new Date().toISOString();
-    return this.fetch(target, "/v1/models", { method: "GET" }, 3_000).pipe(
+    const models = this.fetch(target, "/v1/models", { method: "GET" }, 3_000).pipe(
       Effect.flatMap((response) =>
         response.ok
           ? Effect.tryPromise({
@@ -183,13 +185,45 @@ export class WorkerPool {
               }),
             ),
       ),
-      Effect.map((payload) => ({
+    );
+    const hardware = includeHardware
+      ? this.fetch(target, "/studio/rigs", { method: "GET" }, 3_000).pipe(
+          Effect.flatMap((response) =>
+            response.ok
+              ? Effect.tryPromise({
+                  try: () => response.json(),
+                  catch: (source) =>
+                    new WorkerRequestError({
+                      workerId: target.id,
+                      message: `Worker ${target.name} returned invalid hardware data`,
+                      source,
+                    }),
+                }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(RigsPayloadSchema)))
+              : Effect.fail(
+                  new WorkerRequestError({
+                    workerId: target.id,
+                    message: `Worker ${target.name} returned HTTP ${response.status}`,
+                  }),
+                ),
+          ),
+          Effect.map(
+            (payload) =>
+              payload.rigs
+                .flatMap((rig) => rig.nodes)
+                .find((node) => node.id === payload.local_node_id) ?? null,
+          ),
+          Effect.catch(() => Effect.succeed(null)),
+        )
+      : Effect.succeed(null);
+    return Effect.all({ models, hardware }, { concurrency: "unbounded" }).pipe(
+      Effect.map(({ models: payload, hardware: node }) => ({
         id: target.id,
         name: target.name,
         address: target.address,
         healthy: true,
         active_streams: this.activeStreams.get(target.id) ?? 0,
         models: [...payload.data] as WorkerModel[],
+        hardware: node,
         checked_at: checkedAt,
         error: null,
       })),
@@ -201,6 +235,7 @@ export class WorkerPool {
           healthy: false,
           active_streams: this.activeStreams.get(target.id) ?? 0,
           models: [],
+          hardware: null,
           checked_at: checkedAt,
           error: error instanceof Error ? error.message : String(error),
         }),

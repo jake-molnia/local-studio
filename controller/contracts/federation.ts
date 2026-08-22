@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { RigNodeSchema } from "./rigs";
 
 export const CONTROLLER_MODES = ["head", "worker", "standalone"] as const;
 export const ControllerModeSchema = Schema.Literals(CONTROLLER_MODES);
@@ -31,6 +32,7 @@ export const WorkerStatusSchema = Schema.Struct({
   healthy: Schema.Boolean,
   active_streams: Schema.Number,
   models: Schema.Array(WorkerModelSchema),
+  hardware: Schema.NullOr(RigNodeSchema),
   checked_at: Schema.String,
   error: Schema.NullOr(Schema.String),
 });

@@ -160,6 +160,7 @@ export function MachinesSection({ state }: { state: ConfigureState }) {
                   key={node.id}
                   node={node}
                   isLocal={node.id === state.localNodeId}
+                  worker={state.workers.find((worker) => worker.id === node.id)}
                   onEdit={() => setNodeTarget({ mode: "edit", rigId: rig.id, node })}
                   onRemove={
                     node.id === state.localNodeId

@@ -206,7 +206,7 @@ export const registerFederationRoutes = defineRoutes((app, context) => {
       documentRoute,
       effectHandler((ctx) =>
         context.workerPool
-          .statuses()
+          .statuses(true)
           .pipe(
             Effect.map((workers) =>
               ctx.json({ mode: context.config.controller_mode, workers } satisfies WorkersPayload),

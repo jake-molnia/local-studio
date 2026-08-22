@@ -38,6 +38,8 @@ The Head is reachable on a private local network only. Authentication is deferre
 
 Workers are added manually through the existing rig UI. A Worker connection contains its controller address, display name, and optional API key. The Head stores credentials without returning them to clients.
 
+A desktop that should also run local inference runs a Worker controller alongside its UI and Pi runtime, then adds that controller to the Head like any other Worker. The desktop application is not a separate compute node, and the Head's detected hardware never contributes to the inference pool.
+
 Management surfaces expose a Worker picker populated from the Head. Configure, Status, Usage, and Logs operate on the selected Worker. Every mutating operation targets one Worker explicitly. There is no broadcasting, automatic placement, GPU pooling, or distributed scheduling.
 
 Recipes remain stored on their Worker. Model downloads, runtime installations, controller settings, and lifecycle state also remain Worker-owned. The Head forwards existing APIs instead of creating parallel representations.
