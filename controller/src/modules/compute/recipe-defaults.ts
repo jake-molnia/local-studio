@@ -75,6 +75,9 @@ export const getDefaultToolCallParser = (recipe: Recipe): ParserName => {
   if (isIntellect3(modelId)) {
     return "qwen3_xml";
   }
+  if (modelId.includes("gemma-4") || modelId.includes("gemma4")) {
+    return "gemma4";
+  }
   return undefined;
 };
 
