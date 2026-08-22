@@ -8,11 +8,11 @@ import {
 import { Effect, Schema, Stream } from "effect";
 import { HttpStatus } from "../../core/errors";
 import { decodeJsonBody } from "../../core/validation";
-import { effectHandler } from "../../http/effect-handler";
 import { buildSseHeaders } from "../../http/sse";
-import { documentRoute, defineRoutes, mergeRoutes } from "../../http/route-registrar";
-import { extractSessionId, type OpenAIUsage } from "../proxy/chat-request";
+import { defineRoutes, effectRoute, mergeRoutes } from "../../http/route-registrar";
+import { extractSessionId } from "../proxy/chat-request";
 import {
+  type InferenceUsageInput,
   recordNonStreamingInferenceUsage,
   recordStreamingInferenceUsage,
 } from "../proxy/inference-accounting";
@@ -50,7 +50,7 @@ const aggregateModels = (statuses: WorkersPayload["workers"]): WorkerModel[] => 
   return [...models.values()].sort((left, right) => left.id.localeCompare(right.id));
 };
 
-const readUsageFrame = (frame: string): OpenAIUsage | null => {
+const readUsageFrame = (frame: string): InferenceUsageInput | null => {
   for (const line of frame.split("\n")) {
     if (!line.startsWith("data:")) continue;
     const raw = line.slice(5).trim();
@@ -59,7 +59,7 @@ const readUsageFrame = (frame: string): OpenAIUsage | null => {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const usage = parsed["usage"];
       if (usage && typeof usage === "object" && !Array.isArray(usage)) {
-        return usage as OpenAIUsage;
+        return usage as InferenceUsageInput;
       }
     } catch {}
   }
@@ -115,7 +115,7 @@ export const registerFederationRoutes = defineRoutes((app, context) => {
     }
     const decoder = new TextDecoder();
     let pending = "";
-    let usage: OpenAIUsage | null = null;
+    let usage: InferenceUsageInput | null = null;
     let ttftMs: number | null = null;
     const source = Stream.fromReadableStream({ evaluate: () => body, onError: () => null }).pipe(
       Stream.tap((chunk) =>
@@ -176,87 +176,91 @@ export const registerFederationRoutes = defineRoutes((app, context) => {
   };
 
   return mergeRoutes(
-    app.get(
-      "/studio/sessions",
-      documentRoute,
-      effectHandler((ctx) =>
-        context.stores.sessionMetadataStore
-          .listEffect()
-          .pipe(Effect.map((sessions) => ctx.json({ sessions }))),
-      ),
+    effectRoute(app.get, "/studio/sessions", (ctx) =>
+      context.stores.sessionMetadataStore
+        .listEffect()
+        .pipe(Effect.map((sessions) => ctx.json({ sessions }))),
     ),
-    app.put(
-      "/studio/sessions/:sessionId",
-      documentRoute,
-      effectHandler((ctx) =>
-        Effect.gen(function* () {
-          const metadata = yield* decodeJsonBody(ctx, SessionMetadataSchema);
-          if (metadata.session_id !== ctx.req.param("sessionId")) {
-            return yield* Effect.fail(
-              new HttpStatus({ status: 400, detail: "Session id does not match route" }),
-            );
-          }
-          yield* context.stores.sessionMetadataStore.saveEffect(metadata);
-          return ctx.json({ success: true });
-        }),
-      ),
+    effectRoute(app.put, "/studio/sessions/:sessionId", (ctx) =>
+      Effect.gen(function* () {
+        const metadata = yield* decodeJsonBody(ctx, SessionMetadataSchema);
+        if (metadata.session_id !== ctx.req.param("sessionId")) {
+          return yield* Effect.fail(
+            new HttpStatus({ status: 400, detail: "Session id does not match route" }),
+          );
+        }
+        yield* context.stores.sessionMetadataStore.saveEffect(metadata);
+        return ctx.json({ success: true });
+      }),
     ),
-    app.get(
-      "/studio/workers",
-      documentRoute,
-      effectHandler((ctx) =>
-        context.workerPool
-          .statuses(true)
-          .pipe(
-            Effect.map((workers) =>
-              ctx.json({ mode: context.config.controller_mode, workers } satisfies WorkersPayload),
+    effectRoute(app.get, "/studio/workers", (ctx) =>
+      context.workerPool
+        .statuses(true)
+        .pipe(
+          Effect.map((workers) =>
+            ctx.json({ mode: context.config.controller_mode, workers } satisfies WorkersPayload),
+          ),
+        ),
+    ),
+    effectRoute(app.get, "/v1/models", (ctx) =>
+      context.workerPool
+        .statuses()
+        .pipe(
+          Effect.map((statuses) => ctx.json({ object: "list", data: aggregateModels(statuses) })),
+        ),
+    ),
+    effectRoute(app.post, "/v1/chat/completions", (ctx) =>
+      Effect.gen(function* () {
+        const bodyBuffer = yield* Effect.tryPromise({
+          try: () => ctx.req.arrayBuffer(),
+          catch: () => new HttpStatus({ status: 400, detail: "Invalid request body" }),
+        });
+        const parsed = yield* Effect.try({
+          try: () =>
+            Schema.decodeUnknownSync(ChatRequestSchema)(
+              JSON.parse(new TextDecoder().decode(bodyBuffer)),
             ),
-          ),
-      ),
-    ),
-    app.get(
-      "/v1/models",
-      documentRoute,
-      effectHandler((ctx) =>
-        context.workerPool
-          .statuses()
+          catch: () => new HttpStatus({ status: 400, detail: "Invalid JSON body" }),
+        });
+        const model = typeof parsed["model"] === "string" ? parsed["model"].trim() : "";
+        if (!model)
+          return yield* Effect.fail(new HttpStatus({ status: 400, detail: "model is required" }));
+        const source =
+          ctx.req.header("x-vllm-source") ??
+          ctx.req.header("x-source") ??
+          ctx.req.header("user-agent") ??
+          null;
+        const sessionId = extractSessionId(parsed, (name) => ctx.req.header(name));
+        const worker = yield* context.workerPool.selectServing(model);
+        if (!worker) return ctx.json(modelNotRunningError(null, model), { status: 503 });
+        const requestStart = performance.now();
+        context.workerPool.acquire(worker.id);
+        const fetched = yield* context.workerPool
+          .fetch(
+            worker,
+            "/v1/chat/completions",
+            {
+              method: "POST",
+              headers: ctx.req.raw.headers,
+              body: bodyBuffer,
+              signal: ctx.req.raw.signal,
+            },
+            300_000,
+          )
           .pipe(
-            Effect.map((statuses) => ctx.json({ object: "list", data: aggregateModels(statuses) })),
-          ),
-      ),
-    ),
-    app.post(
-      "/v1/chat/completions",
-      documentRoute,
-      effectHandler((ctx) =>
-        Effect.gen(function* () {
-          const bodyBuffer = yield* Effect.tryPromise({
-            try: () => ctx.req.arrayBuffer(),
-            catch: () => new HttpStatus({ status: 400, detail: "Invalid request body" }),
-          });
-          const parsed = yield* Effect.try({
-            try: () =>
-              Schema.decodeUnknownSync(ChatRequestSchema)(
-                JSON.parse(new TextDecoder().decode(bodyBuffer)),
-              ),
-            catch: () => new HttpStatus({ status: 400, detail: "Invalid JSON body" }),
-          });
-          const model = typeof parsed["model"] === "string" ? parsed["model"].trim() : "";
-          if (!model)
-            return yield* Effect.fail(new HttpStatus({ status: 400, detail: "model is required" }));
-          const source =
-            ctx.req.header("x-vllm-source") ??
-            ctx.req.header("x-source") ??
-            ctx.req.header("user-agent") ??
-            null;
-          const sessionId = extractSessionId(parsed, (name) => ctx.req.header(name));
-          const worker = yield* context.workerPool.selectServing(model);
-          if (!worker) return ctx.json(modelNotRunningError(null, model), { status: 503 });
-          const requestStart = performance.now();
-          context.workerPool.acquire(worker.id);
-          const fetched = yield* context.workerPool
+            Effect.match({
+              onFailure: (left) => ({ _tag: "Left" as const, left }),
+              onSuccess: (right) => ({ _tag: "Right" as const, right }),
+            }),
+          );
+        if (fetched._tag === "Left") {
+          context.workerPool.release(worker.id);
+          const alternate = yield* context.workerPool.selectServing(model, new Set([worker.id]));
+          if (!alternate) return ctx.json({ detail: fetched.left.message }, { status: 502 });
+          context.workerPool.acquire(alternate.id);
+          const retried = yield* context.workerPool
             .fetch(
-              worker,
+              alternate,
               "/v1/chat/completions",
               {
                 method: "POST",
@@ -272,70 +276,46 @@ export const registerFederationRoutes = defineRoutes((app, context) => {
                 onSuccess: (right) => ({ _tag: "Right" as const, right }),
               }),
             );
-          if (fetched._tag === "Left") {
-            context.workerPool.release(worker.id);
-            const alternate = yield* context.workerPool.selectServing(model, new Set([worker.id]));
-            if (!alternate) return ctx.json({ detail: fetched.left.message }, { status: 502 });
-            context.workerPool.acquire(alternate.id);
-            const retried = yield* context.workerPool
-              .fetch(
-                alternate,
-                "/v1/chat/completions",
-                {
-                  method: "POST",
-                  headers: ctx.req.raw.headers,
-                  body: bodyBuffer,
-                  signal: ctx.req.raw.signal,
-                },
-                300_000,
-              )
-              .pipe(
-                Effect.match({
-                  onFailure: (left) => ({ _tag: "Left" as const, left }),
-                  onSuccess: (right) => ({ _tag: "Right" as const, right }),
-                }),
-              );
-            if (retried._tag === "Left") {
-              context.workerPool.release(alternate.id);
-              return ctx.json({ detail: retried.left.message }, { status: 502 });
-            }
-            return Boolean(parsed["stream"])
-              ? streamResponse({
-                  response: retried.right,
-                  worker: alternate,
-                  model,
-                  source,
-                  sessionId,
-                  requestStart,
-                })
-              : yield* finishNonStreaming(
-                  retried.right,
-                  alternate,
-                  model,
-                  source,
-                  sessionId,
-                  requestStart,
-                );
+          if (retried._tag === "Left") {
+            context.workerPool.release(alternate.id);
+            return ctx.json({ detail: retried.left.message }, { status: 502 });
           }
           return Boolean(parsed["stream"])
             ? streamResponse({
-                response: fetched.right,
-                worker,
+                response: retried.right,
+                worker: alternate,
                 model,
                 source,
                 sessionId,
                 requestStart,
               })
             : yield* finishNonStreaming(
-                fetched.right,
-                worker,
+                retried.right,
+                alternate,
                 model,
                 source,
                 sessionId,
                 requestStart,
               );
-        }),
-      ),
+        }
+        return Boolean(parsed["stream"])
+          ? streamResponse({
+              response: fetched.right,
+              worker,
+              model,
+              source,
+              sessionId,
+              requestStart,
+            })
+          : yield* finishNonStreaming(
+              fetched.right,
+              worker,
+              model,
+              source,
+              sessionId,
+              requestStart,
+            );
+      }),
     ),
   );
 
@@ -354,11 +334,11 @@ export const registerFederationRoutes = defineRoutes((app, context) => {
       }).pipe(Effect.orElseSucceed(() => new ArrayBuffer(0)));
       const durationMs = Math.round(performance.now() - requestStart);
       context.workerPool.release(worker.id);
-      let usage: OpenAIUsage | undefined;
+      let usage: InferenceUsageInput | undefined;
       try {
         const parsed = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
         if (parsed["usage"] && typeof parsed["usage"] === "object")
-          usage = parsed["usage"] as OpenAIUsage;
+          usage = parsed["usage"] as InferenceUsageInput;
       } catch {}
       if (usage) {
         yield* recordNonStreamingInferenceUsage(
