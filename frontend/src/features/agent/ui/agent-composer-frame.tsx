@@ -76,6 +76,7 @@ export type AgentComposerFrameProps = {
   selectedSkills: ComposerSkillRef[];
   status?: string;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  contextTriggerRef: RefObject<HTMLButtonElement | null>;
   floating?: boolean;
   dense?: boolean;
 };
@@ -124,6 +125,7 @@ export function AgentComposerFrame({
   selectedSkills,
   status,
   textareaRef,
+  contextTriggerRef,
   floating = false,
   dense = false,
 }: AgentComposerFrameProps) {
@@ -131,12 +133,12 @@ export function AgentComposerFrame({
     <form
       onSubmit={onSubmit}
       className={cx(
-        "agent-composer-form relative z-[100] mx-auto w-full max-w-[calc(var(--composer-w)*0.9+1.75rem)] shrink-0 sm:w-[90%]",
+        "agent-composer-form relative z-[100] mx-auto w-full max-w-[672px] shrink-0 px-4",
         floating
-          ? "bg-transparent p-[calc(var(--space-base)*1.5)]"
+          ? "bg-transparent"
           : dense
-            ? "bg-(--agent-bg) px-2 pb-0.5 pt-0.5"
-            : "bg-transparent px-2.5 pb-1.5 pt-0 sm:px-4",
+            ? "bg-(--agent-bg) pb-0.5 pt-0.5"
+            : "bg-transparent pb-1.5 pt-0",
       )}
     >
       {banner ? (
@@ -151,7 +153,7 @@ export function AgentComposerFrame({
         onDragLeave={onComposerDragLeave}
         onDrop={onComposerDrop}
         className={cx(
-          "agent-composer-box relative z-10 w-full overflow-visible rounded-[var(--composer-radius-inner)] border border-(--composer-border) bg-(--composer) shadow-[var(--composer-elevation)] transition-[border-color,box-shadow] duration-100",
+          "agent-composer-box relative z-10 flex min-h-[120px] w-full flex-col overflow-visible rounded-[12px] bg-(--composer)",
           composerDragActive && "outline outline-1 outline-(--link)/50",
         )}
       >
@@ -222,6 +224,7 @@ export function AgentComposerFrame({
           modelSelector={modelSelector}
           contextOpen={contextOpen}
           onOpenContext={onOpenContext}
+          contextTriggerRef={contextTriggerRef}
         />
       </div>
       {showStatusBar ? (

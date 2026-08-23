@@ -16,6 +16,7 @@ export function AgentComposerActions({
   onAbortTurn,
   onOpenContext,
   contextOpen,
+  contextTriggerRef,
   modelSelector,
 }: {
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -28,6 +29,7 @@ export function AgentComposerActions({
   onAbortTurn: () => void;
   onOpenContext: () => void;
   contextOpen: boolean;
+  contextTriggerRef: RefObject<HTMLButtonElement | null>;
   modelSelector?: ReactNode;
 }) {
   const inputHasText = Boolean(input.trim());
@@ -35,7 +37,7 @@ export function AgentComposerActions({
   const stopping = status === "stopping";
 
   return (
-    <div className="agent-composer-actions-row flex min-h-7 items-center gap-0.5 bg-transparent px-1 pb-1 pt-0 text-xs">
+    <div className="agent-composer-actions-row flex min-h-9 items-center gap-0.5 bg-transparent px-3 pb-3 pt-1 text-xs">
       <input
         ref={fileInputRef}
         type="file"
@@ -45,6 +47,7 @@ export function AgentComposerActions({
       />
       <button
         type="button"
+        ref={contextTriggerRef}
         onClick={onOpenContext}
         disabled={readingAttachments}
         data-composer-context-trigger

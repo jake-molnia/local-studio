@@ -67,7 +67,7 @@ export function SubagentChips({ piSessionId }: { piSessionId: string }) {
   if (runs.length === 0) return null;
 
   return (
-    <div className="mx-auto mb-1 flex w-[90%] max-w-[calc(var(--composer-w)*0.9)] flex-wrap items-center gap-1">
+    <div className="mx-auto mb-1 flex w-full max-w-[var(--thread-w)] flex-wrap items-center gap-1">
       {runs.map((run) => (
         <button
           key={run.id}

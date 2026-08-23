@@ -216,6 +216,8 @@ export type ComposerModelSelectorProps = {
   reasoningLevels: readonly AgentThinkingLevel[];
   reasoningDisabled: boolean;
   onSelectReasoning: (level: AgentThinkingLevel) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
 function renderComposerModelSelector(
@@ -374,11 +376,18 @@ export function ChatPane({
     },
     [activeTab, running, updateTab],
   );
+  const [contextOpen, setContextOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const composerModelSelector = renderComposerModelSelector(modelSelector, {
     reasoningLevel: thinkingLevel,
     reasoningLevels: modelThinkingLevels,
     reasoningDisabled: Boolean(running),
     onSelectReasoning: selectThinkingLevel,
+    open: modelPickerOpen,
+    onOpenChange: (next) => {
+      if (next) setContextOpen(false);
+      setModelPickerOpen(next);
+    },
   });
 
   const activePiSessionId = activeTab?.piSessionId ?? null;
@@ -424,8 +433,11 @@ export function ChatPane({
     tools.setComputerOpen(true);
   }, [tools]);
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
-  useMountSubscription(() => setContextOpen(false), [activeTabId]);
+  const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useMountSubscription(() => {
+    setContextOpen(false);
+    setModelPickerOpen(false);
+  }, [activeTabId]);
   const openDiffDrawer = useCallback(() => setDiffDrawerOpen(true), []);
   const closeDiffDrawer = useCallback(() => setDiffDrawerOpen(false), []);
   const exportSession = useCallback(() => {
@@ -693,7 +705,11 @@ export function ChatPane({
           modelSupportsVision={modelSupportsVision}
           modelSelector={composerModelSelector}
           contextOpen={contextOpen}
-          onOpenContext={() => setContextOpen((value) => !value)}
+          contextTriggerRef={contextTriggerRef}
+          onOpenContext={() => {
+            setModelPickerOpen(false);
+            setContextOpen((value) => !value);
+          }}
           onAbortTurn={() => void abortTurn()}
           onAttachFiles={(files) => void attachFiles(files)}
           onComposerChange={handleComposerChange}
@@ -727,6 +743,7 @@ export function ChatPane({
               showProjectRow={composerVisual.showProjectRow}
               open={contextOpen}
               onOpenChange={setContextOpen}
+              contextTriggerRef={contextTriggerRef}
               onRequestAttach={() => fileInputRef.current?.click()}
               browserToolEnabled={browserToolEnabled}
               browserBackend={browserBackend}

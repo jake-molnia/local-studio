@@ -24,8 +24,8 @@
 }
 
 .agent-thread-shell {
-  width: 90%;
-  max-width: calc(var(--composer-w) * 0.9);
+  width: min(100%, var(--thread-w));
+  max-width: var(--thread-w);
 }
 
 [data-empty-prompt="true"] {
@@ -37,10 +37,6 @@
   inset-inline: 0;
   top: 50%;
   transform: translateY(-50%);
-}
-
-[data-empty-prompt="true"] .agent-composer-form > .agent-composer-box {
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--bg) 20%, transparent);
 }
 
 /* Phone widths: give the thread the full column — the 90% inset plus the
@@ -468,7 +464,52 @@
 }
 
 .agent-composer-box:focus-within {
-  border-color: color-mix(in srgb, var(--fg) 24%, transparent);
+  box-shadow: var(--composer-elevation-focus);
+}
+
+.agent-composer-box {
+  box-shadow: var(--composer-elevation);
+  backdrop-filter: blur(4px);
+  transition: box-shadow 150ms var(--ease-standard);
+}
+
+.composer-popover-enter {
+  animation: composer-popover-enter 120ms var(--ease-enter) both;
+  transform-origin: bottom center;
+}
+
+.composer-popover-exit {
+  animation: composer-popover-exit 90ms var(--ease-exit) both;
+  transform-origin: bottom center;
+}
+
+@keyframes composer-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes composer-popover-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-popover-enter,
+  .composer-popover-exit {
+    animation: none;
+  }
 }
 
 .agent-composer-box textarea:focus-visible {

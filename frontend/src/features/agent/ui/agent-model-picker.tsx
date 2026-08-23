@@ -30,6 +30,8 @@ type AgentModelPickerProps = {
   reasoningLevels?: readonly AgentThinkingLevel[];
   reasoningDisabled?: boolean;
   onSelectReasoning?: (level: AgentThinkingLevel) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 const PANEL_GAP_PX = 6;
@@ -71,8 +73,12 @@ export function AgentModelPicker({
   reasoningLevels = [],
   reasoningDisabled = false,
   onSelectReasoning,
+  open: controlledOpen,
+  onOpenChange,
 }: AgentModelPickerProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const [present, setPresent] = useState(open);
   const [view, setView] = useState<PickerView>("models");
   const [showOtherModels, setShowOtherModels] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
@@ -116,11 +122,19 @@ export function AgentModelPicker({
   const selectedModelNotRunning = !loading && Boolean(active && active.active === false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const updateOpen = useCallback(
+    (next: boolean) => {
+      if (next) setPresent(true);
+      if (controlledOpen === undefined) setInternalOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange],
+  );
   const close = useCallback(() => {
-    setOpen(false);
+    updateOpen(false);
     setView("models");
     setModelQuery("");
-  }, []);
+  }, [updateOpen]);
   const closeAndFocus = useCallback(() => {
     const trigger = view;
     close();
@@ -130,6 +144,15 @@ export function AgentModelPicker({
         ?.focus(),
     );
   }, [close, view]);
+
+  useMountSubscription(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setPresent(false), 90);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
 
   useMountSubscription(() => {
     if (!open) return;
@@ -184,7 +207,7 @@ export function AgentModelPicker({
       onPointerDown={stopToolbarEvent}
       onMouseDown={stopToolbarEvent}
     >
-      <div className="flex min-w-0 items-center gap-0.5">
+      <div className="flex min-w-0 items-center gap-1">
         <ModelPickerTrigger
           view="models"
           kind="Model"
@@ -198,7 +221,7 @@ export function AgentModelPicker({
             if (open && view === "models") close();
             else {
               setView("models");
-              setOpen(true);
+              updateOpen(true);
             }
           }}
         />
@@ -216,18 +239,19 @@ export function AgentModelPicker({
               if (open && view === "reasoning") close();
               else {
                 setView("reasoning");
-                setOpen(true);
+                updateOpen(true);
               }
             }}
           />
         ) : null}
       </div>
-      {open
+      {present && typeof document !== "undefined"
         ? createPortal(
             <div
               ref={placePanel}
-              className={`fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[19rem]" : "w-[11rem]"} ${POPOVER_MENU_CLASS}`}
+              className={`${open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"} fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[19rem]" : "w-[11rem]"} ${POPOVER_MENU_CLASS}`}
               role="menu"
+              aria-hidden={!open}
               aria-label={view === "models" ? "Models" : "Reasoning"}
               onKeyDown={(event) => handleMenuKeyDown(event, closeAndFocus)}
               onPointerDown={stopToolbarEvent}
@@ -306,18 +330,16 @@ function ModelList({
   return (
     <div>
       <PickerHeader title="Model" />
-      {groups.length > 0 || query ? (
-        <div className="px-1.5 pt-1">
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search models"
-            aria-label="Search models"
-            className="h-7 w-full rounded-[4px] border border-(--border) bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none transition-[border-color,background-color] duration-[var(--motion-fast)] placeholder:text-(--dim) focus:border-(--accent) focus:bg-(--input-focus)"
-          />
-        </div>
-      ) : null}
+      <div className="px-1.5 pt-1">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search models"
+          aria-label="Search models"
+          className="h-7 w-full rounded-[4px] border border-(--border) bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none transition-[border-color,background-color] duration-[var(--motion-fast)] placeholder:text-(--dim) focus:border-(--accent) focus:bg-(--input-focus)"
+        />
+      </div>
       {otherModelCount > 0 ? (
         <button
           type="button"
@@ -417,7 +439,7 @@ function ReasoningList({
             disabled={disabled}
             onClick={() => onSelect(level)}
             className={cx(
-              "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) disabled:opacity-45",
+              "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-45",
               level === value && "bg-(--color-input)",
             )}
           >
@@ -458,8 +480,8 @@ function ModelPickerTrigger({
       onClick={onToggle}
       disabled={disabled}
       className={cx(
-        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[5px] bg-transparent px-1.5 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
-        open && "bg-(--hover) text-(--fg)",
+        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[6px] bg-transparent px-2 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-60",
+        open && "bg-(--active) text-(--fg)",
       )}
       title={notRunning ? `${title} is not running — launch it or pick a running model` : title}
       aria-label={`${kind}: ${title}${notRunning ? " (not running)" : ""}`}
@@ -525,7 +547,7 @@ function ModelOption({
         role="menuitemradio"
         aria-checked={selected}
         onClick={() => onSelect(model.id)}
-        className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-[4px] pl-2 text-left focus-visible:outline-none"
+        className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-[4px] pl-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring)"
       >
         <span className="min-w-0 flex-1 truncate" title={label}>
           {label}
@@ -539,7 +561,7 @@ function ModelOption({
           aria-label={isDefault ? `${label} is the default model` : `Set ${label} as default model`}
           title={isDefault ? "Default model" : "Set as default"}
           className={cx(
-            "mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] hover:bg-(--active) hover:text-(--fg) focus-visible:opacity-100 focus-visible:outline-none group-hover/model-option:opacity-100 group-focus-within/model-option:opacity-100",
+            "mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] hover:bg-(--active) hover:text-(--fg) focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-option:opacity-100 group-focus-within/model-option:opacity-100",
             isDefault && "bg-(--active) text-(--fg) opacity-100",
           )}
         >
