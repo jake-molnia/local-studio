@@ -424,6 +424,8 @@ export function ChatPane({
     tools.setComputerOpen(true);
   }, [tools]);
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  useMountSubscription(() => setContextOpen(false), [activeTabId]);
   const openDiffDrawer = useCallback(() => setDiffDrawerOpen(true), []);
   const closeDiffDrawer = useCallback(() => setDiffDrawerOpen(false), []);
   const exportSession = useCallback(() => {
@@ -677,8 +679,6 @@ export function ChatPane({
         <AgentComposerFrame
           attachments={attachments}
           banner={composerVisual.banner}
-          browserToolEnabled={browserToolEnabled}
-          browserBackend={browserBackend}
           composerDragActive={composerDragActive}
           contextWindow={effectiveContextWindow}
           currentContextTokens={currentContextTokens}
@@ -692,6 +692,8 @@ export function ChatPane({
           mentionRows={mentionRows}
           modelSupportsVision={modelSupportsVision}
           modelSelector={composerModelSelector}
+          contextOpen={contextOpen}
+          onOpenContext={() => setContextOpen((value) => !value)}
           onAbortTurn={() => void abortTurn()}
           onAttachFiles={(files) => void attachFiles(files)}
           onComposerChange={handleComposerChange}
@@ -710,8 +712,6 @@ export function ChatPane({
           onRemoveLoadedContext={removeLoadedContext}
           onSelectMention={(entry) => void handleSelectMention(entry)}
           onSubmit={handleComposerSubmit}
-          onToggleBrowserBackend={onToggleBrowserBackend}
-          onToggleBrowserTool={onToggleBrowserTool}
           placeholder={goalModeApi.goalPlaceholder ?? composerVisual.placeholder}
           drawer={
             <SessionProjectDrawer
@@ -725,6 +725,13 @@ export function ChatPane({
               onInitGit={onInitGit}
               onOpenDiff={openDiffDrawer}
               showProjectRow={composerVisual.showProjectRow}
+              open={contextOpen}
+              onOpenChange={setContextOpen}
+              onRequestAttach={() => fileInputRef.current?.click()}
+              browserToolEnabled={browserToolEnabled}
+              browserBackend={browserBackend}
+              onToggleBrowserBackend={onToggleBrowserBackend}
+              onToggleBrowserTool={onToggleBrowserTool}
               running={Boolean(running)}
               onProjectPicked={handleProjectPicked}
               queueItems={visibleQueueItems}

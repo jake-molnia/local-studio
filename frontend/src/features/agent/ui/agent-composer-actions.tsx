@@ -3,8 +3,7 @@
 import type { ReactNode, RefObject } from "react";
 import { Spinner } from "@/ui";
 import { ArrowUp, Plus } from "@/ui/icon-registry";
-import type { BrowserBackend } from "@/features/agent/tools/types";
-import { GlobeIcon, PanelIcon, StopIcon, UserBrowserIcon } from "@/ui/icons";
+import { StopIcon } from "@/ui/icons";
 
 export function AgentComposerActions({
   fileInputRef,
@@ -14,11 +13,9 @@ export function AgentComposerActions({
   status,
   input,
   attachmentsCount,
-  browserToolEnabled,
-  browserBackend,
-  onToggleBrowserBackend,
-  onToggleBrowserTool,
   onAbortTurn,
+  onOpenContext,
+  contextOpen,
   modelSelector,
 }: {
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -28,26 +25,14 @@ export function AgentComposerActions({
   status?: string;
   input: string;
   attachmentsCount: number;
-  browserToolEnabled: boolean;
-  browserBackend: BrowserBackend;
-  onToggleBrowserBackend: () => void;
-  onToggleBrowserTool: () => void;
   onAbortTurn: () => void;
+  onOpenContext: () => void;
+  contextOpen: boolean;
   modelSelector?: ReactNode;
 }) {
   const inputHasText = Boolean(input.trim());
   const starting = status === "starting";
   const stopping = status === "stopping";
-  // The sandbox browser is always armed once the browser tool is on; this
-  // second button adds the user's own browser on top of it, so it reads as an
-  // on/off for Chrome rather than a choice between two backends.
-  const chromeArmed = browserBackend === "chrome";
-  const chromeLabel = chromeArmed
-    ? "Your Chrome is armed — the agent can drive your real browser, with your logins"
-    : "Your Chrome is off — the agent only has the headless sandbox browser";
-  const chromeAction = chromeArmed ? "Stop letting it use your browser" : "Let it use your browser";
-  const inactiveIconClass = "text-(--hl2) hover:bg-(--hover) hover:text-(--fg)";
-  const activeIconClass = "bg-(--active) text-(--fg)";
 
   return (
     <div className="agent-composer-actions-row flex min-h-8 items-center gap-0.5 bg-transparent px-1.5 pb-1.5 pt-0 text-xs">
@@ -60,46 +45,18 @@ export function AgentComposerActions({
       />
       <button
         type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={readingAttachments || running}
-        className="inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full text-(--hl2) hover:bg-(--hover) hover:text-(--fg) disabled:opacity-30"
-        aria-label="Attach files"
-        title="Attach files (or paste/drop into composer)"
+        onClick={onOpenContext}
+        disabled={readingAttachments}
+        data-composer-context-trigger
+        aria-expanded={contextOpen}
+        className={`inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full hover:bg-(--hover) hover:text-(--fg) disabled:opacity-30 ${
+          contextOpen ? "bg-(--active) text-(--fg)" : "text-(--hl2)"
+        }`}
+        aria-label="Add context"
+        title="Add context"
       >
         <Plus className="h-4 w-4" strokeWidth={1.75} />
       </button>
-      <button
-        type="button"
-        onClick={onToggleBrowserTool}
-        aria-pressed={browserToolEnabled}
-        aria-label="Browser tools"
-        title={
-          browserToolEnabled
-            ? "Browser tool: ON — agent can drive the browser"
-            : "Browser tool: OFF — click to let the agent navigate, click, fill, and read pages"
-        }
-        className={`composer-action-optional inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full ${browserToolEnabled ? activeIconClass : inactiveIconClass}`}
-      >
-        <span className="relative inline-flex">
-          <GlobeIcon className="h-4 w-4" />
-        </span>
-      </button>
-      {browserToolEnabled ? (
-        <button
-          type="button"
-          onClick={onToggleBrowserBackend}
-          aria-pressed={chromeArmed}
-          aria-label={`${chromeLabel}. ${chromeAction}.`}
-          className={`composer-action-optional inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full ${chromeArmed ? activeIconClass : inactiveIconClass}`}
-          title={`${chromeLabel}. Click to ${chromeAction.toLowerCase()}.`}
-        >
-          {chromeArmed ? (
-            <UserBrowserIcon className="h-4 w-4" />
-          ) : (
-            <PanelIcon className="h-4 w-4" />
-          )}
-        </button>
-      ) : null}
       <div className="ml-auto flex min-w-0 shrink items-center gap-0.5">
         {modelSelector}
         {running ? (

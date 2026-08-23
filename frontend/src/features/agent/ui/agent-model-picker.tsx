@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Pin } from "@/ui/icon-registry";
+import { Check, ChevronDown, Pin } from "@/ui/icon-registry";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { POPOVER_MENU_CLASS } from "@/ui/popover";
@@ -36,7 +36,7 @@ const PANEL_GAP_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
 
 type ModelGroup = { key: string; name: string; models: AgentModel[] };
-type PickerView = "root" | "models" | "reasoning";
+type PickerView = "models" | "reasoning";
 
 const REASONING_LABELS: Record<AgentThinkingLevel, string> = {
   off: "Off",
@@ -73,7 +73,7 @@ export function AgentModelPicker({
   onSelectReasoning,
 }: AgentModelPickerProps) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<PickerView>("root");
+  const [view, setView] = useState<PickerView>("models");
   const [showOtherModels, setShowOtherModels] = useState(false);
   const active = models.find((model) => model.id === selectedModel) ?? null;
   const visible = useMemo(
@@ -91,23 +91,29 @@ export function AgentModelPicker({
     loading,
     visible.controllerModels.length,
   );
-  const supportsReasoning = Boolean(reasoningLevel && onSelectReasoning);
+  const supportsReasoning = Boolean(
+    reasoningLevel && onSelectReasoning && reasoningLevels.length > 1,
+  );
   const effectiveReasoning = reasoningLevels.includes(reasoningLevel ?? "off")
     ? (reasoningLevel ?? "off")
     : (reasoningLevels.at(-1) ?? "off");
   const reasoningLabel = REASONING_LABELS[effectiveReasoning];
-  const triggerLabel = supportsReasoning ? `${modelLabel} ${reasoningLabel}` : modelLabel;
   const selectedModelNotRunning = !loading && Boolean(active && active.active === false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => {
     setOpen(false);
-    setView("root");
+    setView("models");
   }, []);
   const closeAndFocus = useCallback(() => {
+    const trigger = view;
     close();
-    requestAnimationFrame(() => anchorRef.current?.querySelector("button")?.focus());
-  }, [close]);
+    requestAnimationFrame(() =>
+      anchorRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-picker-view="${trigger}"]`)
+        ?.focus(),
+    );
+  }, [close, view]);
 
   useMountSubscription(() => {
     if (!open) return;
@@ -158,41 +164,55 @@ export function AgentModelPicker({
       onPointerDown={stopToolbarEvent}
       onMouseDown={stopToolbarEvent}
     >
-      <ModelPickerTrigger
-        label={triggerLabel}
-        title={active?.name || triggerLabel}
-        disabled={disabled}
-        open={open}
-        notRunning={selectedModelNotRunning}
-        onToggle={() => {
-          if (disabled) return;
-          if (open) close();
-          else {
-            setView(supportsReasoning ? "root" : "models");
-            setOpen(true);
-          }
-        }}
-      />
+      <div className="flex min-w-0 items-center gap-0.5">
+        <ModelPickerTrigger
+          view="models"
+          kind="Model"
+          label={modelLabel}
+          title={active?.name || modelLabel}
+          disabled={disabled}
+          open={open && view === "models"}
+          notRunning={selectedModelNotRunning}
+          onToggle={() => {
+            if (disabled) return;
+            if (open && view === "models") close();
+            else {
+              setView("models");
+              setOpen(true);
+            }
+          }}
+        />
+        {supportsReasoning ? (
+          <ModelPickerTrigger
+            view="reasoning"
+            kind="Reasoning"
+            label={reasoningLabel}
+            title={`Reasoning: ${reasoningLabel}`}
+            disabled={disabled || reasoningDisabled}
+            open={open && view === "reasoning"}
+            notRunning={false}
+            onToggle={() => {
+              if (disabled || reasoningDisabled) return;
+              if (open && view === "reasoning") close();
+              else {
+                setView("reasoning");
+                setOpen(true);
+              }
+            }}
+          />
+        ) : null}
+      </div>
       {open
         ? createPortal(
             <div
               ref={placePanel}
               className={`fixed z-[300] w-[20rem] max-w-[calc(100vw-1rem)] ${POPOVER_MENU_CLASS}`}
               role="menu"
-              aria-label="Model and reasoning"
-              onKeyDown={(event) => handleMenuKeyDown(event, view, setView, closeAndFocus)}
+              aria-label={view === "models" ? "Models" : "Reasoning"}
+              onKeyDown={(event) => handleMenuKeyDown(event, closeAndFocus)}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >
-              {view === "root" ? (
-                <PickerRoot
-                  modelLabel={modelLabel}
-                  reasoningLabel={reasoningLabel}
-                  reasoningFixed={reasoningLevels.length <= 1}
-                  onOpenModels={() => setView("models")}
-                  onOpenReasoning={() => setView("reasoning")}
-                />
-              ) : null}
               {view === "models" ? (
                 <ModelList
                   groups={groups}
@@ -200,7 +220,6 @@ export function AgentModelPicker({
                   defaultModel={defaultModel}
                   showOtherModels={showOtherModels}
                   otherModelCount={visible.otherModels.length}
-                  onBack={supportsReasoning ? () => setView("root") : undefined}
                   onSelect={(modelId) => {
                     onSelect(modelId);
                     closeAndFocus();
@@ -215,7 +234,6 @@ export function AgentModelPicker({
                   value={effectiveReasoning}
                   levels={reasoningLevels}
                   disabled={reasoningDisabled}
-                  onBack={() => setView("root")}
                   onSelect={(level) => {
                     onSelectReasoning(level);
                     closeAndFocus();
@@ -230,71 +248,9 @@ export function AgentModelPicker({
   );
 }
 
-function PickerRoot({
-  modelLabel,
-  reasoningLabel,
-  reasoningFixed,
-  onOpenModels,
-  onOpenReasoning,
-}: {
-  modelLabel: string;
-  reasoningLabel: string;
-  reasoningFixed: boolean;
-  onOpenModels: () => void;
-  onOpenReasoning: () => void;
-}) {
+function PickerHeader({ title }: { title: string }) {
   return (
-    <div className="grid gap-0.5">
-      <PickerRootRow label="Model" value={modelLabel} onClick={onOpenModels} />
-      <PickerRootRow
-        label="Reasoning"
-        value={reasoningLabel}
-        disabled={reasoningFixed}
-        onClick={onOpenReasoning}
-      />
-    </div>
-  );
-}
-
-function PickerRootRow({
-  label,
-  value,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  value: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-7 min-w-0 items-center gap-2 rounded-[4px] px-2 text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover) disabled:cursor-default disabled:opacity-55"
-    >
-      <span className="w-16 shrink-0 text-left font-medium">{label}</span>
-      <span className="min-w-0 flex-1 truncate text-right text-(--fg)/60">{value}</span>
-      {disabled ? <span className="w-3.5" /> : <ChevronRight className="h-3 w-3 text-(--dim)" />}
-    </button>
-  );
-}
-
-function PickerHeader({ title, onBack }: { title: string; onBack?: () => void }) {
-  return (
-    <div className="flex h-7 items-center gap-1 border-b border-(--border) px-0.5 pb-0.5">
-      {onBack ? (
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-[4px] text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
-          aria-label="Back"
-        >
-          <ChevronLeft className="h-3 w-3" />
-        </button>
-      ) : null}
+    <div className="flex h-7 items-center border-b border-(--border) px-1 pb-0.5">
       <span className="px-1 text-[length:var(--fs-sm)] font-medium text-(--dim)">{title}</span>
     </div>
   );
@@ -306,7 +262,6 @@ function ModelList({
   defaultModel,
   showOtherModels,
   otherModelCount,
-  onBack,
   onSelect,
   onSetDefault,
   onToggleOtherModels,
@@ -317,7 +272,6 @@ function ModelList({
   defaultModel?: string;
   showOtherModels: boolean;
   otherModelCount: number;
-  onBack?: () => void;
   onSelect: (modelId: string) => void;
   onSetDefault?: (modelId: string) => void;
   onToggleOtherModels: () => void;
@@ -325,7 +279,7 @@ function ModelList({
 }) {
   return (
     <div>
-      <PickerHeader title="Model" onBack={onBack} />
+      <PickerHeader title="Model" />
       {otherModelCount > 0 ? (
         <button
           type="button"
@@ -402,18 +356,16 @@ function ReasoningList({
   value,
   levels,
   disabled,
-  onBack,
   onSelect,
 }: {
   value: AgentThinkingLevel;
   levels: readonly AgentThinkingLevel[];
   disabled: boolean;
-  onBack: () => void;
   onSelect: (level: AgentThinkingLevel) => void;
 }) {
   return (
     <div>
-      <PickerHeader title="Reasoning" onBack={onBack} />
+      <PickerHeader title="Reasoning" />
       <div className="grid gap-0.5 pt-1">
         {REASONING_MENU_LEVELS.filter((level) => levels.includes(level)).map((level) => (
           <button
@@ -438,6 +390,8 @@ function ReasoningList({
 }
 
 function ModelPickerTrigger({
+  view,
+  kind,
   label,
   title,
   disabled,
@@ -445,6 +399,8 @@ function ModelPickerTrigger({
   notRunning,
   onToggle,
 }: {
+  view: PickerView;
+  kind: "Model" | "Reasoning";
   label: string;
   title: string;
   disabled: boolean;
@@ -455,20 +411,22 @@ function ModelPickerTrigger({
   return (
     <button
       type="button"
+      data-picker-view={view}
       onPointerDown={stopToolbarEvent}
       onMouseDown={stopToolbarEvent}
       onClick={onToggle}
       disabled={disabled}
       className={cx(
-        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-full items-center justify-between gap-1 rounded-[4px] bg-transparent pl-1.5 pr-1 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/85 transition-colors hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
+        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[5px] bg-transparent px-1.5 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-colors duration-100 hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
         open && "bg-(--hover) text-(--fg)",
       )}
       title={notRunning ? `${title} is not running — launch it or pick a running model` : title}
-      aria-label={`Model: ${title}${notRunning ? " (not running)" : ""}`}
+      aria-label={`${kind}: ${title}${notRunning ? " (not running)" : ""}`}
       aria-expanded={open}
       aria-haspopup="menu"
     >
-      <span className="min-w-0 max-w-[180px] truncate text-left">{label}</span>
+      <span className="mr-0.5 text-[length:var(--fs-xs)] text-(--dim)">{kind}</span>
+      <span className="min-w-0 truncate text-left text-(--fg)/90">{label}</span>
       {notRunning ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--warn)" /> : null}
       <ChevronDown className="pointer-events-none h-3 w-3 shrink-0 text-(--dim)" />
     </button>
@@ -551,16 +509,10 @@ function ModelOption({
   );
 }
 
-function handleMenuKeyDown(
-  event: ReactKeyboardEvent<HTMLDivElement>,
-  view: PickerView,
-  setView: (view: PickerView) => void,
-  close: () => void,
-) {
+function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, close: () => void) {
   if (event.key === "Escape") {
     event.preventDefault();
-    if (view === "root" || view === "models") close();
-    else setView("root");
+    close();
     return;
   }
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(

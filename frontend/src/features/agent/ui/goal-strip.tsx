@@ -45,7 +45,7 @@ export function GoalStrip({
   // Turn N is in flight while the goal is active; once it settles, N is done.
   const iteration = goal.status === "active" ? goal.turnsUsed + 1 : Math.max(1, goal.turnsUsed);
   return (
-    <div className="mx-auto mb-1 flex w-[calc(100%_-_26px)] max-w-[calc(var(--composer-w)*0.9_-_26px)] items-center gap-1.5 rounded-[var(--composer-radius-inner)] border border-(--separator) bg-(--surface)/35 px-2 py-0.5 text-[length:var(--fs-xs)] backdrop-blur-sm [corner-shape:superellipse(1.5)] sm:w-[calc(90%_-_26px)]">
+    <div className="mx-auto mb-1 flex w-[calc(100%_-_26px)] items-center gap-1.5 rounded-[var(--composer-radius-inner)] border border-(--separator) bg-(--surface)/35 px-2 py-0.5 text-[length:var(--fs-xs)] backdrop-blur-sm [corner-shape:superellipse(1.5)]">
       <button
         type="button"
         onClick={onOpen}

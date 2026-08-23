@@ -14,7 +14,6 @@ import type {
   ComposerPromptTemplateRef,
   ComposerSkillRef,
 } from "@/features/agent/composer-context";
-import type { BrowserBackend } from "@/features/agent/tools/types";
 import type { ComposerBanner } from "@/features/agent/composer/composer-visual-state";
 import { Spinner } from "@/ui";
 import { POPOVER_MENU_CLASS } from "@/ui/popover";
@@ -36,8 +35,6 @@ import { CloseIcon } from "@/ui/icons";
 export type AgentComposerFrameProps = {
   attachments: AgentComposerAttachment[];
   banner: ComposerBanner | null;
-  browserToolEnabled: boolean;
-  browserBackend: BrowserBackend;
   composerDragActive: boolean;
   contextWindow: number;
   currentContextTokens: number;
@@ -51,6 +48,8 @@ export type AgentComposerFrameProps = {
   mentionRows: MentionRow[];
   modelSupportsVision: boolean;
   modelSelector?: ReactNode;
+  contextOpen: boolean;
+  onOpenContext: () => void;
   onAbortTurn: () => void;
   onAttachFiles: (files: FileList | null) => void;
   onComposerChange: ChangeEventHandler<HTMLTextAreaElement>;
@@ -66,8 +65,6 @@ export type AgentComposerFrameProps = {
   onRemoveLoadedContext: (kind: LoadedContextKind, id: string) => void;
   onSelectMention: (entry: MentionRow) => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
-  onToggleBrowserBackend: () => void;
-  onToggleBrowserTool: () => void;
   placeholder: string;
   goalMode?: boolean;
   onExitGoalMode?: () => void;
@@ -86,8 +83,6 @@ export type AgentComposerFrameProps = {
 export function AgentComposerFrame({
   attachments,
   banner,
-  browserToolEnabled,
-  browserBackend,
   composerDragActive,
   contextWindow,
   currentContextTokens,
@@ -101,6 +96,8 @@ export function AgentComposerFrame({
   mentionRows,
   modelSupportsVision,
   modelSelector,
+  contextOpen,
+  onOpenContext,
   onAbortTurn,
   onAttachFiles,
   onComposerChange,
@@ -116,8 +113,6 @@ export function AgentComposerFrame({
   onRemoveLoadedContext,
   onSelectMention,
   onSubmit,
-  onToggleBrowserBackend,
-  onToggleBrowserTool,
   placeholder,
   goalMode = false,
   onExitGoalMode,
@@ -136,7 +131,7 @@ export function AgentComposerFrame({
     <form
       onSubmit={onSubmit}
       className={cx(
-        "agent-composer-form relative z-[100] shrink-0",
+        "agent-composer-form relative z-[100] mx-auto w-full max-w-[calc(var(--composer-w)*0.9+2rem)] shrink-0 sm:w-[90%]",
         floating
           ? "bg-transparent p-[calc(var(--space-base)*1.5)]"
           : dense
@@ -145,22 +140,18 @@ export function AgentComposerFrame({
       )}
     >
       {banner ? (
-        <div className="mx-auto flex w-full max-w-[calc(var(--composer-w)*0.9)] items-center gap-2 pb-3 pl-1 text-[length:var(--codex-chat-font-size)] text-(--fg)/35 sm:w-[90%]">
+        <div className="flex w-full items-center gap-2 pb-3 pl-1 text-[length:var(--codex-chat-font-size)] text-(--fg)/35">
           <Spinner size="xs" />
           {banner.label}
         </div>
       ) : null}
-      {drawer ? (
-        <div className="mx-auto w-full max-w-[calc(var(--composer-w)*0.9)] sm:w-[90%]">
-          {drawer}
-        </div>
-      ) : null}
+      {drawer ? <div className="w-full">{drawer}</div> : null}
       <div
         onDragOver={onComposerDragOver}
         onDragLeave={onComposerDragLeave}
         onDrop={onComposerDrop}
         className={cx(
-          "agent-composer-box relative z-10 mx-auto w-full max-w-[calc(var(--composer-w)*0.9)] overflow-visible rounded-[var(--composer-radius-inner)] border border-(--separator) bg-(--composer) shadow-[var(--composer-elevation)] transition-colors sm:w-[90%]",
+          "agent-composer-box relative z-10 w-full overflow-visible rounded-[var(--composer-radius-inner)] border border-(--composer-border) bg-(--composer) shadow-[var(--composer-elevation)] transition-[border-color,box-shadow] duration-100",
           composerDragActive && "outline outline-1 outline-(--link)/50",
         )}
       >
@@ -227,12 +218,10 @@ export function AgentComposerFrame({
           status={status}
           input={input}
           attachmentsCount={attachments.length}
-          browserToolEnabled={browserToolEnabled}
-          browserBackend={browserBackend}
-          onToggleBrowserBackend={onToggleBrowserBackend}
-          onToggleBrowserTool={onToggleBrowserTool}
           onAbortTurn={onAbortTurn}
           modelSelector={modelSelector}
+          contextOpen={contextOpen}
+          onOpenContext={onOpenContext}
         />
       </div>
       {showStatusBar ? (
@@ -247,10 +236,7 @@ export function AgentComposerFrame({
           onOpenDiff={onOpenDiff}
         />
       ) : (
-        <div
-          aria-hidden="true"
-          className="mx-auto mt-1.5 h-2 w-full max-w-[calc(var(--composer-w)*0.9)] sm:mt-2 sm:h-3 sm:w-[90%]"
-        />
+        <div aria-hidden="true" className="mt-1.5 h-2 w-full sm:mt-2 sm:h-3" />
       )}
     </form>
   );
