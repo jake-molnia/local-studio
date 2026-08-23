@@ -23,6 +23,8 @@ const Job = struct {
     id: []u8,
     backend: []u8,
     target_id: ?[]u8,
+    version: ?[]u8,
+    prefer_bundled: bool,
     job_type: []u8,
     status: Status,
     progress: f64,
@@ -41,6 +43,7 @@ const Job = struct {
         job.allocator.free(job.id);
         job.allocator.free(job.backend);
         if (job.target_id) |value| job.allocator.free(value);
+        if (job.version) |value| job.allocator.free(value);
         job.allocator.free(job.job_type);
         job.allocator.free(job.message);
         if (job.command) |value| job.allocator.free(value);
@@ -161,12 +164,14 @@ pub const State = struct {
         }
         state.mutex.unlock(state.io);
         locked = false;
-        if (job.process_id > 0) signalProcessGroup(job.process_id, false);
-        state.io.sleep(.fromSeconds(2), .awake) catch {};
-        try state.mutex.lock(state.io);
-        const current_process_id = job.process_id;
-        if (current_process_id > 0) signalProcessGroup(current_process_id, true);
-        state.mutex.unlock(state.io);
+        if (job.process_id > 0) {
+            signalProcessGroup(job.process_id, false);
+            state.io.sleep(.fromSeconds(2), .awake) catch {};
+            try state.mutex.lock(state.io);
+            const current_process_id = job.process_id;
+            if (current_process_id > 0) signalProcessGroup(current_process_id, true);
+            state.mutex.unlock(state.io);
+        }
         job.group.cancel(state.io);
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
@@ -184,6 +189,8 @@ pub const State = struct {
         errdefer state.allocator.free(backend);
         const target_id = if (options.target_id) |value| try state.allocator.dupe(u8, value) else null;
         errdefer if (target_id) |value| state.allocator.free(value);
+        const version = if (options.version) |value| try state.allocator.dupe(u8, std.mem.trim(u8, value, " \t\r\n")) else null;
+        errdefer if (version) |value| state.allocator.free(value);
         const job_type = try state.allocator.dupe(u8, options.job_type);
         errdefer state.allocator.free(job_type);
         const message = try std.fmt.allocPrint(state.allocator, "{s} queued for {s}", .{ options.job_type, options.backend });
@@ -196,6 +203,8 @@ pub const State = struct {
             .id = id,
             .backend = backend,
             .target_id = target_id,
+            .version = version,
+            .prefer_bundled = options.prefer_bundled orelse true,
             .job_type = job_type,
             .status = .queued,
             .progress = 0,
@@ -228,6 +237,12 @@ fn runJob(state: *State, configuration: *const config_module.Config, cache: *run
     runJobInner(state, configuration, cache, id) catch |failure| {
         if (failure == error.Canceled) {
             markCancelled(state, id);
+        } else if (failure == error.RuntimeTargetNotFound) {
+            markFailed(state, id, "Runtime target not found");
+        } else if (failure == error.RuntimeTargetNotUpdatable) {
+            markFailed(state, id, "Update is unsupported for this runtime target");
+        } else if (failure == error.InstallLockTimeout) {
+            markFailed(state, id, "Runtime install lock still present after 30 minutes");
         } else {
             markFailed(state, id, @errorName(failure));
         }
@@ -235,61 +250,402 @@ fn runJob(state: *State, configuration: *const config_module.Config, cache: *run
 }
 
 fn runJobInner(state: *State, configuration: *const config_module.Config, cache: *runtime_info.Cache, id: []const u8) !void {
-    const command = command: {
+    const configured_command = command: {
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
         const job = state.jobs.get(id) orelse {
             return;
         };
         if (job.status != .queued) return;
-        const environment_name = upgradeEnvironment(job.backend) orelse {
-            try failJobLocked(job, state.io, try std.fmt.allocPrint(job.allocator, "No {s} upgrade command configured.", .{job.backend}));
-            return;
-        };
-        const configured = configuration.environment.get(environment_name) orelse {
-            try failJobLocked(job, state.io, try std.fmt.allocPrint(job.allocator, "No {s} upgrade command configured. Set {s}.", .{ job.backend, environment_name }));
-            return;
-        };
-        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
-        if (trimmed.len == 0) {
-            try failJobLocked(job, state.io, try job.allocator.dupe(u8, "Upgrade command is empty"));
-            return;
-        }
-        const owned = try state.allocator.dupe(u8, trimmed);
-        errdefer state.allocator.free(owned);
         const message = try std.fmt.allocPrint(job.allocator, "{s} running for {s}", .{ job.job_type, job.backend });
         try replaceString(job.allocator, &job.message, message);
         job.status = .running;
         job.progress = 0.05;
+        const environment_name = upgradeEnvironment(job.backend) orelse break :command null;
+        const configured = configuration.environment.get(environment_name) orelse break :command null;
+        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+        if (trimmed.len == 0) break :command null;
         try setOptionalString(job.allocator, &job.command, try job.allocator.dupe(u8, trimmed));
-        break :command owned;
+        break :command try state.allocator.dupe(u8, trimmed);
     };
-    defer state.allocator.free(command);
-    const result = runCommand(state, configuration, id, command) catch |failure| switch (failure) {
-        error.Canceled => return error.Canceled,
-        error.Timeout => return markFailed(state, id, "Upgrade command timed out after 10 minutes"),
-        error.StreamTooLong => return markFailed(state, id, "Upgrade command output exceeded 8 MiB"),
-        else => return markFailed(state, id, @errorName(failure)),
-    };
-    defer state.allocator.free(result.stdout);
-    defer state.allocator.free(result.stderr);
-    const output = if (result.stdout.len > 0) result.stdout else result.stderr;
-    const success = switch (result.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-    if (!success) return markFailedWithOutput(state, id, if (result.stderr.len > 0) result.stderr else "Upgrade command failed", output);
+    const backend = try jobBackend(state, id);
+    defer state.allocator.free(backend);
+    var install_lock: ?std.Io.File = if (platformBackend(backend)) null else try acquireInstallLock(state, configuration, id, backend);
+    defer if (install_lock) |*file| file.close(state.io);
+    var operation_version: ?[]u8 = null;
+    defer if (operation_version) |value| state.allocator.free(value);
+    var operation_output: ?[]u8 = null;
+    defer if (operation_output) |value| state.allocator.free(value);
+    if (configured_command) |command| {
+        defer state.allocator.free(command);
+        const result = runCommand(state, configuration, id, &.{command}, 600) catch |failure| return commandFailure(state, id, failure, 10);
+        defer state.allocator.free(result.stdout);
+        defer state.allocator.free(result.stderr);
+        const output = if (result.stdout.len > 0) result.stdout else result.stderr;
+        if (!termSuccessful(result.term)) return markFailedWithOutput(state, id, if (result.stderr.len > 0) result.stderr else "Upgrade command failed", output);
+        operation_output = try state.allocator.dupe(u8, output);
+    } else if (managedPythonBackend(backend)) {
+        const managed = try runManagedPythonInstall(state, configuration, id, backend) orelse return;
+        operation_version = managed.version;
+        operation_output = managed.output;
+    } else {
+        const environment_name = upgradeEnvironment(backend);
+        const message = if (environment_name) |name|
+            try std.fmt.allocPrint(state.allocator, "No {s} upgrade command configured. Set {s}.", .{ backend, name })
+        else
+            try std.fmt.allocPrint(state.allocator, "No {s} upgrade command configured.", .{backend});
+        defer state.allocator.free(message);
+        return markFailed(state, id, message);
+    }
     try cache.invalidate();
     try state.mutex.lock(state.io);
     defer state.mutex.unlock(state.io);
     const job = state.jobs.get(id) orelse return;
     if (job.status != .running) return;
-    const message = try std.fmt.allocPrint(job.allocator, "{s} complete", .{job.job_type});
+    const message = if (operation_version) |version|
+        try std.fmt.allocPrint(job.allocator, "{s} complete ({s})", .{ job.job_type, version })
+    else
+        try std.fmt.allocPrint(job.allocator, "{s} complete", .{job.job_type});
     try replaceString(job.allocator, &job.message, message);
     job.status = .success;
     job.progress = 1;
     try setOptionalString(job.allocator, &job.finished_at, try nowTimestamp(job.allocator, state.io));
-    if (tail(output)) |value| try setOptionalString(job.allocator, &job.output_tail, try job.allocator.dupe(u8, value));
+    if (operation_output) |output| if (tail(output)) |value| try setOptionalString(job.allocator, &job.output_tail, try job.allocator.dupe(u8, value));
+}
+
+const ManagedResult = struct {
+    version: ?[]u8,
+    output: ?[]u8,
+};
+
+fn runManagedPythonInstall(state: *State, configuration: *const config_module.Config, id: []const u8, backend: []const u8) !?ManagedResult {
+    const target_python = try installPythonPath(state, configuration, id, backend);
+    defer state.allocator.free(target_python.path);
+    if (target_python.create_venv and !pathExists(state.io, target_python.path)) {
+        const base_python = try resolveBasePython(state, configuration, id) orelse {
+            markFailed(state, id, "Python 3 was not found on PATH");
+            return null;
+        };
+        defer state.allocator.free(base_python);
+        const venv_directory = std.fs.path.dirname(std.fs.path.dirname(target_python.path) orelse return error.InvalidManagedPythonPath) orelse return error.InvalidManagedPythonPath;
+        const parent = std.fs.path.dirname(venv_directory) orelse return error.InvalidManagedPythonPath;
+        _ = try std.Io.Dir.cwd().createDirPathStatus(state.io, parent, @enumFromInt(0o700));
+        const command = try renderCommand(state.allocator, &.{ base_python, "-m", "venv", venv_directory });
+        defer state.allocator.free(command);
+        try updateJobStage(state, id, 0.1, try std.fmt.allocPrint(state.allocator, "Creating {s} virtual environment...", .{backend}), command, null);
+        const create = runCommand(state, configuration, id, &.{ base_python, "-m", "venv", venv_directory }, 600) catch |failure| {
+            commandFailure(state, id, failure, 10);
+            return null;
+        };
+        defer state.allocator.free(create.stdout);
+        defer state.allocator.free(create.stderr);
+        if (!termSuccessful(create.term)) {
+            const message = if (create.stderr.len > 0) create.stderr else "Failed to create managed virtual environment";
+            markFailedWithOutput(state, id, message, if (create.stdout.len > 0) create.stdout else message);
+            return null;
+        }
+        if (!pathExists(state.io, target_python.path)) {
+            markFailed(state, id, "Managed virtual environment did not create its Python executable");
+            return null;
+        }
+    }
+    const requested_version = try jobVersion(state, id);
+    defer if (requested_version) |value| state.allocator.free(value);
+    const package_spec = try managedPackageSpec(state.allocator, state.io, backend, requested_version, try jobPreferBundled(state, id));
+    defer state.allocator.free(package_spec);
+    const installer = try resolveInstaller(state, configuration, id, target_python.path, package_spec) orelse return null;
+    defer installer.deinit(state.allocator);
+    const display = try renderCommand(state.allocator, installer.argv);
+    defer state.allocator.free(display);
+    const message = try std.fmt.allocPrint(state.allocator, "Installing {s} with {s}...", .{ package_spec, installer.name });
+    try updateJobStage(state, id, 0.2, message, display, null);
+    const install = runCommand(state, configuration, id, installer.argv, 1800) catch |failure| {
+        commandFailure(state, id, failure, 30);
+        return null;
+    };
+    defer state.allocator.free(install.stdout);
+    defer state.allocator.free(install.stderr);
+    const install_output = if (install.stdout.len > 0) install.stdout else install.stderr;
+    if (!termSuccessful(install.term)) {
+        const failure_message = if (install.stderr.len > 0) install.stderr else "Runtime package installation failed";
+        markFailedWithOutput(state, id, failure_message, install_output);
+        return null;
+    }
+    try updateJobStage(state, id, 0.92, try std.fmt.allocPrint(state.allocator, "Verifying {s} runtime...", .{backend}), null, tail(install_output));
+    const probe_script = if (std.mem.eql(u8, backend, "vllm"))
+        "import importlib.metadata as m; import vllm; print(m.version('vllm'))"
+    else if (std.mem.eql(u8, backend, "sglang"))
+        "import importlib.metadata as m; import sglang; print(m.version('sglang'))"
+    else
+        "import importlib.metadata as m; import mlx_lm; print(m.version('mlx-lm'))";
+    const probe = runCommand(state, configuration, id, &.{ target_python.path, "-c", probe_script }, 10) catch |failure| {
+        commandFailure(state, id, failure, 1);
+        return null;
+    };
+    defer state.allocator.free(probe.stdout);
+    defer state.allocator.free(probe.stderr);
+    if (!termSuccessful(probe.term)) {
+        const failure_message = if (probe.stderr.len > 0) probe.stderr else "Runtime import probe failed";
+        markFailedWithOutput(state, id, failure_message, failure_message);
+        return null;
+    }
+    const version = if (firstLine(probe.stdout)) |value| try state.allocator.dupe(u8, value) else null;
+    const output = if (install_output.len > 0) try state.allocator.dupe(u8, install_output) else null;
+    return .{ .version = version, .output = output };
+}
+
+const PythonTarget = struct { path: []u8, create_venv: bool };
+
+fn installPythonPath(state: *State, configuration: *const config_module.Config, id: []const u8, backend: []const u8) !PythonTarget {
+    const target_id = try jobTargetId(state, id);
+    defer if (target_id) |value| state.allocator.free(value);
+    if (target_id) |value| {
+        const prefix = try std.fmt.allocPrint(state.allocator, "{s}:", .{backend});
+        defer state.allocator.free(prefix);
+        if (!std.mem.startsWith(u8, value, prefix)) return error.RuntimeTargetNotFound;
+        const identity = value[prefix.len..];
+        const separator = std.mem.indexOfScalar(u8, identity, ':') orelse return error.RuntimeTargetNotFound;
+        const kind = identity[0..separator];
+        if (!std.mem.eql(u8, kind, "venv") and !std.mem.eql(u8, kind, "system")) return error.RuntimeTargetNotUpdatable;
+        const encoded = identity[separator + 1 ..];
+        const size = std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(encoded) catch return error.RuntimeTargetNotFound;
+        if (size == 0) return error.RuntimeTargetNotFound;
+        const decoded = try state.allocator.alloc(u8, size);
+        errdefer state.allocator.free(decoded);
+        std.base64.url_safe_no_pad.Decoder.decode(decoded, encoded) catch return error.RuntimeTargetNotFound;
+        const executable_name = std.fs.path.basename(decoded);
+        if (!std.fs.path.isAbsolute(decoded) or !std.mem.startsWith(u8, executable_name, "python") or !pathExists(state.io, decoded)) return error.RuntimeTargetNotFound;
+        return .{ .path = decoded, .create_venv = false };
+    }
+    const name = try std.fmt.allocPrint(state.allocator, "{s}-latest", .{backend});
+    defer state.allocator.free(name);
+    return .{ .path = try std.fs.path.join(state.allocator, &.{ configuration.data_dir, "runtime", "venvs", name, "bin", "python" }), .create_venv = true };
+}
+
+const Installer = struct {
+    argv: [][]const u8,
+    name: []const u8,
+
+    fn deinit(installer: Installer, allocator: std.mem.Allocator) void {
+        allocator.free(installer.argv);
+    }
+};
+
+fn resolveInstaller(state: *State, configuration: *const config_module.Config, id: []const u8, python: []const u8, package_spec: []const u8) !?Installer {
+    const uv_probe = runCommand(state, configuration, id, &.{ "uv", "--version" }, 10) catch |failure| switch (failure) {
+        error.Canceled => return error.Canceled,
+        else => null,
+    };
+    if (uv_probe) |probe| {
+        defer state.allocator.free(probe.stdout);
+        defer state.allocator.free(probe.stderr);
+        if (termSuccessful(probe.term)) {
+            const argv = try state.allocator.alloc([]const u8, 7);
+            @memcpy(argv, &[_][]const u8{ "uv", "pip", "install", "--python", python, "--upgrade", package_spec });
+            return .{ .argv = argv, .name = "uv" };
+        }
+    }
+    const pip_probe = runCommand(state, configuration, id, &.{ python, "-m", "pip", "--version" }, 10) catch |failure| {
+        if (failure == error.Canceled) return error.Canceled;
+        markFailed(state, id, "Neither uv nor a working pip is available. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh");
+        return null;
+    };
+    defer state.allocator.free(pip_probe.stdout);
+    defer state.allocator.free(pip_probe.stderr);
+    if (!termSuccessful(pip_probe.term)) {
+        markFailed(state, id, "Neither uv nor a working pip is available. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh");
+        return null;
+    }
+    const argv = try state.allocator.alloc([]const u8, 6);
+    @memcpy(argv, &[_][]const u8{ python, "-m", "pip", "install", "--upgrade", package_spec });
+    return .{ .argv = argv, .name = "pip" };
+}
+
+fn resolveBasePython(state: *State, configuration: *const config_module.Config, id: []const u8) !?[]u8 {
+    const configured = if (configuration.environment.get("LOCAL_STUDIO_RUNTIME_PYTHON")) |value| std.mem.trim(u8, value, " \t\r\n") else "";
+    const candidates = [_][]const u8{ configured, "python3", "python" };
+    for (candidates) |candidate| {
+        if (candidate.len == 0) continue;
+        const probe = runCommand(state, configuration, id, &.{ candidate, "--version" }, 10) catch |failure| switch (failure) {
+            error.Canceled => return error.Canceled,
+            else => continue,
+        };
+        defer state.allocator.free(probe.stdout);
+        defer state.allocator.free(probe.stderr);
+        if (termSuccessful(probe.term)) return try state.allocator.dupe(u8, candidate);
+    }
+    return null;
+}
+
+fn managedPackageSpec(allocator: std.mem.Allocator, io: std.Io, backend: []const u8, version: ?[]const u8, prefer_bundled: bool) ![]u8 {
+    if (std.mem.eql(u8, backend, "vllm") and prefer_bundled) if (try newestBundledWheel(allocator, io)) |wheel| return wheel;
+    if (std.mem.eql(u8, backend, "mlx")) return allocator.dupe(u8, "mlx-lm");
+    const package = if (std.mem.eql(u8, backend, "vllm")) "vllm" else "sglang[all]";
+    return if (version) |value| std.fmt.allocPrint(allocator, "{s}=={s}", .{ package, value }) else allocator.dupe(u8, package);
+}
+
+fn newestBundledWheel(allocator: std.mem.Allocator, io: std.Io) !?[]u8 {
+    const root = try std.fs.path.resolve(allocator, &.{ "runtime", "wheels" });
+    defer allocator.free(root);
+    var directory = std.Io.Dir.cwd().openDir(io, root, .{ .iterate = true }) catch |failure| switch (failure) {
+        error.FileNotFound, error.NotDir => return null,
+        else => return failure,
+    };
+    defer directory.close(io);
+    var latest_name: ?[]u8 = null;
+    defer if (latest_name) |value| allocator.free(value);
+    var latest_time: i128 = std.math.minInt(i128);
+    var iterator = directory.iterateAssumeFirstIteration();
+    while (try iterator.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.startsWith(u8, entry.name, "vllm-") or !std.mem.endsWith(u8, entry.name, ".whl")) continue;
+        const path = try std.fs.path.join(allocator, &.{ root, entry.name });
+        defer allocator.free(path);
+        const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+        if (stat.mtime.nanoseconds <= latest_time) continue;
+        if (latest_name) |value| allocator.free(value);
+        latest_name = try allocator.dupe(u8, entry.name);
+        latest_time = stat.mtime.nanoseconds;
+    }
+    const name = latest_name orelse return null;
+    return try std.fs.path.join(allocator, &.{ root, name });
+}
+
+fn acquireInstallLock(state: *State, configuration: *const config_module.Config, id: []const u8, backend: []const u8) !std.Io.File {
+    const lock_directory = try std.fs.path.join(state.allocator, &.{ configuration.data_dir, "runtime", "locks" });
+    defer state.allocator.free(lock_directory);
+    _ = try std.Io.Dir.cwd().createDirPathStatus(state.io, lock_directory, @enumFromInt(0o700));
+    const lock_name = try std.fmt.allocPrint(state.allocator, "{s}.install.lock", .{backend});
+    defer state.allocator.free(lock_name);
+    const lock_path = try std.fs.path.join(state.allocator, &.{ lock_directory, lock_name });
+    defer state.allocator.free(lock_path);
+    const deadline = std.Io.Clock.awake.now(state.io).addDuration(.fromSeconds(1800));
+    var waiting_reported = false;
+    while (std.Io.Clock.awake.now(state.io).durationTo(deadline).toNanoseconds() > 0) {
+        if (!try jobIsRunning(state, id)) return error.Canceled;
+        var file = std.Io.Dir.cwd().createFile(state.io, lock_path, .{ .read = true, .truncate = false, .lock = .exclusive, .lock_nonblocking = true, .permissions = @enumFromInt(0o600) }) catch |failure| switch (failure) {
+            error.WouldBlock => {
+                if (!waiting_reported) {
+                    waiting_reported = true;
+                    try updateJobStage(state, id, 0.05, try std.fmt.allocPrint(state.allocator, "waiting for in-progress {s} install...", .{backend}), null, null);
+                }
+                try state.io.sleep(.fromSeconds(3), .awake);
+                continue;
+            },
+            else => return failure,
+        };
+        errdefer file.close(state.io);
+        const record = try std.fmt.allocPrint(state.allocator, "{{\"backend\":\"{s}\",\"pid\":{d}}}", .{ backend, currentProcessId() });
+        defer state.allocator.free(record);
+        try file.setLength(state.io, 0);
+        try file.writePositionalAll(state.io, record, 0);
+        return file;
+    }
+    return error.InstallLockTimeout;
+}
+
+fn updateJobStage(state: *State, id: []const u8, progress: f64, message: []u8, command: ?[]const u8, output: ?[]const u8) !void {
+    var message_owned = true;
+    defer if (message_owned) state.allocator.free(message);
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    const job = state.jobs.get(id) orelse return error.Canceled;
+    if (job.status != .running) return error.Canceled;
+    try replaceString(job.allocator, &job.message, message);
+    message_owned = false;
+    job.progress = progress;
+    if (command) |value| try setOptionalString(job.allocator, &job.command, try job.allocator.dupe(u8, value));
+    if (output) |value| try setOptionalString(job.allocator, &job.output_tail, try job.allocator.dupe(u8, value));
+}
+
+fn renderCommand(allocator: std.mem.Allocator, argv: []const []const u8) ![]u8 {
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    for (argv, 0..) |argument, index| {
+        if (index > 0) try output.writer.writeByte(' ');
+        try output.writer.writeAll(argument);
+    }
+    return output.toOwnedSlice();
+}
+
+fn jobBackend(state: *State, id: []const u8) ![]u8 {
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    const job = state.jobs.get(id) orelse return error.Canceled;
+    return state.allocator.dupe(u8, job.backend);
+}
+
+fn jobTargetId(state: *State, id: []const u8) !?[]u8 {
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    const job = state.jobs.get(id) orelse return error.Canceled;
+    return if (job.target_id) |value| try state.allocator.dupe(u8, value) else null;
+}
+
+fn jobVersion(state: *State, id: []const u8) !?[]u8 {
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    const job = state.jobs.get(id) orelse return error.Canceled;
+    return if (job.version) |value| try state.allocator.dupe(u8, value) else null;
+}
+
+fn jobPreferBundled(state: *State, id: []const u8) !bool {
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    return (state.jobs.get(id) orelse return error.Canceled).prefer_bundled;
+}
+
+fn jobIsRunning(state: *State, id: []const u8) !bool {
+    try state.mutex.lock(state.io);
+    defer state.mutex.unlock(state.io);
+    const job = state.jobs.get(id) orelse return false;
+    return job.status == .running;
+}
+
+fn commandFailure(state: *State, id: []const u8, failure: anyerror, timeout_minutes: u32) void {
+    if (failure == error.Canceled) return markCancelled(state, id);
+    if (failure == error.Timeout) {
+        var buffer: [96]u8 = undefined;
+        const message = std.fmt.bufPrint(&buffer, "Runtime command timed out after {d} minutes", .{timeout_minutes}) catch "Runtime command timed out";
+        return markFailed(state, id, message);
+    }
+    if (failure == error.StreamTooLong) return markFailed(state, id, "Runtime command output exceeded 8 MiB");
+    return markFailed(state, id, @errorName(failure));
+}
+
+fn termSuccessful(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+fn managedPythonBackend(backend: []const u8) bool {
+    return std.mem.eql(u8, backend, "vllm") or std.mem.eql(u8, backend, "sglang") or std.mem.eql(u8, backend, "mlx");
+}
+
+fn platformBackend(backend: []const u8) bool {
+    return std.mem.eql(u8, backend, "cuda") or std.mem.eql(u8, backend, "rocm");
+}
+
+fn pathExists(io: std.Io, path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    return true;
+}
+
+fn firstLine(value: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, value, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len > 0) return line;
+    }
+    return null;
+}
+
+fn currentProcessId() i32 {
+    return switch (builtin.os.tag) {
+        .windows => 0,
+        else => @intCast(std.c.getpid()),
+    };
 }
 
 const CommandResult = struct {
@@ -298,9 +654,9 @@ const CommandResult = struct {
     stderr: []u8,
 };
 
-fn runCommand(state: *State, configuration: *const config_module.Config, id: []const u8, command: []const u8) !CommandResult {
+fn runCommand(state: *State, configuration: *const config_module.Config, id: []const u8, argv: []const []const u8, timeout_seconds: i64) !CommandResult {
     var child = try std.process.spawn(state.io, .{
-        .argv = &.{command},
+        .argv = argv,
         .environ_map = configuration.environment,
         .stdin = .ignore,
         .stdout = .pipe,
@@ -331,7 +687,7 @@ fn runCommand(state: *State, configuration: *const config_module.Config, id: []c
     defer multi_reader.deinit();
     const stdout_reader = multi_reader.reader(0);
     const stderr_reader = multi_reader.reader(1);
-    const timeout: std.Io.Timeout = .{ .duration = .{ .clock = .awake, .raw = std.Io.Duration.fromSeconds(600) } };
+    const timeout: std.Io.Timeout = .{ .duration = .{ .clock = .awake, .raw = std.Io.Duration.fromSeconds(timeout_seconds) } };
     while (multi_reader.fill(64, timeout)) |_| {
         if (stdout_reader.buffered().len > max_output_bytes or stderr_reader.buffered().len > max_output_bytes) return error.StreamTooLong;
     } else |failure| switch (failure) {

@@ -109,17 +109,14 @@ pub fn detect(allocator: std.mem.Allocator, io: Io, config: *const config_module
     const storage = arena.allocator();
 
     const gpu = try detectGpu(storage, allocator, io, system);
-    const vllm = try commandBackend(storage, allocator, io, &.{ "vllm", "--version" }, null, "vllm");
-    const sglang = if (config.sglang_python) |python|
-        try pythonBackend(storage, allocator, io, python, "sglang", "sglang")
-    else
-        try commandBackend(storage, allocator, io, &.{ "sglang", "--version" }, null, "sglang");
+    const vllm_managed = try managedPython(storage, config.data_dir, "vllm");
+    const sglang_managed = try managedPython(storage, config.data_dir, "sglang");
+    const mlx_managed = try managedPython(storage, config.data_dir, "mlx");
+    const vllm = try detectPythonBackend(storage, allocator, io, &.{ config.environment.get("LOCAL_STUDIO_RUNTIME_PYTHON"), vllm_managed, "/opt/venvs/active/vllm-latest/bin/python" }, "vllm", "vllm", &.{ "vllm", "--version" }, "vllm");
+    const sglang = try detectPythonBackend(storage, allocator, io, &.{ config.sglang_python, sglang_managed, "/opt/venvs/active/sglang-latest/bin/python", "/opt/venvs/sglang-latest/bin/python" }, "sglang", "sglang", &.{ "sglang", "--version" }, "sglang");
     const llama_binary = config.llama_bin orelse "llama-server";
     const llamacpp = try commandBackend(storage, allocator, io, &.{ llama_binary, "--version" }, null, llama_binary);
-    const mlx = if (config.mlx_python) |python|
-        try pythonBackend(storage, allocator, io, python, "mlx-lm", "mlx_lm")
-    else
-        try commandBackend(storage, allocator, io, &.{ "mlx_lm.server", "--help" }, null, "mlx_lm.server");
+    const mlx = try detectPythonBackend(storage, allocator, io, &.{ config.mlx_python, mlx_managed }, "mlx-lm", "mlx_lm", &.{ "mlx_lm.server", "--help" }, "mlx_lm.server");
 
     return .{
         .arena = arena,
@@ -233,7 +230,30 @@ fn commandBackend(storage: std.mem.Allocator, allocator: std.mem.Allocator, io: 
 
 fn pythonBackend(storage: std.mem.Allocator, allocator: std.mem.Allocator, io: Io, python: []const u8, package: []const u8, module: []const u8) !Backend {
     const script = try std.fmt.allocPrint(storage, "import importlib.metadata as m; import {s}; print(m.version('{s}'))", .{ module, package });
-    return commandBackend(storage, allocator, io, &.{ python, "-c", script }, python, null);
+    var backend = try commandBackend(storage, allocator, io, &.{ python, "-c", script }, python, null);
+    backend.upgrade_command_available = backend.installed;
+    return backend;
+}
+
+fn detectPythonBackend(storage: std.mem.Allocator, allocator: std.mem.Allocator, io: Io, candidates: []const ?[]const u8, package: []const u8, module: []const u8, fallback_argv: []const []const u8, fallback_binary: []const u8) !Backend {
+    for (candidates) |candidate| {
+        const raw = candidate orelse continue;
+        const python = std.mem.trim(u8, raw, " \t\r\n");
+        if (python.len == 0 or !pathExists(io, python)) continue;
+        const backend = try pythonBackend(storage, allocator, io, python, package, module);
+        if (backend.installed) return backend;
+    }
+    return commandBackend(storage, allocator, io, fallback_argv, null, fallback_binary);
+}
+
+fn managedPython(allocator: std.mem.Allocator, data_dir: []const u8, backend: []const u8) ![]const u8 {
+    const name = try std.fmt.allocPrint(allocator, "{s}-latest", .{backend});
+    return std.fs.path.join(allocator, &.{ data_dir, "runtime", "venvs", name, "bin", "python" });
+}
+
+fn pathExists(io: Io, path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    return true;
 }
 
 fn run(allocator: std.mem.Allocator, io: Io, argv: []const []const u8) ?std.process.RunResult {

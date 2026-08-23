@@ -213,14 +213,27 @@ fn writeTarget(allocator: std.mem.Allocator, writer: *std.Io.Writer, configurati
     const label = try std.fmt.allocPrint(allocator, "{s} {s}", .{ label_name, if (source[0] == 'c') "configured" else "discovered" });
     defer allocator.free(label);
     const active = (selected_id != null and std.mem.eql(u8, selected_id.?, id)) or (running_engine != null and std.mem.eql(u8, running_engine.?, backend_name));
+    const can_update = switch (backend) {
+        .vllm, .mlx => installed and python_path != null,
+        .sglang => installed and (python_path != null or configuration.environment.get("LOCAL_STUDIO_SGLANG_UPGRADE_CMD") != null),
+        .llamacpp => configuration.environment.get("LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD") != null,
+    };
     const Capabilities = struct {
         canLaunch: bool,
-        canUpdate: bool = false,
+        canUpdate: bool,
         canInspectOptions: bool,
         supportsDocker: bool = false,
     };
     const Health = struct {
         status: []const u8,
+    };
+    const Update = struct {
+        currentVersion: ?[]const u8,
+        targetVersion: []const u8,
+        packageSpec: []const u8,
+        releaseNotesUrl: []const u8,
+        restartRequired: bool = true,
+        changes: []const []const u8,
     };
     const Target = struct {
         id: []const u8,
@@ -236,7 +249,27 @@ fn writeTarget(allocator: std.mem.Allocator, writer: *std.Io.Writer, configurati
         source: []const u8,
         capabilities: Capabilities,
         health: Health,
+        update: ?Update,
     };
+    const configured_vllm_version = if (configuration.environment.get("LOCAL_STUDIO_VLLM_UPGRADE_VERSION")) |value| std.mem.trim(u8, value, " \t\r\n") else "";
+    const update = if (can_update) Update{
+        .currentVersion = optionalString(info, "version"),
+        .targetVersion = if (backend == .vllm and configured_vllm_version.len > 0) configured_vllm_version else if (backend == .llamacpp) "configured" else "latest",
+        .packageSpec = switch (backend) {
+            .vllm => if (configured_vllm_version.len > 0) try std.fmt.allocPrint(allocator, "vllm=={s}", .{configured_vllm_version}) else "vllm",
+            .sglang => "sglang",
+            .llamacpp => "configured llama.cpp upgrade command",
+            .mlx => "mlx-lm",
+        },
+        .releaseNotesUrl = switch (backend) {
+            .vllm => "https://github.com/vllm-project/vllm/releases",
+            .sglang => "https://github.com/sgl-project/sglang/releases",
+            .llamacpp => "https://github.com/ggml-org/llama.cpp/releases",
+            .mlx => "https://github.com/ml-explore/mlx-lm/releases",
+        },
+        .changes = &.{ "Runtime package or binary", "Controller runtime target metadata after completion", "Running model process after restart or reload" },
+    } else null;
+    defer if (update) |value| if (backend == .vllm and configured_vllm_version.len > 0) allocator.free(value.packageSpec);
     try std.json.Stringify.value(Target{
         .id = id,
         .backend = backend_name,
@@ -250,9 +283,11 @@ fn writeTarget(allocator: std.mem.Allocator, writer: *std.Io.Writer, configurati
         .source = source,
         .capabilities = .{
             .canLaunch = installed,
+            .canUpdate = can_update,
             .canInspectOptions = installed and (backend == .vllm or backend == .llamacpp),
         },
         .health = .{ .status = if (installed) "ok" else "warning" },
+        .update = update,
     }, .{}, writer);
 }
 
