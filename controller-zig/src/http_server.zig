@@ -12,6 +12,7 @@ const lifecycle = @import("services/lifecycle.zig");
 const telemetry = @import("services/telemetry.zig");
 const system_service = @import("services/system.zig");
 const runtime_info = @import("services/runtime_info.zig");
+const metrics = @import("services/metrics.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -290,6 +291,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/devices")) {
         const response = try telemetry.devicePayload(allocator, io, system);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/metrics/vllm")) {
+        const response = try metrics.payload(allocator, io, client, database, recipe_column, inference_port, default_trust_remote_code, system, supervisor);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
