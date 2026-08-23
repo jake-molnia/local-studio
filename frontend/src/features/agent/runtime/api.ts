@@ -249,6 +249,7 @@ export function compactSession(args: CompactSessionArgs): Promise<CompactSession
 
 export type SubmitTurnArgs = {
   sessionId: string;
+  harness?: string;
   modelId: string;
   thinkingLevel?: import("@/features/agent/contracts").AgentThinkingLevel;
   toolAccess: AgentToolAccess;
@@ -256,6 +257,7 @@ export type SubmitTurnArgs = {
   images?: AgentImageInput[];
   cwd?: string;
   piSessionId?: string | null;
+  nativeSessionId?: string | null;
   /** Control mode for steer/follow-up; omitted for a normal prompt. */
   mode?: "steer" | "follow_up";
   queueAction?: AgentQueueAction;

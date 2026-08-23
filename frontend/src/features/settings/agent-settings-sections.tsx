@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { Schema } from "effect";
 import { StatusPill } from "@/ui";
 import {
   SettingsButton,
@@ -10,6 +11,31 @@ import { cleanSessionTitle } from "@/features/agent/messages/helpers";
 import { SESSIONS_CHANGED_EVENT } from "@/lib/workspace-events";
 import { useSidebarStatus } from "@/features/settings/use-sidebar-status";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+
+const HarnessCatalogSchema = Schema.Struct({
+  harnesses: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      status: Schema.String,
+      transport: Schema.String,
+      nodeCount: Schema.optional(Schema.Number),
+      installation: Schema.optional(
+        Schema.Union([
+          Schema.Null,
+          Schema.Struct({
+            source: Schema.String,
+            executable: Schema.String,
+            version: Schema.Union([Schema.Null, Schema.String]),
+          }),
+        ]),
+      ),
+      capabilities: Schema.Array(Schema.String),
+    }),
+  ),
+});
+
+type HarnessCatalog = Schema.Schema.Type<typeof HarnessCatalogSchema>;
 
 export function ArchivedChatsSettings() {
   type Session = {
@@ -125,8 +151,16 @@ export function ArchivedChatsSettings() {
   );
 }
 export function SetupChecksSettings() {
-  type Check = { id: string; label: string; ok: boolean; value: string; guidance: string };
+  type Check = {
+    id: string;
+    label: string;
+    ok: boolean;
+    value: string;
+    guidance: string;
+    blocking?: boolean;
+  };
   const [checks, setChecks] = useState<Check[]>([]);
+  const [harnesses, setHarnesses] = useState<HarnessCatalog["harnesses"]>([]);
   const controllerStatus = useSidebarStatus();
 
   useMountSubscription(() => {
@@ -134,6 +168,12 @@ export function SetupChecksSettings() {
       .then((res) => res.json() as Promise<{ checks?: Check[] }>)
       .then((payload) => setChecks(payload.checks ?? []))
       .catch(() => setChecks([]));
+    void fetch("/api/agent/harnesses", { cache: "no-store" })
+      .then((res) => res.json() as Promise<unknown>)
+      .then((payload) =>
+        setHarnesses([...Schema.decodeUnknownSync(HarnessCatalogSchema)(payload).harnesses]),
+      )
+      .catch(() => setHarnesses([]));
   }, []);
   const controllerCheck: Check = {
     id: "controller",
@@ -142,8 +182,20 @@ export function SetupChecksSettings() {
     value: controllerStatus.online ? controllerStatus.activityLine : "offline",
     guidance: "Set a reachable controller URL in Settings → Connection before using Agents.",
   };
-  const rows = [...checks, controllerCheck];
-  const blockers = rows.filter((check) => !check.ok);
+  const harnessChecks: Check[] = harnesses.map((harness) => ({
+    id: `harness-${harness.id}`,
+    label: `${harness.name} harness`,
+    ok: harness.status === "available",
+    value:
+      harness.installation?.version ??
+      (harness.nodeCount !== undefined ? `${harness.nodeCount} nodes` : harness.status),
+    guidance: harness.installation
+      ? `${harness.transport} via ${harness.installation.source}: ${harness.installation.executable}`
+      : `${harness.transport}; install or enroll a node that offers this harness.`,
+    blocking: false,
+  }));
+  const rows = [...checks, ...harnessChecks, controllerCheck];
+  const blockers = rows.filter((check) => !check.ok && check.blocking !== false);
   const setupRows: SettingsFactRow[] = rows.map((check) => ({
     key: check.id,
     label: check.label,

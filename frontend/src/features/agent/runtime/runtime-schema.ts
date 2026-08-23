@@ -16,6 +16,10 @@ const RuntimeLoggedEventSchema = Schema.Struct({
 export const RuntimeStatusSchema = Schema.Struct({
   active: Schema.optional(Schema.Boolean),
   running: Schema.optional(Schema.Boolean),
+  harness: Schema.optional(Schema.String),
+  harnessVersion: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
+  nativeSessionId: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   piSessionId: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   modelId: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   eventSeq: Schema.optional(Schema.Number),
@@ -33,8 +37,20 @@ const RuntimeStatusEventSchema = Schema.Struct({
 
 const RuntimePiEventSchema = Schema.Struct({
   type: Schema.Literal("pi"),
+  harness: Schema.optional(Schema.String),
   seq: Schema.optional(Schema.Number),
+  normalized: Schema.optional(
+    Schema.Union([
+      Schema.Null,
+      Schema.Struct({
+        type: Schema.String,
+        harness: Schema.String,
+        nativeType: Schema.String,
+      }),
+    ]),
+  ),
   event: Schema.Record(Schema.String, Schema.Unknown),
+  native: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
 
 const RuntimeEventPayloadSchema = Schema.Union([RuntimeStatusEventSchema, RuntimePiEventSchema]);

@@ -71,12 +71,14 @@ export const isAgentThinkingLevel = Schema.is(AgentThinkingLevelSchema);
 
 export type AgentTurnRequest = {
   sessionId: string;
+  harness: string;
   modelId: string;
   thinkingLevel?: AgentThinkingLevel;
   message: string;
   images: AgentImageInput[];
   cwd?: string;
   piSessionId: string | null;
+  nativeSessionId: string | null;
   toolAccess: AgentToolAccess;
   browserToolEnabled: boolean;
   browserSessionId?: string;
@@ -92,6 +94,10 @@ export type AgentTurnRequest = {
 export type AgentTurnRuntimeStatus = {
   active?: boolean;
   running?: boolean;
+  harness?: string;
+  harnessVersion?: string | null;
+  capabilities?: string[];
+  nativeSessionId?: string | null;
   piSessionId?: string | null;
   modelId?: string | null;
   eventSeq?: number;
@@ -110,6 +116,9 @@ export type AgentTurnCommandResult = {
   // it resolved the command to. The client sends the session id as that key
   // and does not read this back.
   runtimeSessionId: string;
+  harness?: string;
+  harnessVersion?: string | null;
+  nativeSessionId?: string | null;
   piSessionId?: string | null;
   active: boolean;
   status?: AgentTurnRuntimeStatus;
@@ -129,10 +138,14 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
   }
   const sessionId = stringField(body, "sessionId");
   if (!sessionId.ok) return sessionId;
+  const harness = stringField(body, "harness");
+  if (!harness.ok) return harness;
   const cwd = stringField(body, "cwd");
   if (!cwd.ok) return cwd;
   const piSessionId = stringField(body, "piSessionId");
   if (!piSessionId.ok) return piSessionId;
+  const nativeSessionId = stringField(body, "nativeSessionId");
+  if (!nativeSessionId.ok) return nativeSessionId;
   const browserSessionId = stringField(body, "browserSessionId");
   if (!browserSessionId.ok) return browserSessionId;
   const browserBackend = body.browserBackend === "chrome" ? "chrome" : "embedded";
@@ -161,12 +174,14 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
     ok: true,
     value: {
       sessionId: sessionId.value ?? "default",
+      harness: harness.value ?? "pi",
       modelId: modelId.value!,
       ...(thinkingLevel ? { thinkingLevel } : {}),
       message: message.value!,
       images: images.value,
       cwd: cwd.value,
       piSessionId: piSessionId.value ?? null,
+      nativeSessionId: nativeSessionId.value ?? piSessionId.value ?? null,
       toolAccess: body.toolAccess === "full" ? "full" : "read_only",
       browserToolEnabled: boolField(body, "browserToolEnabled"),
       browserSessionId: browserSessionId.value,
