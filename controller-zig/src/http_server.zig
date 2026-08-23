@@ -26,6 +26,8 @@ const benchmark_service = @import("services/benchmark.zig");
 const runtime_jobs_service = @import("services/runtime_jobs.zig");
 const huggingface_models = @import("services/huggingface_models.zig");
 const download_manager = @import("services/download_manager.zig");
+const provider_service = @import("services/providers.zig");
+const provider_catalog = @import("services/provider_catalog.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const downloads = @import("repository/downloads.zig");
@@ -362,6 +364,40 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId/cancel")) {
         return serveDownloadControl(allocator, configuration, download_state, client, database, request, .cancel);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/provider-models") and request.head.method == .GET) {
+        var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+        defer snapshot.deinit();
+        const response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/providers") and request.head.method == .GET) {
+        const response = try provider_service.listPayload(allocator, io, studio, configuration.data_dir);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/providers") and request.head.method == .POST) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = provider_service.createPayload(allocator, io, studio, configuration.data_dir, document) catch |failure| return respondProviderFailure(request, failure, null);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/providers/:id") and (request.head.method == .PUT or request.head.method == .DELETE)) {
+        const provider_id = try pathParameter(allocator, request.head.target, "/studio/providers/");
+        defer allocator.free(provider_id);
+        const response = if (request.head.method == .PUT) response: {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            break :response provider_service.updatePayload(allocator, io, studio, configuration.data_dir, provider_id, document) catch |failure| return respondProviderFailure(request, failure, provider_id);
+        } else provider_service.deletePayload(allocator, io, studio, configuration.data_dir, provider_id) catch |failure| return respondProviderFailure(request, failure, provider_id);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm")) {
         return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .vllm, request);
@@ -911,6 +947,33 @@ fn respondDownloadError(request: *http.Server.Request, status: http.Status, deta
     try output.writeByte('}');
     try request.respond(output.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
+}
+
+fn respondProviderFailure(request: *http.Server.Request, failure: anyerror, provider_id: ?[]const u8) !bool {
+    const status: http.Status = switch (failure) {
+        error.ProviderNotFound => .not_found,
+        error.ProviderSettingsTooLarge => .payload_too_large,
+        error.InvalidProviderPayload, error.ProviderIdRequired, error.ProviderNameRequired, error.ProviderBaseUrlRequired, error.ProviderExists, error.TooManyProviders, error.InvalidProvider, error.ProviderFieldTooLarge => .bad_request,
+        else => return failure,
+    };
+    const static_detail: []const u8 = switch (failure) {
+        error.InvalidProviderPayload => "Invalid provider payload",
+        error.ProviderIdRequired => "id is required",
+        error.ProviderNameRequired => "name is required",
+        error.ProviderBaseUrlRequired => "base_url is required",
+        error.ProviderExists => "Provider already exists",
+        error.TooManyProviders => "Too many providers",
+        error.InvalidProvider => "Invalid provider",
+        error.ProviderFieldTooLarge => "Provider field is too large",
+        error.ProviderSettingsTooLarge => "Provider settings are too large",
+        error.ProviderNotFound => "Provider not found",
+        else => unreachable,
+    };
+    if (failure != error.ProviderNotFound or provider_id == null or provider_id.?.len > 2048) return respondDownloadError(request, status, static_detail);
+    var buffer: [4096]u8 = undefined;
+    var output: Io.Writer = .fixed(&buffer);
+    try output.print("Provider \"{s}\" not found", .{provider_id.?});
+    return respondDownloadError(request, status, output.buffered());
 }
 
 fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {
