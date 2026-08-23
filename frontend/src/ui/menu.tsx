@@ -6,6 +6,7 @@ export type MenuItemProps = {
   Icon?: MenuItemIcon;
   danger?: boolean;
   disabled?: boolean;
+  title?: string;
   onClick: () => void;
   children: ReactNode;
 };
@@ -14,6 +15,7 @@ export function MenuItem({
   Icon,
   danger = false,
   disabled = false,
+  title,
   onClick,
   children,
 }: MenuItemProps) {
@@ -22,6 +24,7 @@ export function MenuItem({
       type="button"
       role="menuitem"
       data-ui-control="button"
+      title={title}
       onClick={onClick}
       disabled={disabled}
       className={
@@ -42,7 +45,13 @@ export function MenuItem({
   );
 }
 
-export function handleMenuKeyboard(event: KeyboardEvent<HTMLElement>) {
+export function handleMenuKeyboard(event: KeyboardEvent<HTMLElement>, onEscape?: () => void) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    onEscape?.();
+    return;
+  }
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(
     (item) => !item.hasAttribute("disabled"),
   );

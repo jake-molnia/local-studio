@@ -12,7 +12,7 @@ import type { SessionPref } from "@/features/agent/messages/prefs";
 import { hrefWithOpenNonce, visibleSessionAge } from "./helpers";
 import { PinButton, SessionStatusMark } from "./nav-chrome";
 
-const SESSION_MENU_CLASS = `absolute right-0 top-6 isolate z-[999] min-w-[180px] ${POPOVER_MENU_CLASS}`;
+const SESSION_MENU_CLASS = `ui-popover-enter absolute right-0 top-6 isolate z-[999] min-w-[180px] ${POPOVER_MENU_CLASS}`;
 
 type SessionNavRowProps = {
   pref: SessionPref;
@@ -337,7 +337,11 @@ function SessionOptionsMenu({
   };
 
   return (
-    <div className={SESSION_MENU_CLASS} role="menu" onKeyDown={handleMenuKeyboard}>
+    <div
+      className={SESSION_MENU_CLASS}
+      role="menu"
+      onKeyDown={(event) => handleMenuKeyboard(event, onClose)}
+    >
       <MenuItem Icon={pref.pinned ? PinOffIcon : PinIcon} onClick={run(onPin)}>
         {pref.pinned ? "Unpin" : "Pin"}
       </MenuItem>

@@ -45,6 +45,22 @@
   animation: ui-modal-enter var(--motion-standard) var(--ease-enter) both;
 }
 
+@keyframes ui-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ui-popover-enter {
+  animation: ui-popover-enter 120ms var(--ease-enter) both;
+  transform-origin: top center;
+}
+
 .ui-drawer-enter-right {
   animation: ui-drawer-enter-right var(--motion-panel) var(--ease-enter) both;
 }

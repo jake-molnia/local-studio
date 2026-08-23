@@ -10,7 +10,7 @@ import { setReasoningVisible } from "@/features/agent/messages/reasoning-pref";
 import { useReasoningVisible } from "@/features/agent/messages/use-reasoning-visible";
 import { MoreIcon } from "@/ui/icons";
 
-const CHAT_HEADER_MENU_CLASS = `absolute left-0 top-7 isolate z-[999] min-w-[180px] text-xs text-(--fg) opacity-100 ${POPOVER_MENU_CLASS}`;
+const CHAT_HEADER_MENU_CLASS = `ui-popover-enter absolute left-0 top-7 isolate z-[999] min-w-[180px] text-xs text-(--fg) opacity-100 ${POPOVER_MENU_CLASS}`;
 
 export function AgentChatPaneHeader({
   title,
@@ -113,7 +113,11 @@ export function AgentChatPaneHeader({
             <MoreIcon className="pointer-events-none h-3.5 w-3.5" />
           </button>
           {open ? (
-            <div className={CHAT_HEADER_MENU_CLASS} role="menu" onKeyDown={handleMenuKeyboard}>
+            <div
+              className={CHAT_HEADER_MENU_CLASS}
+              role="menu"
+              onKeyDown={(event) => handleMenuKeyboard(event, () => setOpen(false))}
+            >
               <MenuItem onClick={startRename}>Rename</MenuItem>
               <MenuItem
                 onClick={() => {
