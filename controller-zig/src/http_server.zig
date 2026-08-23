@@ -21,6 +21,7 @@ const model_files = @import("services/model_files.zig");
 const model_index = @import("services/model_index.zig");
 const studio_models = @import("services/studio_models.zig");
 const runtime_routes = @import("services/runtime_routes.zig");
+const vram_calculator = @import("services/vram_calculator.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -217,6 +218,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/vram-calculator")) {
+        return serveVramCalculator(allocator, io, configuration, system, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/models/delete")) {
         return serveStudioModelMutation(allocator, io, studio, request, .delete);
@@ -605,6 +609,42 @@ fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration
         try std.json.Stringify.value(detail, .{}, &output.writer);
         try output.writer.writeByte('}');
         try request.respond(output.writer.buffered(), .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    };
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn serveVramCalculator(allocator: std.mem.Allocator, io: Io, configuration: *const Config, system: *const system_info.Snapshot, request: *http.Server.Request) !bool {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{ .status = .payload_too_large, .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return false;
+    };
+    const response = vram_calculator.payload(allocator, io, system, configuration.models_dir, body_writer.buffered()) catch |failure| {
+        const detail: []const u8 = switch (failure) {
+            error.InvalidPayload => "Invalid payload",
+            error.ModelRequired => "model is required",
+            error.ModelOutsideRoot => "model must be inside models_dir",
+            error.ModelNotFound => "Model path not found",
+            error.WeightsNotFound => "Model weights not found",
+            else => return failure,
+        };
+        const status: http.Status = switch (failure) {
+            error.ModelNotFound, error.WeightsNotFound => .not_found,
+            else => .bad_request,
+        };
+        var output: Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"detail\":");
+        try std.json.Stringify.value(detail, .{}, &output.writer);
+        try output.writer.writeByte('}');
+        try request.respond(output.writer.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     };
     defer allocator.free(response);
