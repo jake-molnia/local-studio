@@ -1,27 +1,19 @@
 "use client";
 
 import {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Check, ChevronDown, ChevronRight, Pin } from "@/ui/icon-registry";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentModel } from "@/features/agent/workspace/types";
-import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
 import { cx } from "@/ui/utils";
-import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import { splitVisibleAgentModels } from "./model-visibility";
 
 export { AgentModelPicker } from "./agent-model-picker-controller";
 
-type AgentModelPickerProps = {
+export type AgentModelPickerProps = {
   models: AgentModel[];
   selectedModel: string;
   defaultModel?: string;
@@ -36,11 +28,8 @@ type AgentModelPickerProps = {
   onOpenChange?: (open: boolean) => void;
 };
 
-const PANEL_GAP_PX = 6;
-const VIEWPORT_MARGIN_PX = 8;
-
-type ModelGroup = { key: string; name: string; models: AgentModel[] };
-type PickerView = "inspector" | "models" | "reasoning";
+export type ModelGroup = { key: string; name: string; models: AgentModel[] };
+export type PickerView = "inspector" | "models" | "reasoning";
 
 const REASONING_LABELS: Record<AgentThinkingLevel, string> = {
   off: "Off",
@@ -64,372 +53,7 @@ const REASONING_MENU_LEVELS: readonly AgentThinkingLevel[] = [
   "off",
 ];
 
-export function LegacyAgentModelPicker({
-  models,
-  selectedModel,
-  defaultModel,
-  onSelect,
-  onSetDefault,
-  loading,
-  reasoningLevel,
-  reasoningLevels = [],
-  reasoningDisabled = false,
-  onSelectReasoning,
-  open: controlledOpen,
-  onOpenChange,
-}: AgentModelPickerProps) {
-  const [internalOpen, setInternalOpen] = useState(false);
-  const open = controlledOpen ?? internalOpen;
-  const [present, setPresent] = useState(open);
-  const [view, setView] = useState<PickerView>("inspector");
-  const [showOtherModels, setShowOtherModels] = useState(false);
-  const [modelQuery, setModelQuery] = useState("");
-  const [openSource, setOpenSource] = useState<"pointer" | "keyboard">("keyboard");
-  const active = models.find((model) => model.id === selectedModel) ?? null;
-  const visible = useMemo(
-    () => splitVisibleAgentModels(models, showOtherModels),
-    [models, showOtherModels],
-  );
-  const groups = useMemo(
-    () => groupModelsByController(visible.visibleModels),
-    [visible.visibleModels],
-  );
-  const filteredGroups = useMemo(() => {
-    const query = modelQuery.trim().toLocaleLowerCase();
-    if (!query) return groups;
-    return groups
-      .map((group) => ({
-        ...group,
-        models: group.models.filter((model) =>
-          [model.name, model.rawId, model.id, model.controllerName]
-            .filter(Boolean)
-            .some((value) => value?.toLocaleLowerCase().includes(query)),
-        ),
-      }))
-      .filter((group) => group.models.length > 0);
-  }, [groups, modelQuery]);
-  const disabled = loading;
-  const modelLabel = modelTriggerLabel(
-    active,
-    selectedModel,
-    loading,
-    visible.controllerModels.length,
-  );
-  const supportsReasoning = Boolean(
-    reasoningLevel && onSelectReasoning && reasoningLevels.length > 1,
-  );
-  const effectiveReasoning = reasoningLevels.includes(reasoningLevel ?? "off")
-    ? (reasoningLevel ?? "off")
-    : (reasoningLevels.at(-1) ?? "off");
-  const reasoningLabel = REASONING_LABELS[effectiveReasoning];
-  const selectedModelNotRunning = !loading && Boolean(active && active.active === false);
-  const anchorRef = useRef<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const nestedPanelRef = useRef<HTMLDivElement | null>(null);
-  const nestedAnchorRef = useRef<HTMLButtonElement | null>(null);
-  const [nestedPosition, setNestedPosition] = useState({ top: 0, left: 0 });
-  const [nestedReady, setNestedReady] = useState(false);
-  const updateOpen = useCallback(
-    (next: boolean) => {
-      if (next) setPresent(true);
-      if (controlledOpen === undefined) setInternalOpen(next);
-      onOpenChange?.(next);
-    },
-    [controlledOpen, onOpenChange],
-  );
-  const close = useCallback(() => {
-    updateOpen(false);
-    setView("inspector");
-    setNestedReady(false);
-    setModelQuery("");
-  }, [updateOpen]);
-  const closeAndFocus = useCallback(
-    (targetView: PickerView = "inspector") => {
-      close();
-      requestAnimationFrame(() =>
-        anchorRef.current
-          ?.querySelector<HTMLButtonElement>(`[data-picker-view="${targetView}"]`)
-          ?.focus(),
-      );
-    },
-    [close],
-  );
-
-  useMountSubscription(() => {
-    if (open) {
-      setPresent(true);
-      return;
-    }
-    const timeout = window.setTimeout(() => setPresent(false), 90);
-    return () => window.clearTimeout(timeout);
-  }, [open]);
-
-  useMountSubscription(() => {
-    if (!open || openSource !== "keyboard") return;
-    const frame = requestAnimationFrame(() => {
-      const selector =
-        view === "models"
-          ? 'input[type="search"], [role^="menuitem"]:not(:disabled)'
-          : '[role^="menuitem"]:not(:disabled)';
-      panelRef.current?.querySelector<HTMLElement>(selector)?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [open, openSource, view]);
-
-  useMountSubscription(() => {
-    if (!open || view === "inspector" || openSource !== "keyboard") return;
-    const frame = requestAnimationFrame(() => {
-      nestedPanelRef.current
-        ?.querySelector<HTMLElement>('input[type="search"], [role^="menuitem"]:not(:disabled)')
-        ?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [open, openSource, view]);
-
-  useMountSubscription(() => {
-    if (!open) return;
-    const onPointerDown = (event: globalThis.PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (
-        anchorRef.current?.contains(event.target) ||
-        panelRef.current?.contains(event.target) ||
-        nestedPanelRef.current?.contains(event.target)
-      )
-        return;
-      close();
-    };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      closeAndFocus();
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [close, closeAndFocus, open]);
-
-  const placeNestedPanel = useCallback(() => {
-    const trigger = nestedAnchorRef.current;
-    const panel = nestedPanelRef.current;
-    if (!trigger || !panel) return;
-    const rect = trigger.getBoundingClientRect();
-    const width = panel.offsetWidth;
-    const gap = PANEL_GAP_PX;
-    const left =
-      rect.right + gap + width <= window.innerWidth - VIEWPORT_MARGIN_PX
-        ? rect.right + gap
-        : rect.left - width - gap;
-    const top = Math.min(
-      Math.max(VIEWPORT_MARGIN_PX, rect.top),
-      Math.max(VIEWPORT_MARGIN_PX, window.innerHeight - panel.offsetHeight - VIEWPORT_MARGIN_PX),
-    );
-    setNestedPosition({
-      top: Math.round(top),
-      left: Math.round(Math.max(VIEWPORT_MARGIN_PX, left)),
-    });
-    setNestedReady(true);
-  }, []);
-
-  const openNested = useCallback(
-    (nextView: Exclude<PickerView, "inspector">, trigger: HTMLButtonElement | null) => {
-      nestedAnchorRef.current = trigger;
-      setNestedReady(false);
-      setView(nextView);
-      requestAnimationFrame(placeNestedPanel);
-    },
-    [placeNestedPanel],
-  );
-
-  const closeNestedAndFocus = useCallback(() => {
-    const trigger = nestedAnchorRef.current;
-    setNestedReady(false);
-    setView("inspector");
-    requestAnimationFrame(() => trigger?.focus());
-  }, []);
-
-  useMountSubscription(() => {
-    if (!open || view === "inspector") return;
-    const frame = requestAnimationFrame(placeNestedPanel);
-    window.addEventListener("resize", placeNestedPanel);
-    window.addEventListener("scroll", placeNestedPanel, true);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", placeNestedPanel);
-      window.removeEventListener("scroll", placeNestedPanel, true);
-    };
-  }, [open, placeNestedPanel, view]);
-
-  const placePanel = useCallback((node: HTMLDivElement | null) => {
-    panelRef.current = node;
-    if (!node) return;
-    const place = () => {
-      const anchor = anchorRef.current?.getBoundingClientRect();
-      if (!anchor) return;
-      const { offsetWidth: width, offsetHeight: height } = node;
-      const maxLeft = window.innerWidth - width - VIEWPORT_MARGIN_PX;
-      const left = Math.min(Math.max(VIEWPORT_MARGIN_PX, anchor.right - width), maxLeft);
-      const fitsBelow =
-        anchor.bottom + height + PANEL_GAP_PX <= window.innerHeight - VIEWPORT_MARGIN_PX;
-      const desiredTop = fitsBelow
-        ? anchor.bottom + PANEL_GAP_PX
-        : anchor.top - height - PANEL_GAP_PX;
-      const maxTop = Math.max(VIEWPORT_MARGIN_PX, window.innerHeight - height - VIEWPORT_MARGIN_PX);
-      const top = Math.min(maxTop, Math.max(VIEWPORT_MARGIN_PX, desiredTop));
-      node.dataset.placement = fitsBelow ? "below" : "above";
-      node.style.left = `${Math.round(Math.max(VIEWPORT_MARGIN_PX, left))}px`;
-      node.style.top = `${Math.round(top)}px`;
-    };
-    place();
-    const observer = new ResizeObserver(place);
-    observer.observe(node);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-      panelRef.current = null;
-    };
-  }, []);
-  return (
-    <div
-      ref={anchorRef}
-      className="relative min-w-0 shrink"
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (nextTarget instanceof Node) {
-          if (event.currentTarget.contains(nextTarget)) return;
-          if (panelRef.current?.contains(nextTarget)) return;
-          if (nestedPanelRef.current?.contains(nextTarget)) return;
-        }
-        close();
-      }}
-      onPointerDown={(event) => {
-        setOpenSource("pointer");
-        stopToolbarEvent(event);
-      }}
-      onMouseDown={(event) => {
-        setOpenSource("pointer");
-        stopToolbarEvent(event);
-      }}
-      onKeyDown={() => setOpenSource("keyboard")}
-    >
-      <div className="flex min-w-0 items-center gap-1">
-        <ModelPickerTrigger
-          view="inspector"
-          kind={supportsReasoning ? "Reasoning" : "Model"}
-          label={supportsReasoning ? reasoningLabel : modelLabel}
-          title={supportsReasoning ? `Reasoning: ${reasoningLabel}` : active?.name || modelLabel}
-          disabled={disabled}
-          open={open}
-          notRunning={selectedModelNotRunning}
-          onToggle={(event) => {
-            setOpenSource(event.detail > 0 ? "pointer" : "keyboard");
-            if (disabled) return;
-            if (open && view === "inspector") close();
-            else {
-              setView("inspector");
-              updateOpen(true);
-            }
-          }}
-        />
-      </div>
-      {present && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={placePanel}
-              className={`composer-popover ${open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"} fixed z-[300] w-[11rem] max-w-[calc(100vw-1rem)] overflow-visible p-1 ${POPOVER_SURFACE_CLASS}`}
-              role="menu"
-              aria-hidden={!open}
-              data-open-source={openSource}
-              aria-label="Model settings"
-              onKeyDown={(event) => {
-                setOpenSource("keyboard");
-                handleMenuKeyDown(event, closeAndFocus);
-              }}
-              onPointerDown={stopToolbarEvent}
-              onMouseDown={stopToolbarEvent}
-            >
-              <PickerInspector
-                activeView={view}
-                modelLabel={modelLabel}
-                reasoningLabel={supportsReasoning ? reasoningLabel : null}
-                reasoningDisabled={reasoningDisabled}
-                onOpenModel={(trigger) => openNested("models", trigger)}
-                onOpenReasoning={(trigger) => openNested("reasoning", trigger)}
-              />
-            </div>,
-            document.body,
-          )
-        : null}
-      {present && open && view !== "inspector" && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={(node) => {
-                nestedPanelRef.current = node;
-                if (node) requestAnimationFrame(placeNestedPanel);
-              }}
-              className={`fixed z-[301] max-w-[calc(100vw-1rem)] overflow-visible p-1 ${nestedReady ? "composer-popover-enter" : ""} ${view === "models" ? "w-[18rem]" : "w-[11rem]"} ${POPOVER_SURFACE_CLASS}`}
-              style={{
-                top: nestedPosition.top,
-                left: nestedPosition.left,
-                visibility: nestedReady ? "visible" : "hidden",
-              }}
-              role="menu"
-              aria-label={view === "models" ? "Models" : "Reasoning"}
-              onKeyDown={(event) => {
-                setOpenSource("keyboard");
-                if (event.key === "ArrowLeft") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  closeNestedAndFocus();
-                  return;
-                }
-                handleMenuKeyDown(event, closeAndFocus);
-              }}
-              onPointerDown={stopToolbarEvent}
-              onMouseDown={stopToolbarEvent}
-            >
-              {view === "models" ? (
-                <ModelList
-                  groups={filteredGroups}
-                  query={modelQuery}
-                  onQueryChange={setModelQuery}
-                  selectedModel={selectedModel}
-                  defaultModel={defaultModel}
-                  showOtherModels={showOtherModels}
-                  otherModelCount={visible.otherModels.length}
-                  onSelect={(modelId) => {
-                    onSelect(modelId);
-                    closeAndFocus();
-                  }}
-                  onSetDefault={onSetDefault}
-                  onToggleOtherModels={() => setShowOtherModels((current) => !current)}
-                  onClose={close}
-                />
-              ) : onSelectReasoning ? (
-                <ReasoningList
-                  value={effectiveReasoning}
-                  levels={reasoningLevels}
-                  disabled={reasoningDisabled}
-                  onSelect={(level) => {
-                    onSelectReasoning(level);
-                    closeAndFocus();
-                  }}
-                />
-              ) : null}
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
-  );
-}
-
-function PickerHeader({ title }: { title: string }) {
+export function PickerHeader({ title }: { title: string }) {
   return (
     <div className="flex h-7 items-center gap-0.5 border-b border-(--border) px-1 pb-0.5">
       <span className="px-1 text-[length:var(--fs-sm)] font-medium text-(--dim)">{title}</span>
@@ -437,7 +61,7 @@ function PickerHeader({ title }: { title: string }) {
   );
 }
 
-function PickerInspector({
+export function PickerInspector({
   activeView,
   modelLabel,
   reasoningLabel,
@@ -509,7 +133,7 @@ function PickerInspector({
   );
 }
 
-function ModelList({
+export function ModelList({
   groups,
   query,
   onQueryChange,
@@ -622,7 +246,7 @@ function ModelList({
   );
 }
 
-function ReasoningList({
+export function ReasoningList({
   value,
   levels,
   disabled,
@@ -659,7 +283,7 @@ function ReasoningList({
   );
 }
 
-function ModelPickerTrigger({
+export function ModelPickerTrigger({
   view,
   kind,
   label,
@@ -703,7 +327,7 @@ function ModelPickerTrigger({
   );
 }
 
-function ModelOptions({
+export function ModelOptions({
   models,
   selectedModel,
   defaultModel,
@@ -728,7 +352,7 @@ function ModelOptions({
   ));
 }
 
-function ModelOption({
+export function ModelOption({
   model,
   selected,
   isDefault,
@@ -779,7 +403,7 @@ function ModelOption({
   );
 }
 
-function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, close: () => void) {
+export function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, close: () => void) {
   if (event.key === "Escape") {
     event.preventDefault();
     close();
@@ -800,7 +424,7 @@ function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, close: () 
   items[nextIndex]?.focus();
 }
 
-function modelTriggerLabel(
+export function modelTriggerLabel(
   active: AgentModel | null,
   selectedModel: string,
   loading: boolean,
@@ -811,11 +435,11 @@ function modelTriggerLabel(
   return active?.rawId || active?.name || fallbackLabel;
 }
 
-function controllerGroupKey(model: AgentModel): string {
+export function controllerGroupKey(model: AgentModel): string {
   return model.controllerUrl ?? model.controllerName ?? "primary";
 }
 
-function groupModelsByController(models: AgentModel[]): ModelGroup[] {
+export function groupModelsByController(models: AgentModel[]): ModelGroup[] {
   const groups = new Map<string, ModelGroup>();
   for (const model of models) {
     const key = controllerGroupKey(model);
@@ -826,6 +450,6 @@ function groupModelsByController(models: AgentModel[]): ModelGroup[] {
   return [...groups.values()];
 }
 
-function stopToolbarEvent(event: MouseEvent | PointerEvent) {
+export function stopToolbarEvent(event: MouseEvent | PointerEvent) {
   event.stopPropagation();
 }
