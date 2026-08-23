@@ -17,13 +17,7 @@
 
   .workbench-tab-strip {
     max-width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-  }
-
-  .workbench-tab-strip::-webkit-scrollbar {
-    display: none;
+    overflow: visible;
   }
 
   .workbench-tab {

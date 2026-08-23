@@ -111,7 +111,7 @@ export function NavItemDesktop({
       href={href}
       prefetch={false}
       title={label}
-      className={`group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 transition-colors ${
+      className={`group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 transition-colors duration-[var(--motion-fast)] ${
         active ? "bg-(--active) text-(--fg)" : "text-(--fg)/85 hover:bg-(--hover) hover:text-(--fg)"
       }`}
     >
@@ -140,12 +140,12 @@ export function NavActionDesktop({
       type="button"
       onClick={onClick}
       title={shortcut ? `${label} (${shortcut})` : label}
-      className="group flex h-[var(--sidebar-row-height)] w-full shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-(--fg)/85 transition-colors hover:bg-(--hover) hover:text-(--fg)"
+      className="group flex h-[var(--sidebar-row-height)] w-full shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-(--fg)/85 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 opacity-58 group-hover:opacity-95" strokeWidth={1.6} />
       <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)]">{label}</span>
       {shortcut ? (
-        <kbd className="w-7 rounded-[3px] border border-(--border) px-1 text-center text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity group-hover:opacity-100">
+        <kbd className="w-7 text-right text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
           {shortcut}
         </kbd>
       ) : null}

@@ -1,4 +1,10 @@
-import type { ComponentType, DragEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useMemo,
+  useState,
+  type ComponentType,
+  type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   Activity,
   ChatIcon,
@@ -6,7 +12,6 @@ import {
   FolderTree,
   GitBranch,
   Globe2,
-  NewTaskIcon,
   TerminalSquare,
   Wrench,
 } from "@/ui/icon-registry";
@@ -15,6 +20,7 @@ import type { ComputerTab } from "@/features/agent/tools/types";
 import { COMPUTER_TAB_TITLES, type WorkbenchTab } from "@/features/workbench/model";
 import { handleLauncherKeyDown, projectInitial } from "@/features/workbench/workbench-tab-helpers";
 import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
+import { cx } from "@/ui/utils";
 
 type WorkbenchIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -59,21 +65,18 @@ export function WorkbenchProjectTabList({
     <div
       role="tablist"
       aria-label={`${projectName}, ${threadTitle} tabs`}
-      className="flex min-w-0 flex-1 items-stretch gap-0 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex min-w-0 items-stretch gap-0 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div
         role="presentation"
-        className="flex h-full min-w-0 shrink-0 items-center gap-1.5 border-r border-(--border)/70 pr-2"
+        className="flex h-full min-w-0 shrink-0 items-center gap-1 border-r border-(--border)/55 px-1.5"
         title={`${projectName} · ${threadTitle}`}
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-(--border)/80 bg-(--fg)/4 text-(--hl2)">
-          <span className="text-[9px] font-semibold leading-none">
-            {projectInitial(projectName)}
-          </span>
+        <span className="shrink-0 text-[9px] font-semibold leading-none text-(--hl2)">
+          {projectInitial(projectName)}
         </span>
-        <span className="flex max-w-[170px] flex-col truncate leading-tight">
-          <span className="truncate text-[10px] font-medium text-(--fg)">{projectName}</span>
-          <span className="truncate text-[9px] text-(--dim)">{threadTitle}</span>
+        <span className="max-w-[150px] truncate text-[10px] text-(--dim)">
+          {projectName} · {threadTitle}
         </span>
       </div>
       {orderedTabs.map((tab, index) => (
@@ -143,8 +146,8 @@ export function WorkbenchTabButton({
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
-      className={`workbench-tab group relative flex h-full shrink-0 items-center gap-1 border-r border-t px-2 text-left text-[11px] transition-colors duration-[var(--motion-fast)] ${
-        tab.kind === "task" ? "w-[104px] max-w-[104px]" : "w-[100px] max-w-[100px]"
+      className={`workbench-tab group relative flex h-full shrink-0 items-center gap-1 border border-l-0 px-2 text-left text-[11px] transition-colors duration-[var(--motion-fast)] ${
+        tab.kind === "task" ? "w-[96px] max-w-[96px]" : "w-[92px] max-w-[92px]"
       } ${
         active
           ? "border-(--border) border-b-(--agent-bg) bg-(--agent-bg) text-(--fg)"
@@ -192,7 +195,10 @@ export function WorkbenchTabButton({
             event.stopPropagation();
             onClose();
           }}
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] group-hover:opacity-75 focus-visible:opacity-75 hover:bg-(--fg)/8 hover:text-(--fg)"
+          className={cx(
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-(--dim) transition-[background-color,color,opacity] duration-[var(--motion-fast)] focus-visible:opacity-100 hover:bg-(--fg)/8 hover:text-(--fg)",
+            active ? "opacity-75" : "opacity-0 group-hover:opacity-75",
+          )}
         >
           <CloseIcon className="h-2.5 w-2.5" />
         </button>
@@ -202,16 +208,30 @@ export function WorkbenchTabButton({
 }
 
 export function WorkbenchLauncher({
-  threadTitle,
-  onNewTask,
   onOpenTool,
   onDismiss,
 }: {
-  threadTitle: string;
-  onNewTask: () => void;
   onOpenTool: (tool: ComputerTab) => void;
   onDismiss: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const entries = useMemo(
+    () =>
+      [
+        ["side-chat", ChatIcon],
+        ["terminal", TerminalSquare],
+        ["browser", Globe2],
+        ["files", FolderTree],
+        ["diff", GitBranch],
+        ["status", Activity],
+        ["tools", Wrench],
+      ] as const,
+    [],
+  );
+  const normalized = query.trim().toLowerCase();
+  const visible = entries.filter(([tool]) =>
+    COMPUTER_TAB_TITLES[tool].toLowerCase().includes(normalized),
+  );
   return (
     <div
       className={`absolute right-1 top-[calc(100%+4px)] z-[180] w-52 p-1 ${POPOVER_SURFACE_CLASS}`}
@@ -219,47 +239,28 @@ export function WorkbenchLauncher({
       aria-label="Open thread tab"
       onKeyDown={(event) => handleLauncherKeyDown(event, onDismiss)}
     >
-      <div className="truncate px-2 pb-1 pt-0.5 text-[10px] font-medium text-(--dim)">
-        {threadTitle}
-      </div>
-      <LauncherItem icon={NewTaskIcon} label="New task" shortcut="⌘T" onClick={onNewTask} />
-      <div className="my-1 h-px bg-(--border)" />
-      <div className="px-2 pb-1 pt-0.5 text-[10px] font-medium text-(--dim)">Local tools</div>
-      <LauncherItem
-        icon={ChatIcon}
-        label={COMPUTER_TAB_TITLES["side-chat"]}
-        onClick={() => onOpenTool("side-chat")}
+      <input
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search tools"
+        aria-label="Search tools"
+        className="mb-1 h-7 w-full rounded-[4px] bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none placeholder:text-(--dim) focus:ring-1 focus:ring-(--accent)/35"
       />
-      <LauncherItem
-        icon={TerminalSquare}
-        label={COMPUTER_TAB_TITLES.terminal}
-        onClick={() => onOpenTool("terminal")}
-      />
-      <LauncherItem
-        icon={Globe2}
-        label={COMPUTER_TAB_TITLES.browser}
-        onClick={() => onOpenTool("browser")}
-      />
-      <LauncherItem
-        icon={FolderTree}
-        label={COMPUTER_TAB_TITLES.files}
-        onClick={() => onOpenTool("files")}
-      />
-      <LauncherItem
-        icon={GitBranch}
-        label={COMPUTER_TAB_TITLES.diff}
-        onClick={() => onOpenTool("diff")}
-      />
-      <LauncherItem
-        icon={Activity}
-        label={COMPUTER_TAB_TITLES.status}
-        onClick={() => onOpenTool("status")}
-      />
-      <LauncherItem
-        icon={Wrench}
-        label={COMPUTER_TAB_TITLES.tools}
-        onClick={() => onOpenTool("tools")}
-      />
+      {visible.length ? (
+        visible.map(([tool, Icon]) => (
+          <LauncherItem
+            key={tool}
+            icon={Icon}
+            label={COMPUTER_TAB_TITLES[tool]}
+            onClick={() => onOpenTool(tool)}
+          />
+        ))
+      ) : (
+        <div className="px-2 py-2 text-center text-[length:var(--fs-xs)] text-(--dim)">
+          No matching tools
+        </div>
+      )}
     </div>
   );
 }
@@ -279,6 +280,7 @@ function LauncherItem({
     <button
       type="button"
       role="menuitem"
+      data-ui-control="compact"
       onClick={onClick}
       className="flex h-6 w-full items-center gap-1.5 rounded-[var(--ui-radius-control)] px-1.5 text-left text-[length:var(--fs-xs)] text-(--fg)/90 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover)"
     >

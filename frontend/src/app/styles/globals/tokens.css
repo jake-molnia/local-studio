@@ -430,7 +430,7 @@
 
 :root {
   --sidebar-w: 194px;
-  --sidebar-row-height: 24px;
+  --sidebar-row-height: 22px;
   --sidebar-row-gap: 1px;
   --sidebar-row-radius: 4px;
   --sidebar-padding-x: 6px;
@@ -470,7 +470,7 @@
      inherited body size. */
   --fs-display: calc(40px * var(--ui-scale));
 
-  --workbench-tab-height: 30px;
+  --workbench-tab-height: 26px;
   --workbench-tab-min-width: 72px;
   --workbench-tab-max-width: 184px;
   --workbench-tab-icon-size: 12px;

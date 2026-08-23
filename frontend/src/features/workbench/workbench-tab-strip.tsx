@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Menu, Plus } from "@/ui/icon-registry";
+import { Menu, PanelLeftHollow, Plus } from "@/ui/icon-registry";
 import { uniqueOpenSessions, useOpenSessions } from "@/features/agent/session-index";
 import { useProjects } from "@/features/agent/projects/context";
 import { useComputerTools, useToolsActions } from "@/features/agent/tools/context";
@@ -62,6 +62,8 @@ export function WorkbenchTabStrip() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const setMobileNavOpen = useAppStore((store) => store.setMobileNavOpen);
+  const sidebarExpanded = useAppStore((store) => store.desktopSidebarPinnedOpen);
+  const setSidebarExpanded = useAppStore((store) => store.setDesktopSidebarPinnedOpen);
   const projects = useProjects();
   const computer = useComputerTools();
   const tools = useToolsActions();
@@ -441,7 +443,7 @@ export function WorkbenchTabStrip() {
   useMountSubscription(() => {
     if (!launcherOpen) return;
     const frame = requestAnimationFrame(() => {
-      launcherRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+      launcherRef.current?.querySelector<HTMLElement>('input, [role="menuitem"]')?.focus();
     });
     const onPointerDown = (event: PointerEvent) => {
       if (!launcherRef.current?.contains(event.target as Node)) setLauncherOpen(false);
@@ -507,8 +509,21 @@ export function WorkbenchTabStrip() {
 
   return (
     <header className="workbench-tab-strip relative flex h-[var(--workbench-tab-height)] shrink-0 border-b border-(--border) bg-(--color-header)">
+      {!sidebarExpanded ? (
+        <button
+          type="button"
+          data-ui-control="compact"
+          onClick={() => setSidebarExpanded(true)}
+          className="hidden h-full w-8 shrink-0 items-center justify-center border-r border-(--border) text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) md:flex"
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          <PanelLeftHollow className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </button>
+      ) : null}
       <button
         type="button"
+        data-ui-control="compact"
         onClick={() => setMobileNavOpen(true)}
         className="flex h-full w-8 shrink-0 items-center justify-center border-r border-(--border) text-(--dim) transition-colors hover:bg-(--hover) hover:text-(--fg) md:hidden"
         aria-label="Open navigation menu"
@@ -539,6 +554,7 @@ export function WorkbenchTabStrip() {
       >
         <button
           type="button"
+          data-ui-control="compact"
           onClick={() => setLauncherOpen((open) => !open)}
           className="flex h-full w-8 items-center justify-center text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
           aria-label="Open thread tab"
@@ -550,8 +566,6 @@ export function WorkbenchTabStrip() {
         </button>
         {launcherOpen ? (
           <WorkbenchLauncher
-            threadTitle={activeScope.groupTitle}
-            onNewTask={openNewTask}
             onOpenTool={(tool) => activateTab(toolTab(tool, activeScope))}
             onDismiss={() => {
               setLauncherOpen(false);

@@ -262,6 +262,7 @@ export function handleLauncherKeyDown(
     onDismiss();
     return;
   }
+  if (event.target instanceof HTMLInputElement && event.key !== "ArrowDown") return;
   const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
   if (items.length === 0) return;
   const currentIndex = items.findIndex((item) => item === document.activeElement);
