@@ -59,7 +59,9 @@ export class HeadProviderService {
   }
 
   public list(): Promise<ProviderView[]> {
-    return Promise.all([...this.#providers.values()].map((provider) => provider.view()));
+    return Promise.all(
+      [...this.#providers.values()].map((provider) => provider.view().catch(() => null)),
+    ).then((views) => views.filter((view): view is ProviderView => view !== null));
   }
 
   public models(providerId: string): Promise<HeadProviderModel[]> {
@@ -69,7 +71,10 @@ export class HeadProviderService {
   public catalogs(): Promise<HeadProviderCatalog[]> {
     return Promise.all(
       [...this.#providers.values()].map((provider) =>
-        provider.models().then((models) => ({ providerId: provider.id, models })),
+        provider
+          .models()
+          .then((models) => ({ providerId: provider.id, models }))
+          .catch(() => ({ providerId: provider.id, models: [] })),
       ),
     );
   }

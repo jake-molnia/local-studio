@@ -193,12 +193,16 @@ export const makeAppContext = Effect.gen(function* () {
     store: compute.store,
     getRecipe: (recipeId) => recipeStore.get(recipeId),
   });
-  const cursorProvider = yield* initialize(
-    "cursor-provider.open",
-    Effect.tryPromise({
-      try: () => CursorProviderService.open(config.data_dir),
-      catch: (source) => source,
-    }),
+  const cursorProvider = yield* Effect.tryPromise({
+    try: () => CursorProviderService.open(config.data_dir),
+    catch: (source) => source,
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        logger.warn("Cursor provider initialization failed", { error: String(error) });
+        return null;
+      }),
+    ),
   );
   const headProviders = yield* Effect.acquireRelease(
     initializeSync(
@@ -206,7 +210,7 @@ export const makeAppContext = Effect.gen(function* () {
       () =>
         new HeadProviderService([
           new CodexProviderService(config.data_dir),
-          cursorProvider,
+          ...(cursorProvider ? [cursorProvider] : []),
         ]),
     ),
     (resource) => Effect.sync(() => resource.shutdown()),
