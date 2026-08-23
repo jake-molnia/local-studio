@@ -148,6 +148,15 @@ export function ComposerProjectDrawer({
     setPanelPosition({ top, left, width });
     setPanelReady(true);
   }, [contextTriggerRef]);
+  const setPanelNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      panelRef.current = node;
+      if (!node || !open) return;
+      positionPanel();
+      requestAnimationFrame(() => searchRef.current?.focus());
+    },
+    [open, positionPanel],
+  );
   const {
     goal,
     error: goalError,
@@ -292,7 +301,7 @@ export function ComposerProjectDrawer({
         {panelPresent && typeof document !== "undefined"
           ? createPortal(
               <div
-                ref={panelRef}
+                ref={setPanelNode}
                 style={{
                   top: panelPosition.top,
                   left: panelPosition.left,
@@ -325,6 +334,7 @@ export function ComposerProjectDrawer({
                     ) : null}
                     <input
                       ref={searchRef}
+                      autoFocus
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder={view === "projects" ? "Search projects…" : "Search context…"}
