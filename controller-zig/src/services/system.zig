@@ -7,7 +7,7 @@ const runtime_info = @import("runtime_info.zig");
 
 const Io = std.Io;
 
-pub fn configPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) ![]u8 {
+pub fn configPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, models_dir: []const u8, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) ![]u8 {
     const runtime = try runtime_cache.payload(allocator, config, system);
     defer allocator.free(runtime);
     const inference_running = try supervisor.isRunning();
@@ -79,7 +79,7 @@ pub fn configPayload(allocator: std.mem.Allocator, io: Io, config: *const config
             .port = config.port,
             .inference_port = config.inference_port,
             .api_key_configured = config.api_key != null,
-            .models_dir = config.models_dir,
+            .models_dir = models_dir,
             .data_dir = config.data_dir,
             .db_path = config.db_path,
             .sglang_python = config.sglang_python,
@@ -267,8 +267,8 @@ pub fn computeEnginesPayload(allocator: std.mem.Allocator, io: Io, config: *cons
     return try output.toOwnedSlice();
 }
 
-pub fn runtimeSummaryPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, database: anytype, recipe_column: anytype, default_trust_remote_code: bool) ![]u8 {
-    const config_document = try configPayload(allocator, io, config, system, supervisor, runtime_cache);
+pub fn runtimeSummaryPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, models_dir: []const u8, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, database: anytype, recipe_column: anytype, default_trust_remote_code: bool) ![]u8 {
+    const config_document = try configPayload(allocator, io, config, models_dir, system, supervisor, runtime_cache);
     defer allocator.free(config_document);
     var parsed_config = std.json.parseFromSlice(std.json.Value, allocator, config_document, .{}) catch return error.InvalidSystemPayload;
     defer parsed_config.deinit();

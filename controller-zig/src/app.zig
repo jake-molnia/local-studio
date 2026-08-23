@@ -2,6 +2,7 @@ const std = @import("std");
 const config_module = @import("config.zig");
 const http_server = @import("http_server.zig");
 const system_info = @import("platform/system_info.zig");
+const controller_settings = @import("repository/controller_settings.zig");
 const rig_node_credentials = @import("repository/rig_node_credentials.zig");
 const rigs = @import("repository/rigs.zig");
 const recipes = @import("repository/recipes.zig");
@@ -32,6 +33,7 @@ pub const App = struct {
         if (!try database.quickCheck()) return error.DatabaseIntegrityCheckFailed;
         try rigs.initialize(&database);
         try rig_node_credentials.initialize(&database);
+        try controller_settings.initialize(&database);
         const recipe_column = try recipes.initialize(&database);
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});
 

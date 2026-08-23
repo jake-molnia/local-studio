@@ -14,6 +14,7 @@ const system_service = @import("services/system.zig");
 const runtime_info = @import("services/runtime_info.zig");
 const metrics = @import("services/metrics.zig");
 const logs = @import("services/logs.zig");
+const studio_settings = @import("services/studio_settings.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -26,6 +27,7 @@ const net = Io.net;
 const http = std.http;
 const max_connection_tasks = 256;
 const max_chat_request_bytes = 16 * 1024 * 1024;
+const max_settings_request_bytes = 64 * 1024;
 
 const ConnectionLimiter = struct {
     active: std.atomic.Value(usize) = .init(0),
@@ -48,22 +50,27 @@ pub const HttpServer = struct {
     config: Config,
     listener: net.Server,
     client: http.Client,
+    studio: studio_settings.State,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
         const address = try net.IpAddress.parse(config.host, config.port);
+        var studio = try studio_settings.State.init(allocator, config.models_dir);
+        errdefer studio.deinit();
         return .{
             .allocator = allocator,
             .io = io,
             .config = config,
             .listener = try address.listen(io, .{ .reuse_address = true }),
             .client = .{ .allocator = allocator, .io = io },
+            .studio = studio,
         };
     }
 
     pub fn deinit(server: *HttpServer) void {
         server.listener.deinit(server.io);
         server.client.deinit();
+        server.studio.deinit();
     }
 
     pub fn run(server: *HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) !void {
@@ -78,7 +85,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -86,7 +93,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -108,7 +115,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -125,7 +132,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -170,6 +177,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/settings") and request.head.method == .GET) {
+        const response = try studio_settings.payload(allocator, io, configuration, studio, database);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/settings") and request.head.method == .POST) {
+        return serveStudioSettingsUpdate(allocator, io, configuration, studio, database, request);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
@@ -273,7 +289,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/config")) {
-        const response = try system_service.configPayload(allocator, io, configuration, system, supervisor, runtime_cache);
+        const models_dir = try studio.modelsDirectory(allocator, io);
+        defer allocator.free(models_dir);
+        const response = try system_service.configPayload(allocator, io, configuration, models_dir, system, supervisor, runtime_cache);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -303,7 +321,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/events")) {
-        try serveControllerEvents(allocator, io, client, database, recipe_column, configuration, default_trust_remote_code, system, supervisor, runtime_cache, request);
+        try serveControllerEvents(allocator, io, client, database, recipe_column, configuration, studio, default_trust_remote_code, system, supervisor, runtime_cache, request);
         return false;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/logs") and request.head.method == .GET) {
@@ -459,6 +477,41 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         .status = .not_implemented,
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
+    return request.head.keep_alive;
+}
+
+fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const response = studio_settings.updatePayload(allocator, io, configuration, studio, database, body_writer.buffered()) catch |failure| {
+        const detail = switch (failure) {
+            error.InvalidSettingsPayload => "Invalid JSON body",
+            error.NoSupportedSettings => "No supported settings provided",
+            error.InvalidModelsDirectory => "models_dir must be a string or null",
+            error.InvalidUiPreferences => "ui_preferences must be an object of string values or null",
+            else => return failure,
+        };
+        var output: Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"detail\":");
+        try std.json.Stringify.value(detail, .{}, &output.writer);
+        try output.writer.writeByte('}');
+        try request.respond(output.writer.buffered(), .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    };
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
 }
 
@@ -918,7 +971,7 @@ fn serveSse(io: Io, request: *http.Server.Request) !void {
     }
 }
 
-fn serveControllerEvents(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, configuration: *const Config, default_trust_remote_code: bool, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, request: *http.Server.Request) !void {
+fn serveControllerEvents(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, configuration: *const Config, studio: *studio_settings.State, default_trust_remote_code: bool, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, request: *http.Server.Request) !void {
     var stream_buffer: [16 * 1024]u8 = undefined;
     var body = try request.respondStreaming(&stream_buffer, .{
         .respond_options = .{
@@ -947,7 +1000,9 @@ fn serveControllerEvents(allocator: std.mem.Allocator, io: Io, client: *http.Cli
 
         const now = Io.Clock.awake.now(io);
         if (runtime_at == null or runtime_at.?.durationTo(now).toSeconds() >= 30) {
-            const runtime = try system_service.runtimeSummaryPayload(allocator, io, configuration, system, supervisor, runtime_cache, database, recipe_column, default_trust_remote_code);
+            const models_dir = try studio.modelsDirectory(allocator, io);
+            defer allocator.free(models_dir);
+            const runtime = try system_service.runtimeSummaryPayload(allocator, io, configuration, models_dir, system, supervisor, runtime_cache, database, recipe_column, default_trust_remote_code);
             defer allocator.free(runtime);
             try writeControllerEvent(io, &body, "runtime_summary", runtime, &sequence);
             runtime_at = now;

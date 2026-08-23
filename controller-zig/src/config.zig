@@ -1,4 +1,5 @@
 const std = @import("std");
+const studio_settings = @import("repository/studio_settings.zig");
 
 pub const Mode = enum {
     head,
@@ -69,7 +70,9 @@ pub const Config = struct {
         const inference_host = try allocator.dupe(u8, init.environ_map.get("LOCAL_STUDIO_INFERENCE_HOST") orelse "localhost");
         const inference_port = try parsePort(init.environ_map.get("LOCAL_STUDIO_INFERENCE_PORT") orelse "8000");
         const inference_origin = try std.fmt.allocPrint(allocator, "http://{s}:{d}", .{ inference_host, inference_port });
-        const models_dir = try absolutePath(allocator, cwd, models_value);
+        var persisted = try studio_settings.load(init.gpa, init.io, data_dir);
+        defer persisted.deinit();
+        const models_dir = try absolutePath(allocator, cwd, persisted.models_dir orelse models_value);
         const api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY"));
         const sglang_python = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_SGLANG_PYTHON"));
         const llama_bin = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_LLAMA_BIN"));
