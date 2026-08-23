@@ -10,7 +10,7 @@ import {
   profileImageFromFile,
   useLocalProfile,
 } from "@/features/shell/local-profile";
-import { useUsage } from "./use-usage";
+import { useUsage, type UsageTarget } from "./use-usage";
 import { UsageSkeleton } from "./usage-skeleton";
 import { UsageModelsTab } from "./usage-models-tab";
 import { UsageActivityTab } from "./usage-activity-tab";
@@ -78,8 +78,14 @@ const milliseconds = (value: number | null): string =>
  * six-cell grid. Those six are true of the whole retention window, so they sit
  * above the tab strip rather than inside any one tab.
  */
-export default function UsagePage() {
-  const { stats, loading, error, loadStats, head } = useUsage();
+export default function UsagePage({
+  embedded = false,
+  target,
+}: {
+  embedded?: boolean;
+  target?: UsageTarget;
+}) {
+  const { stats, loading, error, loadStats, head } = useUsage(target);
   const [tab, setTab] = useState<UsageTab>("models");
   const [profile, updateProfile] = useLocalProfile();
   const [imageError, setImageError] = useState("");
@@ -95,28 +101,29 @@ export default function UsagePage() {
     }
   };
 
-  if (loading && !stats) return <UsageSkeleton />;
+  if (loading && !stats) return <UsageSkeleton embedded={embedded} />;
 
   if (error && !stats) {
-    return (
-      <AppPage>
-        <div className="mx-auto flex max-w-md flex-col items-start gap-3 py-16">
-          <ErrorBox>{error}</ErrorBox>
-          <Button variant="secondary" onClick={loadStats}>
-            Retry
-          </Button>
-        </div>
-      </AppPage>
+    const errorContent = (
+      <div className="mx-auto flex max-w-md flex-col items-start gap-3 py-16">
+        <ErrorBox>{error}</ErrorBox>
+        <Button variant="secondary" onClick={loadStats}>
+          Retry
+        </Button>
+      </div>
     );
+    return embedded ? errorContent : <AppPage>{errorContent}</AppPage>;
   }
   if (!stats) return null;
 
   const heading = TAB_HEADINGS[tab];
 
-  return (
-    <AppPage>
-      <PageContainer width="sm" className="pt-3 sm:pt-4">
-        <header className="flex items-start justify-between gap-3">
+  const content = (
+    <PageContainer width="sm" className="pt-3 sm:pt-4">
+      <header className="flex items-start justify-between gap-3">
+        {embedded ? (
+          <h1 className="text-[length:var(--fs-md)] font-medium text-(--ui-fg)">Usage</h1>
+        ) : (
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -138,8 +145,6 @@ export default function UsagePage() {
               onChange={(event) => void updateImage(event.currentTarget.files?.[0])}
             />
             <div className="min-w-0">
-              {/* Duplicated by the phone topbar; kept for desktop and for
-                  screen readers, where it is the page's only heading. */}
               <h1 className="sr-only text-[length:var(--fs-sm)] text-(--ui-muted) md:not-sr-only">
                 Usage
               </h1>
@@ -158,75 +163,76 @@ export default function UsagePage() {
               ) : null}
             </div>
           </div>
-          <RefreshButton onRefresh={loadStats} loading={loading} className="h-7 w-7" />
-        </header>
+        )}
+        <RefreshButton onRefresh={loadStats} loading={loading} className="h-7 w-7" />
+      </header>
 
-        <section className="mt-5">
-          <p className="text-[length:var(--fs-sm)] text-(--ui-muted)">
-            {head ? "Global proxied tokens" : "Proxied tokens"}
-          </p>
-          <div className="mt-1 text-[length:var(--fs-3xl)] font-medium leading-none tracking-[-0.03em] tabular-nums text-(--ui-fg)">
-            {formatNumber(stats.totals.total_tokens)}
-          </div>
-          <p className="mt-2 text-[length:var(--fs-sm)] text-(--ui-muted)">
-            {head
-              ? `Requests recorded across ${head.name || "Studio Head"}`
-              : "Requests proxied through this controller"}
-          </p>
-        </section>
+      <section className="mt-5">
+        <p className="text-[length:var(--fs-sm)] text-(--ui-muted)">
+          {head ? "Global proxied tokens" : "Proxied tokens"}
+        </p>
+        <div className="mt-1 text-[length:var(--fs-3xl)] font-medium leading-none tracking-[-0.03em] tabular-nums text-(--ui-fg)">
+          {formatNumber(stats.totals.total_tokens)}
+        </div>
+        <p className="mt-2 text-[length:var(--fs-sm)] text-(--ui-muted)">
+          {head
+            ? `Requests recorded across ${head.name || "Studio Head"}`
+            : "Requests proxied through this controller"}
+        </p>
+      </section>
 
-        {/* gap-px over a border-coloured ground, rather than divide-x: a divided
+      {/* gap-px over a border-coloured ground, rather than divide-x: a divided
             grid draws a stray left edge on the first cell of every wrapped row,
             so the rule only looked right at the one breakpoint where all six
             cells fit on a single line. This way the hairlines are exact at 2, 3
             and 6 columns, and the rounded corners clip cleanly. */}
-        <StatGrid>
-          <Stat label="Requests" value={formatNumber(stats.totals.total_requests)} />
-          <Stat label="Sessions" value={formatNumber(stats.totals.unique_sessions)} />
-          <Stat label="Active days" value={formatNumber(activeDays(stats))} />
-          <Stat label="Active streak" value={`${currentStreak(stats)} days`} />
-          <Stat label="Success rate" value={`${Math.round(stats.totals.success_rate)}%`} />
-          <Stat label="P95 latency" value={milliseconds(stats.latency.p95_ms)} />
-        </StatGrid>
+      <StatGrid>
+        <Stat label="Requests" value={formatNumber(stats.totals.total_requests)} />
+        <Stat label="Sessions" value={formatNumber(stats.totals.unique_sessions)} />
+        <Stat label="Active days" value={formatNumber(activeDays(stats))} />
+        <Stat label="Active streak" value={`${currentStreak(stats)} days`} />
+        <Stat label="Success rate" value={`${Math.round(stats.totals.success_rate)}%`} />
+        <Stat label="P95 latency" value={milliseconds(stats.latency.p95_ms)} />
+      </StatGrid>
 
-        {/* The year at a glance, above the tabs rather than inside one: it is
+      {/* The year at a glance, above the tabs rather than inside one: it is
             true of the whole window like the grid above it, and it is the thing
             people come to this page to look at. */}
-        <section className="mt-5">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-[length:var(--fs-md)] font-medium text-(--ui-fg)">Past year</h2>
-            <span className="text-[length:var(--fs-xs)] text-(--ui-muted)">tokens per day</span>
-          </div>
-          <div className="mt-2">
-            <TokenActivityHeatmap daily={stats.daily} />
-          </div>
-        </section>
-
-        <div className="mt-5 border-b border-(--ui-separator)">
-          <Tabs items={USAGE_TABS} activeTab={tab} onSelectTab={setTab} className="-mb-px" />
+      <section className="mt-5">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-[length:var(--fs-md)] font-medium text-(--ui-fg)">Past year</h2>
+          <span className="text-[length:var(--fs-xs)] text-(--ui-muted)">tokens per day</span>
         </div>
+        <div className="mt-2">
+          <TokenActivityHeatmap daily={stats.daily} />
+        </div>
+      </section>
 
-        <section className="mt-5">
-          <h2 className="text-[length:var(--fs-lg)] font-medium tracking-[-0.015em] text-(--ui-fg)">
-            {heading.title}
-          </h2>
-          <p className="mt-1 text-[length:var(--fs-sm)] text-(--ui-muted)">{heading.description}</p>
+      <div className="mt-5 border-b border-(--ui-separator)">
+        <Tabs items={USAGE_TABS} activeTab={tab} onSelectTab={setTab} className="-mb-px" />
+      </div>
 
-          <div className="mt-4">
-            {tab === "models" ? (
-              <UsageModelsTab stats={stats} />
-            ) : tab === "activity" ? (
-              <UsageActivityTab stats={stats} />
-            ) : tab === "routes" ? (
-              <UsageControllerTab stats={stats} />
-            ) : (
-              <UsageErrorsTab stats={stats} />
-            )}
-          </div>
-        </section>
-      </PageContainer>
-    </AppPage>
+      <section className="mt-5">
+        <h2 className="text-[length:var(--fs-lg)] font-medium tracking-[-0.015em] text-(--ui-fg)">
+          {heading.title}
+        </h2>
+        <p className="mt-1 text-[length:var(--fs-sm)] text-(--ui-muted)">{heading.description}</p>
+
+        <div className="mt-4">
+          {tab === "models" ? (
+            <UsageModelsTab stats={stats} />
+          ) : tab === "activity" ? (
+            <UsageActivityTab stats={stats} />
+          ) : tab === "routes" ? (
+            <UsageControllerTab stats={stats} />
+          ) : (
+            <UsageErrorsTab stats={stats} />
+          )}
+        </div>
+      </section>
+    </PageContainer>
   );
+  return embedded ? content : <AppPage>{content}</AppPage>;
 }
 
 function StatGrid({ children }: { children: ReactNode }) {

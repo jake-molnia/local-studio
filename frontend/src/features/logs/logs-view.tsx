@@ -6,6 +6,7 @@ import type { LogSession } from "@/lib/types";
 import { LogsSessionsSidebar } from "./logs-sessions-sidebar";
 
 interface LogsViewProps {
+  embedded?: boolean;
   sessions: LogSession[];
   filteredSessions: LogSession[];
   selectedSession: string | null;
@@ -32,6 +33,7 @@ interface LogsViewProps {
 }
 
 export function LogsView({
+  embedded = false,
   sessions,
   filteredSessions,
   selectedSession,
@@ -67,7 +69,13 @@ export function LogsView({
     );
 
   return (
-    <div className="relative flex h-full min-h-0 bg-(--surface) text-(--fg)">
+    <div
+      className={`relative flex min-h-0 bg-(--surface) text-(--fg) ${
+        embedded
+          ? "h-[min(70vh,48rem)] min-h-[32rem] rounded-md border border-(--border)"
+          : "h-full"
+      }`}
+    >
       <LogsSessionsSidebar
         sessions={sessions}
         filteredSessions={filteredSessions}
