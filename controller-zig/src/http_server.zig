@@ -45,6 +45,7 @@ const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
 const agent_goals = @import("services/agent_goals.zig");
+const agent_subagents = @import("services/agent_subagents.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -443,6 +444,39 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             else => unreachable,
         };
         const payload = response catch |failure| return respondGoalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/subagents")) {
+        const parent_id = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "piSessionId") else null;
+        defer if (parent_id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_subagents.listPayload(allocator, io, database, parent_id orelse return respondSubagentFailure(request, error.ParentSessionIdRequired))
+        else
+            agent_subagents.runPayload(allocator, io, mode, client, database, harness, document orelse return false);
+        const payload = response catch |failure| return respondSubagentFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/subagents/:runId") or std.mem.eql(u8, route.path, "/api/agent/subagents/:runId/stop")) {
+        const run_id = if (std.mem.endsWith(u8, route.path, "/stop"))
+            try pathParameterBetween(allocator, request.head.target, "/api/agent/subagents/", "/stop")
+        else
+            try pathParameter(allocator, request.head.target, "/api/agent/subagents/");
+        defer allocator.free(run_id);
+        const parent_id = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "piSessionId") else null;
+        defer if (parent_id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_subagents.getPayload(allocator, io, database, parent_id orelse return respondSubagentFailure(request, error.ParentSessionIdRequired), run_id)
+        else
+            agent_subagents.stopPayload(allocator, io, mode, client, database, harness, run_id, document orelse return false);
+        const payload = response catch |failure| return respondSubagentFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1790,6 +1824,32 @@ fn respondGoalFailure(request: *http.Server.Request, failure: anyerror) !bool {
         error.InvalidGoalPayload => "Invalid goal payload",
         error.InvalidGoalStatus => "Invalid goal status",
         error.InvalidGoalBudget => "turnBudget must be positive or null",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondSubagentFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.SubagentNotFound, error.ParentSessionNotFound => .not_found,
+        error.SubagentNestingDenied => .forbidden,
+        error.TooManySubagents => .conflict,
+        error.InvalidSubagentPayload, error.ParentSessionIdRequired, error.SubagentTaskRequired, error.SubagentTaskTooLarge, error.InvalidSubagentName, error.InvalidSubagentRunId, error.InvalidSessionId, error.SubagentCwdRequired => .bad_request,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.SubagentNotFound => "Subagent not found",
+        error.ParentSessionNotFound => "No session found for this conversation",
+        error.SubagentNestingDenied => "Subagents cannot spawn their own subagents",
+        error.TooManySubagents => "Too many subagents are already running",
+        error.ParentSessionIdRequired => "piSessionId is required",
+        error.SubagentTaskRequired => "task is required",
+        error.SubagentTaskTooLarge => "task is too large",
+        error.InvalidSubagentName => "name is too long",
+        error.InvalidSubagentRunId => "Invalid subagent run id",
+        error.InvalidSessionId => "Invalid parent session id",
+        error.SubagentCwdRequired => "Parent session has no working directory",
+        error.SubagentRunFailed => "Subagent run failed",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);

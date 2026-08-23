@@ -128,6 +128,15 @@ pub fn finish(database: *sqlite.Database, parent_session_id: []const u8, run_id:
     return database.changes() > 0;
 }
 
+pub fn adopt(database: *sqlite.Database, parent_session_id: []const u8, run_id: []const u8, native_session_id: []const u8) !void {
+    var statement = try database.prepare("UPDATE agent_subagents SET native_session_id = COALESCE(native_session_id, ?) WHERE parent_session_id = ? AND run_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, native_session_id);
+    try statement.bindText(2, parent_session_id);
+    try statement.bindText(3, run_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
 fn readRun(allocator: std.mem.Allocator, statement: *const sqlite.Statement) !Run {
     return .{
         .allocator = allocator,

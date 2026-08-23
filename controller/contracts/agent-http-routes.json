@@ -222,6 +222,30 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/subagents",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/subagents",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/subagents/:runId",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/subagents/:runId/stop",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/internal/node/v1/projects",
       "ownership": "worker",
       "streaming": "never"
