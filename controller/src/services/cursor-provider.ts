@@ -8,7 +8,6 @@ import {
   type AuthPrompt,
   type Model,
   type MutableModels,
-  type OAuthCredential,
   type ProviderStreams,
 } from "@earendil-works/pi-ai";
 import type {
