@@ -42,6 +42,7 @@ const head_connection = @import("services/head_connection.zig");
 const agent_enrollments = @import("services/agent_enrollments.zig");
 const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
+const agent_connectors = @import("services/agent_connectors.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -345,6 +346,24 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/connectors")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        defer if (id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => agent_connectors.listPayload(allocator, io, mode, client, database, node_id),
+            .POST => agent_connectors.upsertPayload(allocator, io, mode, client, database, node_id, document orelse return false),
+            .DELETE => agent_connectors.deletePayload(allocator, io, mode, client, database, node_id, id orelse return respondConnectorFailure(request, error.ConnectorIdRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
         const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
@@ -430,6 +449,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             else => unreachable,
         };
         const payload = response catch |failure| return respondProjectFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/connectors")) {
+        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        defer if (id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => agent_connectors.listLocal(allocator, io, database),
+            .POST => agent_connectors.upsertLocal(allocator, io, database, document orelse return false),
+            .DELETE => agent_connectors.deleteLocal(allocator, io, database, id orelse return respondConnectorFailure(request, error.ConnectorIdRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1539,6 +1574,31 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.ProjectNodeRequired => "No enrolled node offers project storage",
         error.ProjectNodeRejected => "The project node rejected the request",
         error.ProjectNodeUnavailable => "The project node is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.ConnectorIdRequired, error.InvalidConnectorId, error.ConnectorTransportRequired, error.InvalidConnectorTransport, error.ConnectorCommandRequired, error.ConnectorUrlRequired, error.InvalidConnectorUrl, error.InvalidConnectorPayload => .bad_request,
+        error.ConnectorNamespaceCollision, error.ConnectorNodeRequired, error.ConnectorNodeRejected => .conflict,
+        error.ConnectorNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.ConnectorIdRequired => "id is required",
+        error.InvalidConnectorId => "invalid connector id",
+        error.ConnectorTransportRequired => "transport is required",
+        error.InvalidConnectorTransport => "invalid connector transport",
+        error.ConnectorCommandRequired => "command is required for stdio",
+        error.ConnectorUrlRequired => "url is required for http",
+        error.InvalidConnectorUrl => "url must start with http:// or https://",
+        error.InvalidConnectorPayload => "invalid connector payload",
+        error.ConnectorNamespaceCollision => "Connector tool namespace collides with an existing connector",
+        error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
+        error.ConnectorNodeRejected => "The connector node rejected the request",
+        error.ConnectorNodeUnavailable => "The connector node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
