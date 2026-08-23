@@ -68,19 +68,6 @@ export function WorkbenchProjectTabList({
       className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-7" : ""}`}
     >
       <div
-        className="workbench-project-context flex min-w-0 max-w-[220px] shrink-0 items-center gap-1.5 border-r border-(--border)/45 px-2.5"
-        title={`${projectName} · ${threadTitle}`}
-      >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] bg-(--accent)/15 text-[9px] font-semibold leading-none text-(--accent)">
-          {projectInitial(projectName)}
-        </span>
-        <span className="min-w-0 truncate text-[length:var(--fs-xs)] text-(--dim)">
-          <span className="text-(--fg)/80">{projectName}</span>
-          <span className="px-1 text-(--dim)/55">/</span>
-          {threadTitle}
-        </span>
-      </div>
-      <div
         role="tablist"
         aria-orientation="horizontal"
         aria-label={`${projectName}, ${threadTitle} tabs`}
@@ -92,6 +79,8 @@ export function WorkbenchProjectTabList({
             tab={tab}
             active={tab.id === activeId}
             ariaLabel={`${projectName}, ${threadTitle}, ${tab.title}`}
+            projectName={projectName}
+            threadTitle={threadTitle}
             shortcut={index < 9 ? `⌘${index + 1}` : undefined}
             onActivate={() => onActivate(tab)}
             onClose={() => onClose(tab.id)}
@@ -127,6 +116,8 @@ export function WorkbenchTabButton({
   tab,
   active,
   ariaLabel,
+  projectName,
+  threadTitle,
   shortcut,
   onActivate,
   onClose,
@@ -138,6 +129,8 @@ export function WorkbenchTabButton({
   tab: WorkbenchTab;
   active: boolean;
   ariaLabel: string;
+  projectName: string;
+  threadTitle: string;
   shortcut?: string;
   onActivate: () => void;
   onClose: () => void;
@@ -147,6 +140,7 @@ export function WorkbenchTabButton({
   register: (element: HTMLButtonElement | null) => void;
 }) {
   const Icon = tabIcon(tab);
+  const label = tab.kind === "task" ? `${projectName} / ${threadTitle}` : tab.title;
   const working = tab.kind === "task" && Boolean(tab.status && isWorkingStatus(tab.status));
   return (
     <div
@@ -182,7 +176,7 @@ export function WorkbenchTabButton({
         onAuxClick={(event) => {
           if (event.button === 1 && tab.kind === "tool") onClose();
         }}
-        title={shortcut ? `${tab.title} (${shortcut})` : tab.title}
+        title={shortcut ? `${label} (${shortcut})` : label}
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:rounded-[4px] focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px]"
       >
         <span
@@ -190,12 +184,18 @@ export function WorkbenchTabButton({
             active ? "text-(--fg)" : "text-(--hl2)"
           }`}
         >
-          <Icon className="h-3 w-3 opacity-90" strokeWidth={1.65} />
+          {tab.kind === "task" ? (
+            <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-(--accent)/15 text-[9px] font-semibold leading-none text-(--accent)">
+              {projectInitial(projectName)}
+            </span>
+          ) : (
+            <Icon className="h-3 w-3 opacity-90" strokeWidth={1.65} />
+          )}
           {working ? (
             <span className="absolute -bottom-px -right-px h-1.5 w-1.5 rounded-full bg-(--accent) ring-2 ring-(--color-header)" />
           ) : null}
         </span>
-        <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
       </button>
       {tab.kind === "tool" ? (
         <button
