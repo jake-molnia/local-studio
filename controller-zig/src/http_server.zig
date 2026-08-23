@@ -13,6 +13,7 @@ const telemetry = @import("services/telemetry.zig");
 const system_service = @import("services/system.zig");
 const runtime_info = @import("services/runtime_info.zig");
 const metrics = @import("services/metrics.zig");
+const logs = @import("services/logs.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -303,6 +304,77 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/events")) {
         try serveControllerEvents(allocator, io, client, database, recipe_column, configuration, default_trust_remote_code, system, supervisor, runtime_cache, request);
+        return false;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/logs") and request.head.method == .GET) {
+        const response = try logs.listPayload(allocator, io, configuration, database, recipe_column, default_trust_remote_code, supervisor);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId") and request.head.method == .GET) {
+        const session_id = try pathParameter(allocator, request.head.target, "/logs/");
+        defer allocator.free(session_id);
+        const limit_value = queryUnsigned(request.head.target, "limit") orelse 2000;
+        if (limit_value == 0 or limit_value > 20_000) {
+            try request.respond("{\"detail\":\"Invalid log limit\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        const response = logs.tailPayload(allocator, io, configuration, session_id, @intCast(limit_value)) catch |failure| {
+            if (failure == error.InvalidSessionId) {
+                try request.respond("{\"detail\":\"Invalid log session id\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+                return request.head.keep_alive;
+            }
+            return failure;
+        } orelse {
+            try request.respond("{\"detail\":\"Log not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId") and request.head.method == .DELETE) {
+        const session_id = try pathParameter(allocator, request.head.target, "/logs/");
+        defer allocator.free(session_id);
+        const deleted = logs.delete(io, allocator, configuration, session_id) catch |failure| switch (failure) {
+            error.InvalidSessionId => {
+                try request.respond("{\"detail\":\"Invalid log session id\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+                return request.head.keep_alive;
+            },
+            error.ControllerLogProtected => {
+                try request.respond("{\"detail\":\"controller logs cannot be deleted via API\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+                return request.head.keep_alive;
+            },
+            else => return failure,
+        };
+        if (!deleted) {
+            try request.respond("{\"detail\":\"Log not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        try request.respond("{\"success\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId/stream")) {
+        const session_id = try pathParameterBetween(allocator, request.head.target, "/logs/", "/stream");
+        defer allocator.free(session_id);
+        const tail_value = queryUnsigned(request.head.target, "tail") orelse 2000;
+        if (tail_value > 20_000) {
+            try request.respond("{\"detail\":\"Invalid log tail\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        const log_path = logs.resolveLogPath(allocator, io, configuration, session_id) catch |failure| {
+            if (failure == error.InvalidSessionId) {
+                try request.respond("{\"detail\":\"Invalid log session id\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+                return request.head.keep_alive;
+            }
+            return failure;
+        } orelse {
+            try request.respond("{\"detail\":\"Log not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(log_path);
+        try serveLogStream(allocator, io, configuration, session_id, log_path, @intCast(tail_value), request);
         return false;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances") and request.head.method == .GET) {
@@ -895,6 +967,110 @@ fn writeControllerEvent(io: Io, body: anytype, event_type: []const u8, data: []c
     try body.writer.flush();
     try body.flush();
     sequence.* += 1;
+}
+
+fn serveLogStream(allocator: std.mem.Allocator, io: Io, configuration: *const Config, session_id: []const u8, log_path: []const u8, replay_limit: usize, request: *http.Server.Request) !void {
+    var stream_buffer: [16 * 1024]u8 = undefined;
+    var body = try request.respondStreaming(&stream_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var sequence: u64 = 0;
+    if (replay_limit > 0) {
+        const replay_document = try logs.tailPayload(allocator, io, configuration, session_id, replay_limit) orelse return;
+        defer allocator.free(replay_document);
+        var replay = std.json.parseFromSlice(std.json.Value, allocator, replay_document, .{}) catch return error.InvalidLogPayload;
+        defer replay.deinit();
+        if (replay.value == .object) {
+            if (replay.value.object.get("logs")) |lines| if (lines == .array) {
+                for (lines.array.items) |line| if (line == .string) try writeLogEvent(allocator, io, &body, session_id, line.string, false, &sequence);
+            };
+        }
+    }
+    var stat = try std.Io.Dir.cwd().statFile(io, log_path, .{});
+    var offset = stat.size;
+    var pending: std.ArrayList(u8) = .empty;
+    defer pending.deinit(allocator);
+    var heartbeat_ticks: usize = 0;
+    while (true) {
+        try io.sleep(.fromMilliseconds(500), .awake);
+        heartbeat_ticks += 1;
+        stat = std.Io.Dir.cwd().statFile(io, log_path, .{}) catch {
+            if (heartbeat_ticks >= 30) {
+                try body.writer.writeAll(": keep-alive\n\n");
+                try body.writer.flush();
+                try body.flush();
+                heartbeat_ticks = 0;
+            }
+            continue;
+        };
+        if (stat.size < offset) {
+            offset = 0;
+            pending.clearRetainingCapacity();
+        }
+        if (stat.size == offset) {
+            if (heartbeat_ticks >= 30) {
+                try body.writer.writeAll(": keep-alive\n\n");
+                try body.writer.flush();
+                try body.flush();
+                heartbeat_ticks = 0;
+            }
+            continue;
+        }
+        const maximum_chunk: u64 = 1024 * 1024;
+        var read_offset = offset;
+        var drop_prefix = false;
+        if (stat.size - offset > maximum_chunk) {
+            read_offset = stat.size - maximum_chunk;
+            drop_prefix = true;
+            pending.clearRetainingCapacity();
+        }
+        const read_length: usize = @intCast(stat.size - read_offset);
+        const storage = try allocator.alloc(u8, read_length);
+        defer allocator.free(storage);
+        var file = try std.Io.Dir.cwd().openFile(io, log_path, .{});
+        defer file.close(io);
+        const bytes_read = try file.readPositionalAll(io, storage, read_offset);
+        offset = read_offset + bytes_read;
+        var bytes = storage[0..bytes_read];
+        if (drop_prefix) {
+            const newline = std.mem.indexOfScalar(u8, bytes, '\n') orelse bytes.len;
+            bytes = if (newline < bytes.len) bytes[newline + 1 ..] else bytes[bytes.len..];
+        }
+        try pending.appendSlice(allocator, bytes);
+        var consumed: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, pending.items, consumed, '\n')) |newline| {
+            const line = std.mem.trimEnd(u8, pending.items[consumed..newline], "\r");
+            try writeLogEvent(allocator, io, &body, session_id, line, true, &sequence);
+            consumed = newline + 1;
+        }
+        if (consumed > 0) {
+            const remaining = pending.items[consumed..];
+            std.mem.copyForwards(u8, pending.items[0..remaining.len], remaining);
+            pending.items.len = remaining.len;
+        }
+        if (pending.items.len > maximum_chunk) pending.clearRetainingCapacity();
+        heartbeat_ticks = 0;
+    }
+}
+
+fn writeLogEvent(allocator: std.mem.Allocator, io: Io, body: anytype, session_id: []const u8, line: []const u8, redact_line: bool, sequence: *u64) !void {
+    const safe_line = if (redact_line) try logs.redact(allocator, line) else try allocator.dupe(u8, line);
+    defer allocator.free(safe_line);
+    const Data = struct {
+        session_id: []const u8,
+        line: []const u8,
+    };
+    var output: Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    try std.json.Stringify.value(Data{ .session_id = session_id, .line = safe_line }, .{}, &output.writer);
+    try writeControllerEvent(io, body, "log", output.writer.buffered(), sequence);
 }
 
 fn eventTimestamp(io: Io, buffer: *[24]u8) []const u8 {
