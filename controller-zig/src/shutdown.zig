@@ -46,6 +46,10 @@ pub const Shutdown = struct {
             if (posix.errno(count) != .INTR) return error.ShutdownPipeReadFailed;
         }
     }
+
+    pub fn request(controller: *Shutdown) void {
+        notify(controller.write_handle);
+    }
 };
 
 pub fn isRequested() bool {
@@ -53,9 +57,11 @@ pub fn isRequested() bool {
 }
 
 fn handleSignal(_: posix.SIG) callconv(.c) void {
-    if (requested.swap(true, .acq_rel)) return;
-    const handle = signal_write_handle.load(.acquire);
-    if (handle == invalid_handle) return;
+    notify(signal_write_handle.load(.acquire));
+}
+
+fn notify(handle: c.fd_t) void {
+    if (requested.swap(true, .acq_rel) or handle == invalid_handle) return;
     const byte = [_]u8{1};
     _ = c.write(handle, &byte, byte.len);
 }

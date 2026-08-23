@@ -34,6 +34,7 @@ Completed foundation evidence:
 - The native binary builds on macOS arm64.
 - The binary cross-compiles to Linux x86_64 and Linux arm64.
 - `head`, `worker`, and `standalone` configuration values parse from `LOCAL_STUDIO_CONTROLLER_MODE`.
+- `App.init` owns database, shutdown notification, HTTP client, and HTTP server resources with partial-initialization unwind and reverse-order teardown.
 - Host and port parse from the existing environment variables.
 - `/health` returns `{"status":"ok"}`.
 - The HTTP spike streams SSE frames without buffering the complete response.
