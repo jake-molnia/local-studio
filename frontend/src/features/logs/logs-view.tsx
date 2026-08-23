@@ -72,7 +72,7 @@ export function LogsView({
     <div
       className={`relative flex min-h-0 bg-(--surface) text-(--fg) ${
         embedded
-          ? "h-[min(70vh,48rem)] min-h-[32rem] flex-col rounded-md border border-(--border)"
+          ? "h-[min(72vh,48rem)] min-h-[24rem] flex-col rounded-md border border-(--border) sm:min-h-[32rem]"
           : "h-full"
       }`}
     >
@@ -95,7 +95,7 @@ export function LogsView({
         {selectedSession ? (
           <>
             {/* Header */}
-            <div className="flex items-center justify-between gap-2 border-b border-(--border) px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-(--border) px-2.5 py-2 sm:px-3">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[length:var(--fs-sm)]">
                 <Button
                   variant="icon"
@@ -110,7 +110,7 @@ export function LogsView({
                   {selectedSession}
                 </span>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
                 <Checkbox
                   checked={autoRefresh}
                   onChange={onAutoRefreshChange}

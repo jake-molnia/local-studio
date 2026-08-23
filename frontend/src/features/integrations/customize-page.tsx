@@ -71,7 +71,7 @@ export function CustomizePage() {
 
         <nav aria-label="Customize categories" className="mt-3 w-full overflow-x-auto">
           <div className="flex min-w-max items-center gap-1">
-            {CATEGORIES.map(({ id, label, description }) => {
+            {CATEGORIES.map(({ id, label, description, icon: Icon }) => {
               const active = section === id;
               return (
                 <button
@@ -87,6 +87,7 @@ export function CustomizePage() {
                   )}
                   title={description}
                 >
+                  <Icon className="mr-1.5 h-3 w-3 shrink-0" />
                   <span>{label}</span>
                 </button>
               );

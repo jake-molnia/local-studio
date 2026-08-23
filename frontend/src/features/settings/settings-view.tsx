@@ -471,8 +471,9 @@ function SettingsMachineRail({
     <button
       key={id}
       type="button"
+      aria-current={activeSection === id ? "page" : undefined}
       onClick={() => onSelectSection(id)}
-      className={`group flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] transition-[color,background-color] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 ${
+      className={`group flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] transition-[color,background-color] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 max-lg:w-auto max-lg:shrink-0 ${
         activeSection === id
           ? "bg-(--ui-active) text-(--ui-fg)"
           : "text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg)"
@@ -499,13 +500,16 @@ function SettingsMachineRail({
   }, [activeSection]);
 
   return (
-    <nav aria-label="Settings sections" className="flex flex-col gap-2 pb-1">
-      <div>
+    <nav
+      aria-label="Settings sections"
+      className="flex flex-col gap-2 pb-1 max-lg:flex-row max-lg:items-center max-lg:gap-1"
+    >
+      <div className="max-lg:contents">
         <button
           type="button"
           aria-expanded={localOpen}
           onClick={() => setLocalOpen((current) => !current)}
-          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60"
+          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60 max-lg:w-auto max-lg:shrink-0"
         >
           <ChevronDown
             className={cx(
@@ -516,12 +520,12 @@ function SettingsMachineRail({
           Local settings
         </button>
         {localOpen ? (
-          <div className="mt-0.5 flex flex-col gap-px">
+          <div className="mt-0.5 flex flex-col gap-px max-lg:flex-row max-lg:items-center">
             {localSections.map((section) => renderButton(section.id, section.label, section.icon))}
           </div>
         ) : null}
       </div>
-      <div>
+      <div className="max-lg:contents">
         <button
           type="button"
           aria-expanded={machinesOpen}
@@ -529,7 +533,7 @@ function SettingsMachineRail({
             machinesInteracted.current = true;
             setMachinesOpen((current) => !current);
           }}
-          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60"
+          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60 max-lg:w-auto max-lg:shrink-0"
         >
           <ChevronDown
             className={cx(
@@ -540,20 +544,25 @@ function SettingsMachineRail({
           Machines
         </button>
         {machinesOpen ? (
-          <div className="mt-0.5 flex flex-col gap-1">
+          <div className="mt-0.5 flex flex-col gap-1 max-lg:flex-row max-lg:items-center max-lg:gap-1">
             {renderButton(MACHINES_SECTION.id, MACHINES_SECTION.label, MACHINES_SECTION.icon)}
             {nodes.length ? (
               nodes.map((node) => {
                 const nodeOpen = Boolean(openNodes[node.id]);
+                const nodeActive = activeSection.startsWith(`machine:${node.id}:`);
                 return (
-                  <div key={node.id}>
+                  <div key={node.id} className="max-lg:flex max-lg:items-center max-lg:gap-1">
                     <button
                       type="button"
                       aria-expanded={nodeOpen}
+                      aria-current={nodeActive ? "location" : undefined}
                       onClick={() =>
                         setOpenNodes((current) => ({ ...current, [node.id]: !current[node.id] }))
                       }
-                      className="flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg)"
+                      className={cx(
+                        "flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] hover:bg-(--ui-hover)/70 hover:text-(--ui-fg) max-lg:w-auto max-lg:shrink-0",
+                        nodeActive ? "bg-(--ui-active) text-(--ui-fg)" : "text-(--ui-muted)",
+                      )}
                     >
                       <ChevronDown
                         className={cx(
@@ -568,7 +577,7 @@ function SettingsMachineRail({
                       ) : null}
                     </button>
                     {nodeOpen ? (
-                      <div className="mt-0.5 flex flex-col gap-px">
+                      <div className="mt-0.5 flex flex-col gap-px max-lg:mt-0 max-lg:flex-row max-lg:items-center">
                         {(Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
                           machineTargets.get(node.id)?.[view]
                             ? [

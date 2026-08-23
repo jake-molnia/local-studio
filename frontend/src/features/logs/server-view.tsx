@@ -83,7 +83,7 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
 
   if (embedded) {
     return (
-      <div className="flex min-h-[44rem] flex-col overflow-hidden rounded-md border border-(--ui-border) bg-(--ui-surface)">
+      <div className="flex min-h-[32rem] flex-col overflow-hidden rounded-md border border-(--ui-border) bg-(--ui-surface) sm:min-h-[44rem]">
         {content}
       </div>
     );

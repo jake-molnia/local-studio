@@ -15,7 +15,7 @@ import {
   type SectionNavItem,
   type UiTone,
 } from "@/ui";
-import { ChevronDown, ChevronLeft, SettingsIcon } from "@/ui/icon-registry";
+import { ChevronDown, ChevronLeft, CloseIcon } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ProfileAvatar, useLocalProfile } from "@/features/shell/local-profile";
 
@@ -268,11 +268,11 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 aria-label="Search Settings"
                 className="mb-2 [&_input]:h-7 [&_input]:rounded-[4px] [&_input]:bg-(--ui-surface)"
               />
-              <div className="overflow-x-auto [&_nav>div]:flex-nowrap [&_nav_button]:max-w-none [&_nav_button]:shrink-0">
+              <div className="overflow-x-auto [&_nav]:min-w-max [&_nav>div]:contents [&_nav_button]:max-w-none [&_nav_button]:shrink-0">
                 {navigation}
               </div>
             </div>
-            <div className={cx("mx-auto w-full max-w-[56rem] px-4 pb-12 pt-6 sm:px-8 lg:pt-8")}>
+            <div className={cx("mx-auto w-full max-w-[34rem] px-4 pb-12 pt-6 sm:px-8 lg:pt-8")}>
               {content}
             </div>
           </section>
@@ -324,7 +324,7 @@ function SettingsTakeoverFooter({ loading, onReload }: { loading: boolean; onRel
         title="Close Settings"
         className="flex h-6 w-6 items-center justify-center rounded-[4px] bg-(--ui-active) text-(--ui-fg) transition-colors hover:bg-(--ui-hover)"
       >
-        <SettingsIcon className="h-3 w-3" />
+        <CloseIcon className="h-3 w-3" />
       </Link>
     </div>
   );
@@ -352,7 +352,7 @@ export function SettingsGroup({
     <section
       data-setting-key={settingsSearchKey(title)}
       tabIndex={-1}
-      className="mb-6 outline-none transition-colors duration-[var(--motion-fast)] focus:bg-(--ui-hover)/30 last:mb-0"
+      className="mb-5 outline-none transition-colors duration-[var(--motion-fast)] focus:bg-(--ui-hover)/30 last:mb-0"
     >
       <div className="mb-1.5 flex items-start justify-between gap-3 px-1">
         <div className="min-w-0">
@@ -386,7 +386,7 @@ export function SettingsGroup({
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
       {showBody ? (
-        <div className="overflow-hidden border-y border-(--ui-separator)/75 [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/65">
+        <div className="overflow-hidden rounded-[var(--rad-lg)] border border-(--ui-border) bg-(--ui-surface) [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/65">
           {children}
         </div>
       ) : null}
@@ -409,7 +409,7 @@ export function SettingsRow({
     <div
       data-setting-key={settingsSearchKey(label)}
       tabIndex={-1}
-      className="px-2.5 py-2 outline-none transition-colors hover:bg-(--ui-hover)/45 focus:bg-(--ui-hover)/55"
+      className="px-3.5 py-2 outline-none transition-colors hover:bg-(--ui-hover)/45 focus:bg-(--ui-hover)/55"
     >
       <div className="grid min-h-7 grid-cols-1 gap-1 md:grid-cols-[minmax(160px,0.3fr)_minmax(0,1fr)] md:items-center md:gap-3">
         <div className="min-w-0">
@@ -425,7 +425,7 @@ export function SettingsRow({
             </div>
           ) : null}
         </div>
-        <div className="flex min-w-0 items-center justify-end gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {primaryValue ? (
             <div className={control ? "min-w-0 shrink-0" : "min-w-0 flex-1"}>{primaryValue}</div>
           ) : null}
