@@ -19,7 +19,7 @@ export function GitPanelHeader({
   onReload: () => Promise<void>;
 }) {
   return (
-    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-(--border)/80 bg-(--color-header) px-3 text-xs">
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-(--border)/70 bg-(--color-header) px-2 text-xs">
       <GitBranchIcon className="h-3.5 w-3.5 text-(--dim)" />
       <span className="min-w-0 flex-1 truncate text-(--fg)" title={cwd ?? ""}>
         {gitDiffHeaderTitle(payload, cwd)}
@@ -28,7 +28,7 @@ export function GitPanelHeader({
         type="button"
         onClick={() => void onReload()}
         disabled={loading || !cwd}
-        className="rounded-md p-1 text-(--dim) hover:bg-(--hover) hover:text-(--fg) disabled:opacity-40"
+        className="rounded p-1 text-(--dim) hover:bg-(--hover) hover:text-(--fg) disabled:opacity-40"
         title="Refresh review state"
       >
         <ReloadIcon className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -53,7 +53,7 @@ export function GitWorkflowBar({
   if (!payload?.isRepo) return null;
   const dirty = (payload.status?.length ?? 0) > 0;
   return (
-    <div className="grid gap-2 border-b border-(--border)/80 bg-(--color-panel) p-2 text-[length:var(--fs-sm)] text-(--dim)">
+    <div className="grid gap-1.5 border-b border-(--border)/70 bg-(--color-panel) p-1.5 text-[length:var(--fs-xs)] text-(--dim)">
       <div className="flex items-center gap-2">
         <RefSelect
           refs={payload.refs ?? []}
@@ -119,7 +119,7 @@ function RefSelect({
         event.currentTarget.value &&
         void onRun({ action: "checkout", ref: event.currentTarget.value })
       }
-      className="h-7 min-w-[9rem] rounded-md border border-(--border)/80 bg-(--color-input) px-2 text-(--fg)"
+      className="h-6 min-w-[9rem] rounded border border-(--border)/80 bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg)"
       title="Switch branch"
     >
       <option value="">{branch ?? "detached"}</option>
@@ -187,7 +187,7 @@ export function PrSection({
   if (!pr) return null;
   const mergeDisabled = merging || pr.state !== "OPEN" || pr.mergeable === "CONFLICTING";
   return (
-    <div className="grid shrink-0 gap-1 border-b border-(--border)/80 bg-(--color-panel) px-3 py-2 text-[length:var(--fs-sm)]">
+    <div className="grid shrink-0 gap-1 border-b border-(--border)/70 bg-(--color-panel) px-2 py-1.5 text-[length:var(--fs-xs)]">
       <div className="flex items-center gap-2">
         <a
           href={pr.url || "#"}
@@ -215,7 +215,7 @@ export function PrSection({
             onChange={(event) => setMethod(event.target.value as MergeMethod)}
             disabled={mergeDisabled}
             aria-label="Merge method"
-            className="h-7 rounded-md border border-(--border)/80 bg-(--color-input) px-2 text-(--fg) disabled:opacity-50"
+            className="h-6 rounded border border-(--border)/80 bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg) disabled:opacity-50"
           >
             <option value="merge">Merge</option>
             <option value="squash">Squash</option>

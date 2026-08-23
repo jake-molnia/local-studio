@@ -39,8 +39,8 @@ const APP_DESTINATIONS: AppDestination[] = [
     description: "Token, request, and model usage analytics.",
   },
   {
-    href: "/integrations",
-    label: "Integrations",
+    href: "/customize",
+    label: "Customize",
     keywords:
       "connectors mcp servers accounts google gmail workspace access grants providers cloud models sign in oauth api keys skills plugins",
     description: "Connectors, accounts, model sign-ins, and skills.",

@@ -137,7 +137,7 @@ function GitDiffPanelBody({
 }) {
   if (!cwd)
     return (
-      <div className="p-4 text-xs text-(--dim)">
+      <div className="p-3 text-xs text-(--dim)">
         Choose a project directory to view git changes.
       </div>
     );
@@ -156,7 +156,7 @@ function InitializeGitPanel({
   loading: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3 p-4 text-xs text-(--dim)">
+    <div className="flex flex-col gap-2 p-3 text-xs text-(--dim)">
       <span>This directory is not a git repository.</span>
       <Button
         variant="secondary"
@@ -173,10 +173,10 @@ function InitializeGitPanel({
 
 function EmptyDiffPanel({ loading, status }: { loading: boolean; status: string[] }) {
   return (
-    <div className="p-4 text-xs text-(--dim)">
+    <div className="p-3 text-xs text-(--dim)">
       {loading ? "Loading diff…" : "No unstaged tracked-file changes."}
       {status.length > 0 ? (
-        <pre className="mt-3 overflow-auto rounded-md border border-(--border)/80 bg-(--color-input) p-2 font-mono text-[length:var(--fs-sm)] text-(--fg)">
+        <pre className="mt-2 overflow-auto rounded border border-(--border)/70 bg-(--color-input) p-2 font-mono text-[length:var(--fs-xs)] text-(--fg)">
           {status.join("\n")}
         </pre>
       ) : null}

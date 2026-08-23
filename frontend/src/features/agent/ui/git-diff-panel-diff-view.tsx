@@ -19,8 +19,8 @@ export function DiffFileList({
   onViewMode: (mode: DiffViewMode) => void;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[length:var(--fs-sm)] leading-5">
-      <div className="sticky top-0 z-10 mb-2 flex items-center justify-end gap-1 bg-(--color-panel) py-1">
+    <div className="min-h-0 flex-1 overflow-auto p-1.5 font-mono text-[length:var(--fs-xs)] leading-5">
+      <div className="sticky top-0 z-10 mb-1 flex items-center justify-end gap-1 border-b border-(--border)/60 bg-(--color-panel) py-1">
         <DiffModeButton active={viewMode === "unified"} onClick={() => onViewMode("unified")}>
           Unified
         </DiffModeButton>
@@ -34,7 +34,7 @@ export function DiffFileList({
           Top / bottom
         </DiffModeButton>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5">
         {files.map((file, fileIndex) => (
           <DiffFileEntry
             key={file.path}
@@ -64,12 +64,12 @@ function DiffFileEntry({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <details
-      className="overflow-hidden rounded-md border border-(--border)/80 bg-(--color-panel)"
+      className="overflow-hidden rounded border border-(--border)/70 bg-(--color-panel)"
       open={open}
       onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
     >
       <summary
-        className="flex cursor-pointer list-none items-center gap-2 border-b border-(--border)/80 bg-(--color-header) px-2 py-1.5 text-xs text-(--fg) hover:bg-(--color-surface-hover)"
+        className="flex cursor-pointer list-none items-center gap-2 border-b border-(--border)/70 bg-(--color-header) px-2 py-1 text-xs text-(--fg) hover:bg-(--color-surface-hover)"
         title={file.path}
       >
         <span className="min-w-0 flex-1 truncate">{file.path}</span>
@@ -154,17 +154,17 @@ function StackedDiff({ file }: { file: DiffFile }) {
   const oldLines = file.lines.filter((line) => line.kind !== "add");
   const newLines = file.lines.filter((line) => line.kind !== "del");
   return (
-    <div className="grid gap-2 p-2">
+    <div className="grid gap-1.5 p-1.5">
       <div className="rounded border border-red-500/20">
-        <div className="border-b border-red-500/20 px-2 py-1 text-[length:var(--fs-sm)] text-red-300">
+        <div className="border-b border-red-500/20 px-2 py-1 text-[length:var(--fs-xs)] text-red-300">
           Before
         </div>
         {oldLines.map((line, index) => (
           <DiffStackLine key={`${file.path}-old-${index}`} line={line} />
         ))}
       </div>
-      <div className="rounded-lg border border-(--color-diff-added)/25">
-        <div className="border-b border-(--color-diff-added)/25 px-2 py-1 text-[length:var(--fs-sm)] text-(--color-diff-added)">
+      <div className="rounded border border-(--color-diff-added)/25">
+        <div className="border-b border-(--color-diff-added)/25 px-2 py-1 text-[length:var(--fs-xs)] text-(--color-diff-added)">
           After
         </div>
         {newLines.map((line, index) => (
