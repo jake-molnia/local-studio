@@ -2,9 +2,9 @@
 
 ## Migration objective
 
-Replace the Bun/Hono controller with one `local-studio-controller` Zig executable while preserving the existing HTTP, persistence, filesystem, process-ownership, deployment-result, and frontend contracts. The executable supports `head`, `worker`, and `standalone` modes. The Head migrates first and interoperates with Bun Workers. Worker functionality then moves subsystem by subsystem into one compute architecture.
+Replace Local Studio-owned backend services with one `local-studio-controller` Zig executable while preserving the existing HTTP, persistence, filesystem, process-ownership, deployment-result, and frontend contracts. The executable supports `head`, `worker`, and `standalone` modes. The Head migrates first and interoperates with Bun Workers. Worker functionality then moves subsystem by subsystem into one compute architecture.
 
-The frontend, Electron shell, agent runtime, inference engines, bundled model index, and frontend-facing TypeScript contracts remain outside the rewrite.
+The frontend and the minimum Electron UI host remain TypeScript. Standalone combines local Head and Worker responsibilities, serves the desktop's local services, and may enroll under a remote Head. Inference engines and agent harnesses such as Pi remain independently installed external programs. Zig discovers them and speaks their supported process or protocol boundary without reimplementing or owning their internal configuration. The Bun controller and Local Studio-owned TypeScript agent service are removed only after their Zig replacements complete live compatibility acceptance.
 
 ## Delivery rules
 
