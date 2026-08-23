@@ -39,6 +39,16 @@ const LazyGitDiffPanel = lazy(() =>
 
 export type SideChatTabsUpdater = Session[] | ((tabs: Session[]) => Session[]);
 
+const NON_TERMINAL_TABS: Exclude<ComputerTab, "terminal">[] = [
+  "status",
+  "tools",
+  "side-chat",
+  "browser",
+  "files",
+  "diff",
+];
+const visitedComputerTabs = new Set<Exclude<ComputerTab, "terminal">>();
+
 type ComputerTabPanelProps = {
   activeModel: AgentModel | null;
   activeModelId: string;
@@ -61,6 +71,8 @@ type ComputerTabPanelProps = {
 
 export function ComputerTabPanel(props: ComputerTabPanelProps) {
   const focusedCwd = props.focusedSession?.cwd ?? props.activeProject?.path ?? null;
+  const activeTab = props.tools.computer.tab;
+  if (activeTab !== "terminal") visitedComputerTabs.add(activeTab);
   const panels: Record<ComputerTab, ReactNode> = {
     status: <StatusTab {...props} />,
     tools: <ComputerLauncherPanel activeTab={props.tools.computer.tab} {...props} />,
@@ -70,7 +82,26 @@ export function ComputerTabPanel(props: ComputerTabPanelProps) {
     diff: <LazyGitDiffPanel cwd={focusedCwd} />,
     terminal: null,
   };
-  return <Suspense fallback={<ComputerTabFallback />}>{panels[props.tools.computer.tab]}</Suspense>;
+  return (
+    <Suspense fallback={<ComputerTabFallback />}>
+      <div
+        aria-hidden={activeTab === "terminal"}
+        className={activeTab === "terminal" ? "hidden" : "relative flex min-h-0 flex-1 flex-col"}
+      >
+        {NON_TERMINAL_TABS.map((tab) =>
+          visitedComputerTabs.has(tab) ? (
+            <div
+              key={tab}
+              aria-hidden={activeTab !== tab}
+              className={activeTab === tab ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+            >
+              {panels[tab]}
+            </div>
+          ) : null,
+        )}
+      </div>
+    </Suspense>
+  );
 }
 
 function StatusTab({
@@ -165,7 +196,7 @@ function BrowserTab({ onNavigateBrowser, tools }: ComputerTabPanelProps) {
       onNavigate={onNavigateBrowser}
       onLocationChange={(next) => tools.setBrowserUrl(next, next)}
       onClose={() => tools.setComputerOpen(false)}
-      visible={tools.computer.open}
+      visible={tools.computer.open && tools.computer.tab === "browser"}
     />
   );
 }
@@ -232,8 +263,8 @@ function ComputerLauncherPanel({
     },
   ] as const;
   return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-(--color-panel) px-3 py-3">
-      <div className="flex flex-col gap-1">
+    <section className="min-h-0 flex-1 overflow-y-auto bg-(--color-panel) px-4 py-4">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-0.5">
         {cards.map((card) => {
           const Icon = "icon" in card ? card.icon : null;
           const selected = card.key !== "side-chat" && activeTab === card.key;
@@ -242,7 +273,7 @@ function ComputerLauncherPanel({
               key={card.key}
               type="button"
               onClick={card.onClick}
-              className={`group flex min-h-0 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
+              className={`group flex min-h-0 items-center gap-3 border-b border-(--border)/50 px-2.5 py-2 text-left transition-colors last:border-b-0 ${
                 selected
                   ? "bg-(--color-surface-hover) text-(--fg)"
                   : "text-(--fg)/75 hover:bg-(--hover) hover:text-(--fg)"
@@ -252,7 +283,7 @@ function ComputerLauncherPanel({
                 <Icon className="h-4 w-4 shrink-0 text-(--dim)/75 transition-colors group-hover:text-(--fg)/80" />
               ) : null}
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[length:var(--fs-lg)] font-medium">
+                <span className="block truncate text-[length:var(--fs-base)] font-medium">
                   {card.title}
                 </span>
                 <span className="block truncate text-[length:var(--fs-sm)] text-(--dim)">

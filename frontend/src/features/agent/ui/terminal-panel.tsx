@@ -17,12 +17,6 @@ import {
   type TerminalAction,
 } from "@/lib/terminal-keybinds";
 
-export function preloadTerminalPanel(): void {
-  void import("@xterm/xterm");
-  void import("@xterm/addon-fit");
-  void import("@xterm/addon-web-links").catch(() => null);
-}
-
 export function TerminalPanel({ cwd, ownerKey }: { cwd: string | null; ownerKey: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<TerminalRefs>(createTerminalRefs());
@@ -44,7 +38,7 @@ export function TerminalPanel({ cwd, ownerKey }: { cwd: string | null; ownerKey:
           if ((event.target as HTMLElement)?.tagName === "A") return;
           stateRef.current.term?.focus();
         }}
-        className="min-h-0 flex-1 overflow-hidden px-3 py-2.5 [--xterm-color-background:var(--color-terminal-bg)]"
+        className="min-h-0 flex-1 overflow-hidden px-2 py-2 [--xterm-color-background:var(--color-terminal-bg)]"
       />
     </section>
   );
