@@ -9,6 +9,7 @@ const model_service = @import("services/models.zig");
 const tokenization_service = @import("services/tokenization.zig");
 const recipe_service = @import("services/recipes.zig");
 const lifecycle = @import("services/lifecycle.zig");
+const telemetry = @import("services/telemetry.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -257,6 +258,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/status")) {
         const response = try supervisor.statusPayload(database, recipe_column, inference_port, default_trust_remote_code);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/gpus")) {
+        const response = try telemetry.gpuPayload(allocator, io, system);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;

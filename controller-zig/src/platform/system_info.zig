@@ -7,6 +7,7 @@ pub const Snapshot = struct {
     os: []u8,
     cpu_model: ?[]u8,
     cpu_cores: usize,
+    memory_total_bytes: u64,
     memory_gb: u64,
     apple_silicon: bool,
 
@@ -39,6 +40,7 @@ pub fn detect(allocator: std.mem.Allocator) !Snapshot {
         .os = os,
         .cpu_model = cpu_model,
         .cpu_cores = std.Thread.getCpuCount() catch 1,
+        .memory_total_bytes = memory_bytes,
         .memory_gb = if (memory_bytes == 0) 0 else (memory_bytes + bytes_per_gib / 2) / bytes_per_gib,
         .apple_silicon = builtin.os.tag == .macos and builtin.cpu.arch == .aarch64,
     };
