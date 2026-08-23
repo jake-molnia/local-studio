@@ -105,6 +105,9 @@ pub const Manager = struct {
     pub fn piVersion(manager: *const Manager) ?[]const u8 {
         return manager.pi.version;
     }
+    pub fn piSource(manager: *const Manager) []const u8 {
+        return manager.pi.source;
+    }
     pub fn catalogPayload(manager: *Manager) ![]u8 {
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
@@ -336,8 +339,9 @@ pub const Manager = struct {
             if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
             return session;
         }
-        const cwd = cwd_value orelse try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator);
-        defer if (cwd_value == null) manager.allocator.free(cwd);
+        const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
+        defer if (resolved_cwd) |value| manager.allocator.free(value);
+        const cwd = cwd_value orelse resolved_cwd.?;
         if (!std.fs.path.isAbsolute(cwd)) return error.CwdMustBeAbsolute;
         const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "pi", "sessions" });
         errdefer manager.allocator.free(session_dir);

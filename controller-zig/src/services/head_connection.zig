@@ -13,7 +13,7 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, data_dir: []const u8) ![]u8
     return response(allocator, &connection.?);
 }
 
-pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, data_dir: []const u8, hostname: []const u8, os: []const u8, pi_available: bool, document: []const u8) ![]u8 {
+pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, data_dir: []const u8, hostname: []const u8, os: []const u8, pi_available: bool, pi_version: ?[]const u8, pi_source: []const u8, document: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHeadConnection;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidHeadConnection;
@@ -32,7 +32,7 @@ pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, cl
     io.random(&random);
     const generated = std.fmt.bytesToHex(random, .lower);
     const node_id = if (existing) |value| value.node_id else generated[0..];
-    const enrollment = try enrollmentDocument(allocator, mode, node_id, hostname, os, node_address, node_api_key, pi_available);
+    const enrollment = try enrollmentDocument(allocator, mode, node_id, hostname, os, node_address, node_api_key, pi_available, pi_version, pi_source);
     defer allocator.free(enrollment);
     try sendEnrollment(allocator, client, url, api_key, .POST, "/api/agent/enrollments", enrollment);
     try repository.save(allocator, io, data_dir, name, url, api_key, node_id, node_address);
@@ -68,7 +68,7 @@ fn response(allocator: std.mem.Allocator, connection: *const repository.Connecti
     return output.toOwnedSlice();
 }
 
-fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: []const u8, hostname: []const u8, os: []const u8, address: []const u8, api_key: []const u8, pi_available: bool) ![]u8 {
+fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: []const u8, hostname: []const u8, os: []const u8, address: []const u8, api_key: []const u8, pi_available: bool, pi_version: ?[]const u8, pi_source: []const u8) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"nodeId\":");
@@ -85,9 +85,17 @@ fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: 
     try std.json.Stringify.value(api_key, .{}, &output.writer);
     try output.writer.writeAll(",\"role\":");
     try std.json.Stringify.value(if (mode == .worker) "worker" else "standalone", .{}, &output.writer);
-    try output.writer.print(",\"capabilities\":{{\"compute\":true,\"harnesses\":[{s}],\"mcp\":{},\"terminal\":{},\"browser\":false}}}}", .{
-        if (pi_available) "\"pi\"" else "", pi_available, pi_available,
+    try output.writer.print(",\"capabilities\":{{\"compute\":true,\"harnesses\":[{s}],\"mcp\":{},\"terminal\":{},\"browser\":false,\"harnessDetails\":[", .{
+        if (pi_available) "\"pi\"" else "", false, pi_available,
     });
+    if (pi_available) {
+        try output.writer.writeAll("{\"id\":\"pi\",\"version\":");
+        if (pi_version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        try output.writer.writeAll(",\"source\":");
+        try std.json.Stringify.value(pi_source, .{}, &output.writer);
+        try output.writer.writeAll(",\"capabilities\":[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]}");
+    }
+    try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
 }
 

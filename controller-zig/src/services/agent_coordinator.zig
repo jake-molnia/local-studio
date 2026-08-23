@@ -143,8 +143,8 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     try lockedSave(allocator, io, database, .{
         .id = session_id,
         .harness = requested_harness,
-        .harness_version = if (mode == .standalone) harness.piVersion() else if (existing) |session| session.harness_version else null,
-        .capabilities_json = if (existing) |session| session.capabilities_json else if (std.mem.eql(u8, requested_harness, "pi")) "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]" else "[]",
+        .harness_version = if (mode == .standalone) harness.piVersion() else target.?.harness_version orelse if (existing) |session| session.harness_version else null,
+        .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else if (std.mem.eql(u8, requested_harness, "pi")) "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]" else "[]",
         .node_id = node_id,
         .native_session_id = native_session_id,
         .project_id = project_id,

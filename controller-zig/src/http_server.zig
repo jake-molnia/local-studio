@@ -265,7 +265,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             .PUT => update: {
                 const document = try readBoundedAgentBody(allocator, request) orelse return false;
                 defer allocator.free(document);
-                break :update head_connection.updatePayload(allocator, io, mode, client, configuration.data_dir, system.hostname, system.os, harness.piIsAvailable(), document);
+                break :update head_connection.updatePayload(allocator, io, mode, client, configuration.data_dir, system.hostname, system.os, harness.piIsAvailable(), harness.piVersion(), harness.piSource(), document);
             },
             else => unreachable,
         };

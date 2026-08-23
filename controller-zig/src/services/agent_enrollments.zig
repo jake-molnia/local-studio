@@ -134,7 +134,40 @@ fn capabilitiesValue(allocator: std.mem.Allocator, value: ?std.json.Value) !std.
         try capabilities.put(allocator, name, entry);
     }
     try capabilities.put(allocator, "harnesses", .{ .array = copied_harnesses });
+    try capabilities.put(allocator, "harnessDetails", try harnessDetailsValue(allocator, source.object.get("harnessDetails")));
     return .{ .object = capabilities };
+}
+
+fn harnessDetailsValue(allocator: std.mem.Allocator, value: ?std.json.Value) !std.json.Value {
+    const source = value orelse return .{ .array = .init(allocator) };
+    if (source != .array or source.array.items.len > 16) return error.InvalidEnrollmentCapabilities;
+    var details: std.json.Array = .init(allocator);
+    for (source.array.items) |entry| {
+        if (entry != .object) return error.InvalidEnrollmentCapabilities;
+        const id = requiredString(entry.object, "id") orelse return error.InvalidEnrollmentCapabilities;
+        if (id.len > 64) return error.InvalidEnrollmentCapabilities;
+        const capabilities = entry.object.get("capabilities") orelse return error.InvalidEnrollmentCapabilities;
+        if (capabilities != .array or capabilities.array.items.len > 64) return error.InvalidEnrollmentCapabilities;
+        var copied_capabilities: std.json.Array = .init(allocator);
+        for (capabilities.array.items) |capability| {
+            if (capability != .string or capability.string.len == 0 or capability.string.len > 64) return error.InvalidEnrollmentCapabilities;
+            try copied_capabilities.append(.{ .string = try allocator.dupe(u8, capability.string) });
+        }
+        var detail: std.json.ObjectMap = .empty;
+        try detail.put(allocator, "id", .{ .string = try allocator.dupe(u8, id) });
+        try detail.put(allocator, "version", try copyNullableString(allocator, entry.object, "version", 128));
+        try detail.put(allocator, "source", try copyNullableString(allocator, entry.object, "source", 64));
+        try detail.put(allocator, "capabilities", .{ .array = copied_capabilities });
+        try details.append(.{ .object = detail });
+    }
+    return .{ .array = details };
+}
+
+fn copyNullableString(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8, max_length: usize) !std.json.Value {
+    const value = object.get(name) orelse return .null;
+    if (value == .null) return .null;
+    if (value != .string or value.string.len == 0 or value.string.len > max_length) return error.InvalidEnrollmentCapabilities;
+    return .{ .string = try allocator.dupe(u8, value.string) };
 }
 
 fn copyOptional(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8) !std.json.Value {
@@ -189,7 +222,7 @@ fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {
     const month_day = year_day.calculateMonthDay();
     const day_seconds = epoch.getDaySeconds();
     return std.fmt.bufPrint(buffer, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
-        year_day.year, month_day.month.numeric(), month_day.day_index + 1,
+        year_day.year,                 month_day.month.numeric(),        month_day.day_index + 1,
         day_seconds.getHoursIntoDay(), day_seconds.getMinutesIntoHour(), day_seconds.getSecondsIntoMinute(),
     }) catch unreachable;
 }

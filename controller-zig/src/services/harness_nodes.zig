@@ -11,12 +11,16 @@ pub const Target = struct {
     name: []u8,
     address: []u8,
     api_key: []u8,
+    harness_version: ?[]u8,
+    capabilities_json: []u8,
 
     pub fn deinit(target: *Target) void {
         target.allocator.free(target.id);
         target.allocator.free(target.name);
         target.allocator.free(target.address);
         target.allocator.free(target.api_key);
+        if (target.harness_version) |value| target.allocator.free(value);
+        target.allocator.free(target.capabilities_json);
         target.* = undefined;
     }
 };
@@ -40,7 +44,7 @@ pub fn select(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
             if (std.mem.eql(u8, id, "local")) continue;
             const address = nullableStringField(node.object, "address") orelse continue;
             const name = stringField(node.object, "name") orelse id;
-            var target = try makeTarget(allocator, database, id, name, address);
+            var target = try makeTarget(allocator, database, id, name, address, node.object, harness);
             if (preferred_node_id) |preferred| {
                 if (std.mem.eql(u8, preferred, id)) {
                     if (fallback) |*existing| existing.deinit();
@@ -89,20 +93,56 @@ fn supportsHarness(node: std.json.Value, harness: []const u8) bool {
     return false;
 }
 
-fn makeTarget(allocator: std.mem.Allocator, database: *sqlite.Database, id: []const u8, name: []const u8, address: []const u8) !Target {
+fn makeTarget(allocator: std.mem.Allocator, database: *sqlite.Database, id: []const u8, name: []const u8, address: []const u8, node: std.json.ObjectMap, harness: []const u8) !Target {
     const owned_id = try allocator.dupe(u8, id);
     errdefer allocator.free(owned_id);
     const owned_name = try allocator.dupe(u8, name);
     errdefer allocator.free(owned_name);
     const normalized_address = try normalizeAddress(allocator, address);
     errdefer allocator.free(normalized_address);
+    const details = try harnessDetails(allocator, node, harness);
+    errdefer {
+        if (details.version) |value| allocator.free(value);
+        allocator.free(details.capabilities_json);
+    }
     return .{
         .allocator = allocator,
         .id = owned_id,
         .name = owned_name,
         .address = normalized_address,
         .api_key = try credentials.get(allocator, database, id),
+        .harness_version = details.version,
+        .capabilities_json = details.capabilities_json,
     };
+}
+
+const HarnessDetails = struct {
+    version: ?[]u8,
+    capabilities_json: []u8,
+};
+
+fn harnessDetails(allocator: std.mem.Allocator, node: std.json.ObjectMap, harness: []const u8) !HarnessDetails {
+    const capabilities = node.get("capabilities") orelse return emptyHarnessDetails(allocator);
+    if (capabilities != .object) return emptyHarnessDetails(allocator);
+    const details = capabilities.object.get("harnessDetails") orelse return emptyHarnessDetails(allocator);
+    if (details != .array) return emptyHarnessDetails(allocator);
+    for (details.array.items) |entry| {
+        if (entry != .object) continue;
+        const id = stringField(entry.object, "id") orelse continue;
+        if (!std.mem.eql(u8, id, harness)) continue;
+        const version = if (nullableStringField(entry.object, "version")) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (version) |value| allocator.free(value);
+        const advertised = entry.object.get("capabilities") orelse return .{ .version = version, .capabilities_json = try allocator.dupe(u8, "[]") };
+        var output: Io.Writer.Allocating = .init(allocator);
+        errdefer output.deinit();
+        try std.json.Stringify.value(advertised, .{}, &output.writer);
+        return .{ .version = version, .capabilities_json = try output.toOwnedSlice() };
+    }
+    return emptyHarnessDetails(allocator);
+}
+
+fn emptyHarnessDetails(allocator: std.mem.Allocator) !HarnessDetails {
+    return .{ .version = null, .capabilities_json = try allocator.dupe(u8, "[]") };
 }
 
 fn normalizeAddress(allocator: std.mem.Allocator, address: []const u8) ![]u8 {
