@@ -20,7 +20,7 @@
     "start": "npm --prefix frontend start",
     "check": "npm run check:automation && npm run check:contracts && npm run check:structure && npm run check:frontend && npm run check:controller && npm run check:agent-runtime",
     "check:automation": "node scripts/project.mjs audit-layout",
-    "check:contracts": "node scripts/project.mjs validate-contracts",
+    "check:contracts": "node scripts/project.mjs validate-contracts && node controller/contracts/validate-http-routes.mjs",
     "check:structure": "node scripts/project.mjs validate-structure",
     "check:frontend": "npm --prefix frontend run check:quality",
     "check:controller": "cd controller && bun run typecheck && bun run lint && bun run check",
