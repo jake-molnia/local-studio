@@ -15,6 +15,7 @@ const runtime_info = @import("services/runtime_info.zig");
 const metrics = @import("services/metrics.zig");
 const logs = @import("services/logs.zig");
 const studio_settings = @import("services/studio_settings.zig");
+const storage_service = @import("services/storage.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -186,6 +187,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/settings") and request.head.method == .POST) {
         return serveStudioSettingsUpdate(allocator, io, configuration, studio, database, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/storage")) {
+        const models_dir = try studio.modelsDirectory(allocator, io);
+        defer allocator.free(models_dir);
+        const response = try storage_service.payload(allocator, io, models_dir);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
