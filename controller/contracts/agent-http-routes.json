@@ -227,6 +227,30 @@
       "streaming": "never"
     },
     {
+      "method": "GET",
+      "path": "/api/agent/plugins",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/plugins",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/plugins",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/plugins/source",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
       "method": "POST",
       "path": "/api/agent/terminal",
       "ownership": "head",
@@ -445,6 +469,30 @@
     {
       "method": "GET",
       "path": "/internal/node/v1/connectors/ssh-server-path",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/plugins",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/plugins",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/internal/node/v1/plugins",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/plugins/source",
       "ownership": "worker",
       "streaming": "never"
     },

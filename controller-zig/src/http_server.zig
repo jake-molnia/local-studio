@@ -43,6 +43,7 @@ const agent_enrollments = @import("services/agent_enrollments.zig");
 const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
+const agent_plugins = @import("services/agent_plugins.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
 const agent_pty = @import("services/agent_pty.zig");
 const agent_browser = @import("services/agent_browser.zig");
@@ -435,6 +436,26 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/plugins") or std.mem.eql(u8, route.path, "/api/agent/plugins/source")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const id = if (request.head.method == .DELETE or std.mem.endsWith(u8, route.path, "/source")) try queryParameter(allocator, request.head.target, "id") else null;
+        defer if (id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (std.mem.endsWith(u8, route.path, "/source"))
+            agent_plugins.sourcePayload(allocator, io, mode, environment, client, database, node_id, id orelse return respondPluginFailure(request, error.PluginIdRequired))
+        else switch (request.head.method) {
+            .GET => agent_plugins.listPayload(allocator, io, mode, environment, client, database, node_id),
+            .POST => agent_plugins.upsertPayload(allocator, io, mode, environment, client, database, node_id, document orelse return false),
+            .DELETE => agent_plugins.deletePayload(allocator, io, mode, environment, client, database, node_id, id orelse return respondPluginFailure(request, error.PluginIdRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondPluginFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.startsWith(u8, route.path, "/api/agent/browser/")) {
         const target = try allocator.dupe(u8, request.head.target);
         defer allocator.free(target);
@@ -744,6 +765,24 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = try agent_connectors.sshPathLocal(allocator, io);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/plugins") or std.mem.eql(u8, route.path, "/internal/node/v1/plugins/source")) {
+        const id = if (request.head.method == .DELETE or std.mem.endsWith(u8, route.path, "/source")) try queryParameter(allocator, request.head.target, "id") else null;
+        defer if (id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (std.mem.endsWith(u8, route.path, "/source"))
+            agent_plugins.sourceLocal(allocator, io, environment, id orelse return respondPluginFailure(request, error.PluginIdRequired))
+        else switch (request.head.method) {
+            .GET => agent_plugins.listLocal(allocator, io, environment),
+            .POST => agent_plugins.upsertLocal(allocator, io, environment, document orelse return false),
+            .DELETE => agent_plugins.deleteLocal(allocator, io, environment, id orelse return respondPluginFailure(request, error.PluginIdRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondPluginFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/terminal") or std.mem.eql(u8, route.path, "/internal/node/v1/terminal/resolve-cwd")) {
@@ -2049,6 +2088,29 @@ fn respondSessionFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.ProjectPathOutsideRoots => "cwd is not an allowed workspace",
         error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable => "The session's harness node is unavailable",
         error.HarnessUnavailable => "The session harness is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondPluginFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.PluginNotFound => .not_found,
+        error.PluginIdRequired, error.InvalidPluginId, error.InvalidPluginPayload => .bad_request,
+        error.PluginSourceTooLarge => .payload_too_large,
+        error.PluginReadOnly, error.PluginNodeRequired => .conflict,
+        error.PluginNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.PluginNotFound => "Unknown plugin",
+        error.PluginIdRequired => "id is required",
+        error.InvalidPluginId => "A plugin name may use lowercase letters, digits, and hyphens",
+        error.InvalidPluginPayload => "invalid plugin payload",
+        error.PluginSourceTooLarge => "Plugin source exceeds 256 KB",
+        error.PluginReadOnly => "Plugin is a directory, not a single file",
+        error.PluginNodeRequired => "No enrolled node offers harness plugin storage",
+        error.PluginNodeUnavailable => "The plugin node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
