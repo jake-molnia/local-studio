@@ -156,6 +156,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/connectors/grants",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/connectors/grants",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/connectors/grants",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/internal/node/v1/projects",
       "ownership": "worker",
       "streaming": "never"
@@ -187,6 +205,24 @@
     {
       "method": "DELETE",
       "path": "/internal/node/v1/connectors",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/connector-grants",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "PUT",
+      "path": "/internal/node/v1/connector-grants",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/internal/node/v1/connector-grants",
       "ownership": "worker",
       "streaming": "never"
     },

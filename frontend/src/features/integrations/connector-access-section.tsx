@@ -203,10 +203,11 @@ export function ConnectorAccessSection() {
                             title={`Revoke ${connectorLabel(grant.connectorId)}`}
                             onClick={() =>
                               void mutate({
-                                method: "DELETE",
+                                method: "PUT",
                                 body: JSON.stringify({
                                   modelId: grant.modelId,
                                   connectorId: grant.connectorId,
+                                  tools: [],
                                 }),
                               })
                             }

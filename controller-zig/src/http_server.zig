@@ -364,6 +364,26 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/connectors/grants")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
+        defer if (model_id) |value| allocator.free(value);
+        const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
+        defer if (connector_id) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => agent_connectors.grantsPayload(allocator, io, mode, client, database, node_id),
+            .PUT => agent_connectors.putGrantPayload(allocator, io, mode, client, database, node_id, document orelse return false),
+            .DELETE => agent_connectors.deleteGrantPayload(allocator, io, mode, client, database, node_id, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
         const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
@@ -462,6 +482,24 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             .GET => agent_connectors.listLocal(allocator, io, database),
             .POST => agent_connectors.upsertLocal(allocator, io, database, document orelse return false),
             .DELETE => agent_connectors.deleteLocal(allocator, io, database, id orelse return respondConnectorFailure(request, error.ConnectorIdRequired)),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-grants")) {
+        const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
+        defer if (model_id) |value| allocator.free(value);
+        const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
+        defer if (connector_id) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => agent_connectors.grantsLocal(allocator, io, database),
+            .PUT => agent_connectors.putGrantLocal(allocator, io, database, document orelse return false),
+            .DELETE => agent_connectors.deleteGrantLocal(allocator, io, database, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
             else => unreachable,
         };
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
@@ -1581,7 +1619,7 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
 
 fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.ConnectorIdRequired, error.InvalidConnectorId, error.ConnectorTransportRequired, error.InvalidConnectorTransport, error.ConnectorCommandRequired, error.ConnectorUrlRequired, error.InvalidConnectorUrl, error.InvalidConnectorPayload => .bad_request,
+        error.ConnectorIdRequired, error.InvalidConnectorId, error.ConnectorTransportRequired, error.InvalidConnectorTransport, error.ConnectorCommandRequired, error.ConnectorUrlRequired, error.InvalidConnectorUrl, error.InvalidConnectorPayload, error.InvalidConnectorGrantPayload, error.ConnectorGrantFieldsRequired => .bad_request,
         error.ConnectorNamespaceCollision, error.ConnectorNodeRequired, error.ConnectorNodeRejected => .conflict,
         error.ConnectorNodeUnavailable => .service_unavailable,
         else => .internal_server_error,
@@ -1595,6 +1633,8 @@ fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.ConnectorUrlRequired => "url is required for http",
         error.InvalidConnectorUrl => "url must start with http:// or https://",
         error.InvalidConnectorPayload => "invalid connector payload",
+        error.InvalidConnectorGrantPayload => "invalid connector grant payload",
+        error.ConnectorGrantFieldsRequired => "modelId, connectorId and tools are required",
         error.ConnectorNamespaceCollision => "Connector tool namespace collides with an existing connector",
         error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
         error.ConnectorNodeRejected => "The connector node rejected the request",

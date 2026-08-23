@@ -12,6 +12,33 @@ pub const DocumentList = struct {
     }
 };
 
+pub const Grant = struct {
+    allocator: std.mem.Allocator,
+    model_id: []u8,
+    connector_id: []u8,
+    tools_json: []u8,
+    created_at: []u8,
+
+    pub fn deinit(grant: *Grant) void {
+        grant.allocator.free(grant.model_id);
+        grant.allocator.free(grant.connector_id);
+        grant.allocator.free(grant.tools_json);
+        grant.allocator.free(grant.created_at);
+        grant.* = undefined;
+    }
+};
+
+pub const GrantList = struct {
+    allocator: std.mem.Allocator,
+    grants: []Grant,
+
+    pub fn deinit(grant_list: *GrantList) void {
+        for (grant_list.grants) |*grant| grant.deinit();
+        grant_list.allocator.free(grant_list.grants);
+        grant_list.* = undefined;
+    }
+};
+
 pub fn initialize(database: *sqlite.Database) !void {
     try database.executeScript(
         \\CREATE TABLE IF NOT EXISTS agent_connectors (
@@ -67,6 +94,73 @@ pub fn delete(database: *sqlite.Database, id: []const u8) !void {
     defer statement.deinit();
     try statement.bindText(1, id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn listGrants(allocator: std.mem.Allocator, database: *sqlite.Database) !GrantList {
+    var grants: std.ArrayList(Grant) = .empty;
+    errdefer {
+        for (grants.items) |*grant| grant.deinit();
+        grants.deinit(allocator);
+    }
+    var statement = try database.prepare("SELECT model_id, connector_id, tools_json, created_at FROM agent_connector_grants ORDER BY model_id, connector_id LIMIT 10000");
+    defer statement.deinit();
+    while (try statement.step() == .row) {
+        const model_id = try allocator.dupe(u8, statement.columnText(0) orelse return error.InvalidConnectorGrant);
+        errdefer allocator.free(model_id);
+        const connector_id = try allocator.dupe(u8, statement.columnText(1) orelse return error.InvalidConnectorGrant);
+        errdefer allocator.free(connector_id);
+        const tools_json = try allocator.dupe(u8, statement.columnText(2) orelse return error.InvalidConnectorGrant);
+        errdefer allocator.free(tools_json);
+        try grants.append(allocator, .{
+            .allocator = allocator,
+            .model_id = model_id,
+            .connector_id = connector_id,
+            .tools_json = tools_json,
+            .created_at = try allocator.dupe(u8, statement.columnText(3) orelse return error.InvalidConnectorGrant),
+        });
+    }
+    return .{ .allocator = allocator, .grants = try grants.toOwnedSlice(allocator) };
+}
+
+pub fn saveGrant(database: *sqlite.Database, model_id: []const u8, connector_id: []const u8, tools_json: []const u8, created_at: []const u8) !void {
+    var statement = try database.prepare(
+        \\INSERT INTO agent_connector_grants (model_id, connector_id, tools_json, created_at) VALUES (?, ?, ?, ?)
+        \\ON CONFLICT(model_id, connector_id) DO UPDATE SET tools_json = excluded.tools_json, created_at = excluded.created_at
+    );
+    defer statement.deinit();
+    try statement.bindText(1, model_id);
+    try statement.bindText(2, connector_id);
+    try statement.bindText(3, tools_json);
+    try statement.bindText(4, created_at);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn deleteGrant(database: *sqlite.Database, model_id: []const u8, connector_id: []const u8) !void {
+    var statement = try database.prepare("DELETE FROM agent_connector_grants WHERE model_id = ? AND connector_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, model_id);
+    try statement.bindText(2, connector_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn deleteConnectorGrants(database: *sqlite.Database, connector_id: []const u8) !void {
+    var grants = try database.prepare("DELETE FROM agent_connector_grants WHERE connector_id = ?");
+    defer grants.deinit();
+    try grants.bindText(1, connector_id);
+    if (try grants.step() != .done) return error.DatabaseUnexpectedRow;
+    var seed = try database.prepare("DELETE FROM agent_connector_grant_seeds WHERE connector_id = ?");
+    defer seed.deinit();
+    try seed.bindText(1, connector_id);
+    if (try seed.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn seedGrant(database: *sqlite.Database, connector_id: []const u8, created_at: []const u8) !void {
+    var seed = try database.prepare("INSERT OR IGNORE INTO agent_connector_grant_seeds (connector_id) VALUES (?)");
+    defer seed.deinit();
+    try seed.bindText(1, connector_id);
+    if (try seed.step() != .done) return error.DatabaseUnexpectedRow;
+    if (database.changes() == 0) return;
+    try saveGrant(database, "*", connector_id, "\"all\"", created_at);
 }
 
 fn queryDocuments(allocator: std.mem.Allocator, database: *sqlite.Database, sql: []const u8) !DocumentList {

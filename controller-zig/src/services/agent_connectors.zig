@@ -108,6 +108,10 @@ pub fn upsertLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     const stored_value = try stringify(allocator, incoming.value);
     defer allocator.free(stored_value);
     try repository.save(database, id, enabled, stored_value);
+    if (enabled) {
+        var timestamp_buffer: [24]u8 = undefined;
+        try repository.seedGrant(database, id, formatTimestamp(io, &timestamp_buffer));
+    }
     return listLocked(allocator, database);
 }
 
@@ -116,7 +120,151 @@ pub fn deleteLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     try database.lock(io);
     defer database.unlock(io);
     try repository.delete(database, id);
+    try repository.deleteConnectorGrants(database, id);
     return listLocked(allocator, database);
+}
+
+pub fn grantsPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8) ![]u8 {
+    if (mode == .standalone) return grantsLocal(allocator, io, database);
+    var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
+    defer target.deinit();
+    return node_transport.get(allocator, client, &target, "/internal/node/v1/connector-grants") catch |failure| switch (failure) {
+        error.NodeUnavailable => error.ConnectorNodeUnavailable,
+        else => failure,
+    };
+}
+
+pub fn putGrantPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
+    if (mode == .standalone) return putGrantLocal(allocator, io, database, document);
+    var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
+    defer target.deinit();
+    return node_transport.send(allocator, client, &target, "/internal/node/v1/connector-grants", .PUT, document) catch |failure| switch (failure) {
+        error.NodeRequestRejected => error.ConnectorNodeRejected,
+        else => failure,
+    };
+}
+
+pub fn deleteGrantPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, model_id: []const u8, connector_id: []const u8) ![]u8 {
+    try validateGrantIds(model_id, connector_id);
+    if (mode == .standalone) return deleteGrantLocal(allocator, io, database, model_id, connector_id);
+    var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
+    defer target.deinit();
+    var document: Io.Writer.Allocating = .init(allocator);
+    defer document.deinit();
+    try document.writer.writeAll("{\"modelId\":");
+    try std.json.Stringify.value(model_id, .{}, &document.writer);
+    try document.writer.writeAll(",\"connectorId\":");
+    try std.json.Stringify.value(connector_id, .{}, &document.writer);
+    try document.writer.writeAll(",\"tools\":[]}");
+    return node_transport.send(allocator, client, &target, "/internal/node/v1/connector-grants", .PUT, document.writer.buffered()) catch |failure| switch (failure) {
+        error.NodeRequestRejected => error.ConnectorNodeRejected,
+        else => failure,
+    };
+}
+
+pub fn grantsLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) ![]u8 {
+    try database.lock(io);
+    defer database.unlock(io);
+    var grants = try repository.listGrants(allocator, database);
+    defer grants.deinit();
+    var connectors = try repository.listEnabled(allocator, database);
+    defer connectors.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"grants\":[");
+    try writeGrants(&output.writer, grants.grants);
+    try output.writer.writeAll("],\"connectors\":[");
+    for (connectors.documents, 0..) |document, index| {
+        if (index > 0) try output.writer.writeByte(',');
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidConnectorRecord;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidConnectorRecord;
+        const id = stringField(parsed.value.object, "id") orelse return error.InvalidConnectorRecord;
+        const name = stringField(parsed.value.object, "name") orelse id;
+        try output.writer.writeAll("{\"id\":");
+        try std.json.Stringify.value(id, .{}, &output.writer);
+        try output.writer.writeAll(",\"name\":");
+        try std.json.Stringify.value(name, .{}, &output.writer);
+        try output.writer.writeAll(",\"tools\":[]}");
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
+pub fn putGrantLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, document: []const u8) ![]u8 {
+    var parsed = try parseGrant(allocator, document, true);
+    defer parsed.deinit();
+    const model_id = stringField(parsed.value.object, "modelId") orelse return error.ConnectorGrantFieldsRequired;
+    const connector_id = stringField(parsed.value.object, "connectorId") orelse return error.ConnectorGrantFieldsRequired;
+    const tools = parsed.value.object.get("tools") orelse return error.ConnectorGrantFieldsRequired;
+    const tools_json = try stringify(allocator, tools);
+    defer allocator.free(tools_json);
+    try database.lock(io);
+    defer database.unlock(io);
+    if (tools == .array and tools.array.items.len == 0) {
+        try repository.deleteGrant(database, model_id, connector_id);
+    } else {
+        var timestamp_buffer: [24]u8 = undefined;
+        try repository.saveGrant(database, model_id, connector_id, tools_json, formatTimestamp(io, &timestamp_buffer));
+    }
+    return grantsOnlyLocked(allocator, database);
+}
+
+pub fn deleteGrantLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, model_id: []const u8, connector_id: []const u8) ![]u8 {
+    try validateGrantIds(model_id, connector_id);
+    try database.lock(io);
+    defer database.unlock(io);
+    try repository.deleteGrant(database, model_id, connector_id);
+    return grantsOnlyLocked(allocator, database);
+}
+
+fn grantsOnlyLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
+    var grants = try repository.listGrants(allocator, database);
+    defer grants.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"grants\":[");
+    try writeGrants(&output.writer, grants.grants);
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
+fn writeGrants(writer: *Io.Writer, grants: []const repository.Grant) !void {
+    for (grants, 0..) |grant, index| {
+        if (index > 0) try writer.writeByte(',');
+        try writer.writeAll("{\"modelId\":");
+        try std.json.Stringify.value(grant.model_id, .{}, writer);
+        try writer.writeAll(",\"connectorId\":");
+        try std.json.Stringify.value(grant.connector_id, .{}, writer);
+        try writer.writeAll(",\"tools\":");
+        try writer.writeAll(grant.tools_json);
+        try writer.writeAll(",\"createdAt\":");
+        try std.json.Stringify.value(grant.created_at, .{}, writer);
+        try writer.writeByte('}');
+    }
+}
+
+fn parseGrant(allocator: std.mem.Allocator, document: []const u8, require_tools: bool) !std.json.Parsed(std.json.Value) {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidConnectorGrantPayload;
+    errdefer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorGrantPayload;
+    const model_id = stringField(parsed.value.object, "modelId") orelse return error.ConnectorGrantFieldsRequired;
+    const connector_id = stringField(parsed.value.object, "connectorId") orelse return error.ConnectorGrantFieldsRequired;
+    if (model_id.len > 512 or !validId(connector_id)) return error.InvalidConnectorGrantPayload;
+    if (require_tools) {
+        const tools = parsed.value.object.get("tools") orelse return error.ConnectorGrantFieldsRequired;
+        if (tools == .string) {
+            if (!std.mem.eql(u8, tools.string, "all")) return error.InvalidConnectorGrantPayload;
+        } else if (tools == .array) {
+            if (tools.array.items.len > 1000) return error.InvalidConnectorGrantPayload;
+            for (tools.array.items) |tool| if (tool != .string or tool.string.len == 0 or tool.string.len > 512) return error.InvalidConnectorGrantPayload;
+        } else return error.InvalidConnectorGrantPayload;
+    }
+    return parsed;
+}
+
+fn validateGrantIds(model_id: []const u8, connector_id: []const u8) !void {
+    if (model_id.len == 0 or model_id.len > 512 or !validId(connector_id)) return error.InvalidConnectorGrantPayload;
 }
 
 fn listLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
@@ -235,4 +383,13 @@ fn stringify(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
     errdefer output.deinit();
     try std.json.Stringify.value(value, .{}, &output.writer);
     return output.toOwnedSlice();
+}
+
+fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {
+    const seconds = Io.Clock.real.now(io).toSeconds();
+    const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(seconds, 0)) };
+    const year_day = epoch.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch.getDaySeconds();
+    return std.fmt.bufPrint(buffer, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{ year_day.year, month_day.month.numeric(), month_day.day_index + 1, day_seconds.getHoursIntoDay(), day_seconds.getMinutesIntoHour(), day_seconds.getSecondsIntoMinute() }) catch unreachable;
 }
