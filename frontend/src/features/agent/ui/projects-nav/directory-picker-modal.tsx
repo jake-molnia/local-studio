@@ -46,7 +46,7 @@ export function ProjectDirectoryPickerModal({
       setDraftPath(payload.path);
       setParentPath(payload.parent);
       setHomePath(payload.home);
-      setEntries(payload.entries ?? []);
+      setEntries((payload.entries ?? []).filter((entry) => !entry.name.startsWith(".")));
       setActiveIndex(0);
     } catch (loadError) {
       setBrowseError(loadError instanceof Error ? loadError.message : "Failed to list directories");
