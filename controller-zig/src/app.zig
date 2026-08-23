@@ -9,6 +9,7 @@ const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const downloads = @import("repository/downloads.zig");
 const agent_control = @import("repository/agent_control.zig");
+const agent_automations = @import("repository/agent_automations.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
@@ -40,6 +41,7 @@ pub const App = struct {
         try peak_metrics.initialize(&database);
         try downloads.initialize(&database);
         try agent_control.initialize(&database);
+        try agent_automations.initialize(&database);
         try downloads.rehydrate(allocator, &database);
         const recipe_column = try recipes.initialize(&database);
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});
