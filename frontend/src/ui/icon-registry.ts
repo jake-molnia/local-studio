@@ -116,6 +116,7 @@ export {
   Slash,
   Smartphone,
   Sparkles,
+  Star,
   Square,
   SquarePen,
   Sun,
