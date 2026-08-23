@@ -1,7 +1,7 @@
 @media (max-width: 768px) {
   :root {
     --sidebar-w: min(240px, calc(100vw - 48px));
-    --workbench-tab-height: 32px;
+    --workbench-tab-height: var(--h-toolbar);
     --ui-control-height: 36px;
   }
 
