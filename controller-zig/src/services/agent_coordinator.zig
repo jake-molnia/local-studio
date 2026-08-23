@@ -6,22 +6,10 @@ const harness_nodes = @import("harness_nodes.zig");
 const harness_catalog = @import("harness_catalog.zig");
 const harness_events = @import("harness_events.zig");
 const harness_runtime = @import("harness_runtime.zig");
+const node_transport = @import("node_transport.zig");
 
 const Io = std.Io;
 const http = std.http;
-const max_response_bytes = 16 * 1024 * 1024;
-
-const Response = struct {
-    allocator: std.mem.Allocator,
-    status: http.Status,
-    storage: []u8,
-    body: []const u8,
-
-    fn deinit(response: *Response) void {
-        response.allocator.free(response.storage);
-        response.* = undefined;
-    }
-};
 
 const EventSnapshot = struct {
     session: records.Session,
@@ -326,46 +314,17 @@ fn writeStatusEvent(writer: *Io.Writer, session: *const records.Session, phase: 
 }
 
 fn remotePost(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8, payload: []const u8) ![]u8 {
-    var response = try fetch(allocator, client, target, path, .POST, payload);
-    defer response.deinit();
-    if (!success(response.status)) return error.HarnessCommandRejected;
-    return allocator.dupe(u8, response.body);
+    return node_transport.send(allocator, client, target, path, .POST, payload) catch |failure| switch (failure) {
+        error.NodeRequestRejected => error.HarnessCommandRejected,
+        else => failure,
+    };
 }
 
 fn remoteGet(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8) ![]u8 {
-    var response = try fetch(allocator, client, target, path, .GET, null);
-    defer response.deinit();
-    if (!success(response.status)) return error.HarnessNodeUnavailable;
-    return allocator.dupe(u8, response.body);
-}
-
-fn fetch(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8, method: http.Method, payload: ?[]const u8) !Response {
-    const url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ target.address, path });
-    defer allocator.free(url);
-    const authorization = if (target.api_key.len > 0) try std.fmt.allocPrint(allocator, "Bearer {s}", .{target.api_key}) else null;
-    defer if (authorization) |value| allocator.free(value);
-    var headers: [3]http.Header = undefined;
-    headers[0] = .{ .name = "X-Local-Studio-Federation-Hop", .value = "head" };
-    headers[1] = .{ .name = "Content-Type", .value = "application/json" };
-    var count: usize = 2;
-    if (authorization) |value| {
-        headers[count] = .{ .name = "Authorization", .value = value };
-        count += 1;
-    }
-    const storage = try allocator.alloc(u8, max_response_bytes);
-    errdefer allocator.free(storage);
-    var output: Io.Writer = .fixed(storage);
-    const response = try client.fetch(.{
-        .location = .{ .url = url },
-        .method = method,
-        .payload = payload,
-        .redirect_behavior = .unhandled,
-        .keep_alive = false,
-        .headers = .{ .accept_encoding = .omit },
-        .extra_headers = headers[0..count],
-        .response_writer = &output,
-    });
-    return .{ .allocator = allocator, .status = response.status, .storage = storage, .body = output.buffered() };
+    return node_transport.get(allocator, client, target, path) catch |failure| switch (failure) {
+        error.NodeUnavailable => error.HarnessNodeUnavailable,
+        else => failure,
+    };
 }
 
 fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session_id: []const u8, document: []const u8) !void {
