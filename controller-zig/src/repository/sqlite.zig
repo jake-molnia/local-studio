@@ -147,6 +147,7 @@ pub const Database = struct {
         const opened = handle orelse return error.DatabaseOpenFailed;
         errdefer _ = api.close_v2(opened);
         if (api.busy_timeout(opened, 5_000) != SQLITE_OK) return error.DatabaseConfigureFailed;
+        if (!std.mem.eql(u8, path, ":memory:")) _ = std.c.chmod(path_z.ptr, 0o600);
         return .{ .allocator = allocator, .library = library, .api = api, .handle = opened };
     }
 

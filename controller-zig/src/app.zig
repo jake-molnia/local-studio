@@ -1,6 +1,7 @@
 const std = @import("std");
 const config_module = @import("config.zig");
 const http_server = @import("http_server.zig");
+const rigs = @import("repository/rigs.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 
@@ -18,6 +19,7 @@ pub const App = struct {
         errdefer if (database) |*opened| opened.deinit();
         if (database) |*opened| {
             if (!try opened.quickCheck()) return error.DatabaseIntegrityCheckFailed;
+            try rigs.initialize(opened);
             std.log.info("SQLite {s} compatibility database opened", .{opened.version()});
         }
 
