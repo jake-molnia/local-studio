@@ -69,6 +69,7 @@ type ToolsActions = {
   setComputerTab: (tab: ComputerTab) => void;
   selectComputerTabWithoutOpening: (tab: ComputerTab) => void;
   closeComputerTab: (tab: ComputerTab) => void;
+  registerComputerTabCloseHandler: (tab: ComputerTab, handler: () => void) => () => void;
   setComputerWidth: (width: number) => void;
   setActiveComputerSession: (identity: SessionViewIdentity | null) => void;
   requestFileOpen: (path: string) => void;
@@ -166,6 +167,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
   const [computer, setComputer] = useState<ComputerState>(() => buildInitialComputer());
   const [activeComputerSessionKey, setActiveComputerSessionKey] = useState<string | null>(null);
   const activeComputerSessionRef = useRef<SessionViewIdentity | null>(null);
+  const computerTabCloseHandlersRef = useRef(new Map<ComputerTab, () => void>());
   const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
   const [contextAttachRequest, setContextAttachRequest] = useState<ContextAttachRequest | null>(
     null,
@@ -328,7 +330,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
 
   const closeComputerTab = useCallback(
     (tab: ComputerTab) => {
-      if (tab === "status" || tab === "tools") return;
+      computerTabCloseHandlersRef.current.get(tab)?.();
       updateComputer((current) => {
         const tabs = uniqueComputerTabs(current.tabs.filter((item) => item !== tab));
         const activeTab = current.tab === tab ? (tabs[tabs.length - 1] ?? "status") : current.tab;
@@ -339,6 +341,15 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     },
     [updateComputer],
   );
+
+  const registerComputerTabCloseHandler = useCallback((tab: ComputerTab, handler: () => void) => {
+    computerTabCloseHandlersRef.current.set(tab, handler);
+    return () => {
+      if (computerTabCloseHandlersRef.current.get(tab) === handler) {
+        computerTabCloseHandlersRef.current.delete(tab);
+      }
+    };
+  }, []);
 
   const setComputerWidth = useCallback(
     (width: number) => {
@@ -465,6 +476,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       setComputerTab,
       selectComputerTabWithoutOpening,
       closeComputerTab,
+      registerComputerTabCloseHandler,
       setComputerWidth,
       setActiveComputerSession,
       requestFileOpen,
@@ -484,6 +496,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       setComputerTab,
       selectComputerTabWithoutOpening,
       closeComputerTab,
+      registerComputerTabCloseHandler,
       setComputerWidth,
       setActiveComputerSession,
       requestFileOpen,

@@ -17,18 +17,6 @@ export type PendingTool = {
   tool: ComputerTab;
 };
 
-export type ThreadTabGroup = {
-  id: string;
-  title: string;
-  tabs: WorkbenchTab[];
-};
-
-export type ProjectTabGroup = {
-  id: string;
-  name: string;
-  threads: ThreadTabGroup[];
-};
-
 export type WorkbenchNavigation = {
   focusedSession: OpenAgentSession | null;
   currentProjectId: string | null;
@@ -62,52 +50,6 @@ export function dedupeTabs(tabs: readonly WorkbenchTab[]): WorkbenchTab[] {
   return order.flatMap((id) => {
     const tab = byId.get(id);
     return tab ? [tab] : [];
-  });
-}
-
-export function buildProjectGroups(
-  tabs: readonly WorkbenchTab[],
-  projectNames: ReadonlyMap<string, string>,
-): ProjectTabGroup[] {
-  const projectOrder: string[] = [];
-  const projects = new Map<
-    string,
-    { name: string; threadOrder: string[]; threads: Map<string, ThreadTabGroup> }
-  >();
-  for (const tab of tabs) {
-    const projectId = tab.projectId ?? "workspace";
-    let project = projects.get(projectId);
-    if (!project) {
-      project = {
-        name: projectNames.get(projectId) ?? "Workspace",
-        threadOrder: [],
-        threads: new Map(),
-      };
-      projects.set(projectId, project);
-      projectOrder.push(projectId);
-    }
-    let thread = project.threads.get(tab.groupId);
-    if (!thread) {
-      thread = { id: tab.groupId, title: tab.groupTitle, tabs: [] };
-      project.threads.set(tab.groupId, thread);
-      project.threadOrder.push(tab.groupId);
-    }
-    thread.title = tab.groupTitle;
-    thread.tabs.push(tab);
-  }
-  return projectOrder.flatMap((projectId) => {
-    const project = projects.get(projectId);
-    if (!project) return [];
-    return [
-      {
-        id: projectId,
-        name: project.name,
-        threads: project.threadOrder.flatMap((threadId) => {
-          const thread = project.threads.get(threadId);
-          return thread ? [thread] : [];
-        }),
-      },
-    ];
   });
 }
 
@@ -289,17 +231,6 @@ export function closeFocusTarget(
   fallback: WorkbenchTab,
 ): WorkbenchTab | null {
   return activeId === closingId ? (nextActive ?? fallback) : null;
-}
-
-export function resolveActiveScope(
-  state: WorkbenchState,
-  focusedSession: OpenAgentSession | null,
-  projectId: string | null,
-): WorkbenchTab {
-  return (
-    state.tabs.find((tab) => tab.id === state.activeId) ??
-    (focusedSession ? taskTab(focusedSession) : emptyTaskTab(projectId))
-  );
 }
 
 export function promoteDraftTabs(

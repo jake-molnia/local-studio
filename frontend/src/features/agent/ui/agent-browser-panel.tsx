@@ -91,6 +91,7 @@ export function AgentBrowserPanel({
   gitSummary,
 }: AgentBrowserPanelProps) {
   const tools = useTools();
+  const { closeComputerTab, registerComputerTabCloseHandler } = tools;
   const sideChatScope =
     focusedSession?.piSessionId ??
     focusedSession?.id ??
@@ -204,22 +205,25 @@ export function AgentBrowserPanel({
     },
     [handles, sideChatSeed],
   );
-  const closeSideChat = useCallback(() => {
+  const resetSideChat = useCallback(() => {
     handles.removeDetachedSession(sideChatSeed.id);
     setSideChatSeeds((current) => ({
       ...current,
       [sideChatScope]: createSideChatSession(activeProject, focusedSession, activeModelId),
     }));
-    tools.closeComputerTab("side-chat");
-  }, [
-    activeModelId,
-    activeProject,
-    focusedSession,
-    handles,
-    sideChatScope,
-    sideChatSeed.id,
-    tools,
-  ]);
+  }, [activeModelId, activeProject, focusedSession, handles, sideChatScope, sideChatSeed.id]);
+  const closeSideChat = useCallback(() => closeComputerTab("side-chat"), [closeComputerTab]);
+  const closeTerminalTab = useCallback(() => {
+    for (const owner of visibleTerminalState.owners) closePersistedTerminalOwner(owner.mountKey);
+  }, [visibleTerminalState.owners]);
+  useMountSubscription(() => {
+    const unregisterSideChat = registerComputerTabCloseHandler("side-chat", resetSideChat);
+    const unregisterTerminal = registerComputerTabCloseHandler("terminal", closeTerminalTab);
+    return () => {
+      unregisterSideChat();
+      unregisterTerminal();
+    };
+  }, [closeTerminalTab, registerComputerTabCloseHandler, resetSideChat]);
   return (
     <section
       className={`agent-computer-panel ${tools.computer.open ? "relative flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col bg-(--color-panel)`}

@@ -13,11 +13,7 @@ import {
 import { isWorkingStatus } from "@/features/agent/runtime/session-status";
 import type { ComputerTab } from "@/features/agent/tools/types";
 import { COMPUTER_TAB_TITLES, type WorkbenchTab } from "@/features/workbench/model";
-import {
-  handleLauncherKeyDown,
-  projectInitial,
-  type ProjectTabGroup,
-} from "@/features/workbench/workbench-tab-helpers";
+import { handleLauncherKeyDown, projectInitial } from "@/features/workbench/workbench-tab-helpers";
 import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
 
 type WorkbenchIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
@@ -37,7 +33,8 @@ function tabIcon(tab: WorkbenchTab): WorkbenchIcon {
 }
 
 export function WorkbenchProjectTabList({
-  projectGroups,
+  projectName,
+  threadTitle,
   orderedTabs,
   activeId,
   onActivate,
@@ -47,7 +44,8 @@ export function WorkbenchProjectTabList({
   onDrop,
   register,
 }: {
-  projectGroups: readonly ProjectTabGroup[];
+  projectName: string;
+  threadTitle: string;
   orderedTabs: readonly WorkbenchTab[];
   activeId: string | null;
   onActivate: (tab: WorkbenchTab) => void;
@@ -60,76 +58,55 @@ export function WorkbenchProjectTabList({
   return (
     <div
       role="tablist"
-      aria-label="Project thread tabs"
-      className="flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      aria-label={`${projectName}, ${threadTitle} tabs`}
+      className="flex min-w-0 flex-1 items-stretch gap-0 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {projectGroups.map((project) => (
-        <div
-          key={project.id}
-          role="presentation"
-          className="workbench-project-tabs flex h-full shrink-0 items-stretch border-r border-(--border)"
-        >
-          <div
-            aria-label={`Project ${project.name}`}
-            className="flex h-full max-w-[76px] shrink-0 items-center gap-1 border-r border-(--border)/80 bg-(--sidebar-bg) px-1.5 text-[10px] font-medium text-(--dim)"
-            title={project.name}
-          >
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-(--border)/80 bg-(--fg)/4 text-(--hl2)">
-              <span className="text-[9px] font-semibold leading-none">
-                {projectInitial(project.name)}
-              </span>
-            </span>
-            <span className="truncate">{project.name}</span>
-          </div>
-          {project.threads.map((thread) => (
-            <div
-              key={thread.id}
-              role="presentation"
-              data-thread-group={thread.id}
-              className="workbench-thread-tabs flex h-full shrink-0 items-stretch border-r border-(--border)/70 last:border-r-0"
-              title={`${project.name} · ${thread.title}`}
-            >
-              <div className="flex h-full w-[84px] shrink-0 items-center border-r border-(--border)/55 px-1.5 text-[10px] text-(--dim)/80">
-                <span className="truncate">{thread.title}</span>
-              </div>
-              {thread.tabs.map((tab) => {
-                const index = orderedTabs.findIndex((candidate) => candidate.id === tab.id);
-                return (
-                  <WorkbenchTabButton
-                    key={tab.id}
-                    tab={tab}
-                    active={tab.id === activeId}
-                    ariaLabel={`${project.name}, ${thread.title}, ${tab.title}`}
-                    shortcut={index >= 0 && index < 9 ? `⌘${index + 1}` : undefined}
-                    onActivate={() => onActivate(tab)}
-                    onClose={() => onClose(tab.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowLeft") {
-                        event.preventDefault();
-                        onFocusTab(index - 1);
-                      } else if (event.key === "ArrowRight") {
-                        event.preventDefault();
-                        onFocusTab(index + 1);
-                      } else if (event.key === "Home") {
-                        event.preventDefault();
-                        onFocusTab(0);
-                      } else if (event.key === "End") {
-                        event.preventDefault();
-                        onFocusTab(orderedTabs.length - 1);
-                      } else if (event.key === "Delete" || event.key === "Backspace") {
-                        event.preventDefault();
-                        onClose(tab.id);
-                      }
-                    }}
-                    onDragStart={() => onDragStart(tab.id)}
-                    onDrop={(event) => onDrop(event, tab.id)}
-                    register={(element) => register(tab.id, element)}
-                  />
-                );
-              })}
-            </div>
-          ))}
-        </div>
+      <div
+        role="presentation"
+        className="flex h-full min-w-0 shrink-0 items-center gap-1.5 border-r border-(--border)/70 pr-2"
+        title={`${projectName} · ${threadTitle}`}
+      >
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border border-(--border)/80 bg-(--fg)/4 text-(--hl2)">
+          <span className="text-[9px] font-semibold leading-none">
+            {projectInitial(projectName)}
+          </span>
+        </span>
+        <span className="flex max-w-[170px] flex-col truncate leading-tight">
+          <span className="truncate text-[10px] font-medium text-(--fg)">{projectName}</span>
+          <span className="truncate text-[9px] text-(--dim)">{threadTitle}</span>
+        </span>
+      </div>
+      {orderedTabs.map((tab, index) => (
+        <WorkbenchTabButton
+          key={tab.id}
+          tab={tab}
+          active={tab.id === activeId}
+          ariaLabel={`${projectName}, ${threadTitle}, ${tab.title}`}
+          shortcut={index < 9 ? `⌘${index + 1}` : undefined}
+          onActivate={() => onActivate(tab)}
+          onClose={() => onClose(tab.id)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              onFocusTab(index - 1);
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              onFocusTab(index + 1);
+            } else if (event.key === "Home") {
+              event.preventDefault();
+              onFocusTab(0);
+            } else if (event.key === "End") {
+              event.preventDefault();
+              onFocusTab(orderedTabs.length - 1);
+            } else if (event.key === "Delete" || event.key === "Backspace") {
+              event.preventDefault();
+              onClose(tab.id);
+            }
+          }}
+          onDragStart={() => onDragStart(tab.id)}
+          onDrop={(event) => onDrop(event, tab.id)}
+          register={(element) => register(tab.id, element)}
+        />
       ))}
     </div>
   );
@@ -166,12 +143,12 @@ export function WorkbenchTabButton({
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
-      className={`workbench-tab group relative flex h-full shrink-0 items-center gap-1 border-r border-(--border)/65 px-1.5 text-left text-[11px] transition-[background-color,color] duration-[var(--motion-fast)] last:border-r-0 ${
-        tab.kind === "task" ? "w-[144px] max-w-[184px]" : "w-[92px] max-w-[124px]"
+      className={`workbench-tab group relative flex h-full shrink-0 items-center gap-1 border-r border-t px-2 text-left text-[11px] transition-colors duration-[var(--motion-fast)] ${
+        tab.kind === "task" ? "w-[104px] max-w-[104px]" : "w-[100px] max-w-[100px]"
       } ${
         active
-          ? "bg-(--active) text-(--fg)"
-          : "bg-(--color-header) text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+          ? "border-(--border) border-b-(--agent-bg) bg-(--agent-bg) text-(--fg)"
+          : "border-(--border)/35 bg-(--color-header) text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
       }`}
     >
       <button
@@ -192,10 +169,8 @@ export function WorkbenchTabButton({
         className="flex h-full min-w-0 flex-1 items-center gap-1 text-left outline-none"
       >
         <span
-          className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] border transition-colors duration-[var(--motion-fast)] ${
-            active
-              ? "border-(--border-heavy) bg-(--fg)/7 text-(--fg)"
-              : "border-(--border)/70 bg-(--fg)/3 text-(--hl2)"
+          className={`relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-[var(--motion-fast)] ${
+            active ? "text-(--fg)" : "text-(--hl2)"
           }`}
         >
           <Icon
@@ -217,14 +192,11 @@ export function WorkbenchTabButton({
             event.stopPropagation();
             onClose();
           }}
-          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-(--dim) transition-[background-color,color,opacity] duration-[var(--motion-fast)] hover:bg-(--fg)/8 hover:text-(--fg) ${
-            active ? "opacity-60" : "opacity-0 group-hover:opacity-65 focus-visible:opacity-75"
-          }`}
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] group-hover:opacity-75 focus-visible:opacity-75 hover:bg-(--fg)/8 hover:text-(--fg)"
         >
           <CloseIcon className="h-2.5 w-2.5" />
         </button>
       ) : null}
-      {active ? <span className="absolute inset-x-0 top-0 h-px bg-(--accent)/45" /> : null}
     </div>
   );
 }

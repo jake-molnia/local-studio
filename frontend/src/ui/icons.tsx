@@ -110,43 +110,10 @@ export function FileIcon(props: IconProps) {
   );
 }
 
-export function GlobeIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <ellipse cx="8" cy="8" rx="3" ry="6.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M1.5 8h13" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M2.3 5h11.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-      <path d="M2.3 11h11.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-    </Svg>
-  );
-}
-
 export function GitBranchIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="M4 2a2 2 0 0 1 .8 3.8v4.4a2 2 0 1 1-1.6 0V5.8A2 2 0 0 1 4 2zm8 0a2 2 0 0 1 .8 3.8C12.6 8.5 10.5 9 8.8 9.2A2 2 0 1 1 7.4 7.7c1.5-.2 3.2-.6 3.7-2A2 2 0 0 1 12 2z" />
-    </Svg>
-  );
-}
-
-export function UserBrowserIcon(props: IconProps) {
-  // The user's own browser: a ring with a solid core, the concentric mark every
-  // Chromium-family browser wears. Deliberately unlike PanelIcon (the embedded
-  // panel) so the two composer buttons never read as the same thing.
-  return (
-    <Svg {...props}>
-      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1.6a5.4 5.4 0 1 1 0 10.8A5.4 5.4 0 0 1 8 2.6zm0 2.2a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z" />
-    </Svg>
-  );
-}
-
-export function PanelIcon(props: IconProps) {
-  // A bordered panel split into a sidebar + content area — the embedded browser
-  // panel. Solid frame, hollow content well.
-  return (
-    <Svg {...props}>
-      <path d="M2 2.5h12v11H2v-11zm1.5 1.5v8H6v-8H3.5zm4 0v8H12.5v-8H7.5z" />
     </Svg>
   );
 }
@@ -222,16 +189,6 @@ export function AutomationsIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <path d="M9.8 1 3.4 9.2h3.4L6 15l6.6-8.6H9.2L9.8 1Z" />
-    </Svg>
-  );
-}
-
-/** Configure — sliders, not a cog: these are settings you tune, not machinery. */
-export function ConfigureIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M1 4.2h14v1.6H1V4.2Zm3.6-1.6H7v4.8H4.6V2.6Z" />
-      <path d="M1 10.2h14v1.6H1v-1.6Zm8-1.6h2.4v4.8H9V8.6Z" />
     </Svg>
   );
 }

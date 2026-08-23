@@ -33,7 +33,6 @@ import {
   WorkbenchProjectTabList,
 } from "@/features/workbench/workbench-tab-components";
 import {
-  buildProjectGroups,
   canPromoteDraft,
   catalogSessionIds,
   closeFocusTarget,
@@ -45,7 +44,6 @@ import {
   type PendingTool,
   type DraftPromotion,
   promoteDraftTabs,
-  resolveActiveScope,
   resolveWorkbenchNavigation,
   sessionForTab,
   sessionIdentity,
@@ -94,16 +92,23 @@ export function WorkbenchTabStrip() {
   );
   const previousComputerOpenRef = useRef(computer.open);
   const projectNames = new Map(projects.projects.map((project) => [project.id, project.name]));
-  const projectGroups = buildProjectGroups(state.tabs, projectNames);
-  const orderedTabs = projectGroups.flatMap((project) =>
-    project.threads.flatMap((thread) => thread.tabs),
-  );
   const navigationTask = navigationTaskFor(
     focusedSession,
     requestedSessionId,
     currentProjectId,
     sessionCatalog.sessions,
   );
+  const currentSessionTabs = state.tabs.filter((tab) => tab.groupId === navigationTask.groupId);
+  const sessionTabs = [
+    ...currentSessionTabs.filter((tab) => tab.kind === "task"),
+    ...currentSessionTabs.filter((tab) => tab.kind === "tool"),
+  ];
+  const orderedTabs = sessionTabs.some((tab) => tab.kind === "task")
+    ? sessionTabs
+    : [navigationTask, ...sessionTabs];
+  const activeTabId = orderedTabs.some((tab) => tab.id === state.activeId)
+    ? state.activeId
+    : navigationTask.id;
   const sessionSyncKey = JSON.stringify({
     navigation: agentNavigationKey,
     projectId: currentProjectId,
@@ -135,7 +140,7 @@ export function WorkbenchTabStrip() {
     scopeKey: computer.sessionKey,
   });
   const shortcutSyncKey = JSON.stringify({
-    activeId: state.activeId,
+    activeId: activeTabId,
     tabIds: orderedTabs.map((tab) => tab.id),
     projectId: currentProjectId,
     sessionId: focusedSession?.id,
@@ -214,9 +219,10 @@ export function WorkbenchTabStrip() {
     const closing = orderedTabs[index];
     if (!closing) return;
     if (closing.kind === "task") return;
+    if (closing.tool) tools.closeComputerTab(closing.tool);
     const remaining = orderedTabs.filter((tab) => tab.id !== tabId);
     const nextActive =
-      state.activeId === tabId
+      activeTabId === tabId
         ? (remaining[Math.min(index, remaining.length - 1)] ?? remaining.at(-1) ?? null)
         : null;
     const fallback = navigationTask;
@@ -233,13 +239,13 @@ export function WorkbenchTabStrip() {
       };
     });
     if (pendingTool?.tab.id === closing.id) setPendingTool(null);
-    const target = closeFocusTarget(state.activeId, tabId, nextActive, fallback);
+    const target = closeFocusTarget(activeTabId, tabId, nextActive, fallback);
     if (target) {
       activateTab(target);
       requestAnimationFrame(() => tabElementsRef.current.get(target.id)?.focus());
     } else {
       requestAnimationFrame(() => {
-        const active = state.activeId ? tabElementsRef.current.get(state.activeId) : null;
+        const active = activeTabId ? tabElementsRef.current.get(activeTabId) : null;
         active?.focus();
       });
     }
@@ -254,7 +260,7 @@ export function WorkbenchTabStrip() {
     if (orderedTabs.length < 2) return;
     const activeIndex = Math.max(
       0,
-      orderedTabs.findIndex((tab) => tab.id === state.activeId),
+      orderedTabs.findIndex((tab) => tab.id === activeTabId),
     );
     const nextIndex = (activeIndex + direction + orderedTabs.length) % orderedTabs.length;
     activateAtIndex(nextIndex);
@@ -415,7 +421,7 @@ export function WorkbenchTabStrip() {
     const wasOpen = previousComputerOpenRef.current;
     previousComputerOpenRef.current = computer.open;
     if (!wasOpen || computer.open) return;
-    const active = state.tabs.find((tab) => tab.id === state.activeId);
+    const active = orderedTabs.find((tab) => tab.id === activeTabId);
     if (active?.kind !== "tool") return;
     activateTab(focusedSession ? taskTab(focusedSession) : emptyTaskTab(currentProjectId));
   }, [
@@ -423,14 +429,14 @@ export function WorkbenchTabStrip() {
     currentProjectId,
     focusedSession?.id,
     focusedSession?.threadId,
-    state.activeId,
-    state.tabs,
+    activeTabId,
+    orderedTabs,
   ]);
 
   useMountSubscription(() => {
-    const element = state.activeId ? tabElementsRef.current.get(state.activeId) : null;
+    const element = activeTabId ? tabElementsRef.current.get(activeTabId) : null;
     element?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [state.activeId]);
+  }, [activeTabId]);
 
   useMountSubscription(() => {
     if (!launcherOpen) return;
@@ -463,7 +469,7 @@ export function WorkbenchTabStrip() {
       }
       if (!event.shiftKey && key === "w") {
         event.preventDefault();
-        const active = state.tabs.find((tab) => tab.id === state.activeId);
+        const active = orderedTabs.find((tab) => tab.id === activeTabId);
         if (active?.kind === "tool") closeTab(active.id);
         return;
       }
@@ -496,7 +502,8 @@ export function WorkbenchTabStrip() {
     }));
   };
 
-  const activeScope = resolveActiveScope(state, focusedSession, currentProjectId);
+  const activeScope = navigationTask;
+  const projectName = projectNames.get(activeScope.projectId ?? "workspace") ?? "Workspace";
 
   return (
     <header className="workbench-tab-strip relative flex h-[var(--workbench-tab-height)] shrink-0 border-b border-(--border) bg-(--color-header)">
@@ -510,9 +517,10 @@ export function WorkbenchTabStrip() {
         <Menu className="h-3.5 w-3.5" />
       </button>
       <WorkbenchProjectTabList
-        projectGroups={projectGroups}
+        projectName={projectName}
+        threadTitle={activeScope.groupTitle}
         orderedTabs={orderedTabs}
-        activeId={state.activeId}
+        activeId={activeTabId}
         onActivate={activateTab}
         onClose={closeTab}
         onFocusTab={focusTabAtIndex}

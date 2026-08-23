@@ -64,7 +64,5 @@ export type { SpinnerSize } from "./spinner";
 export { StatusDot, StatusPill } from "./status";
 export type { UiTone, StatusPillVariant } from "./status";
 
-export { UserBrowserIcon, PanelIcon } from "./icons";
-
 export { handleMenuKeyboard, MenuItem } from "./menu";
 export type { MenuItemProps } from "./menu";
