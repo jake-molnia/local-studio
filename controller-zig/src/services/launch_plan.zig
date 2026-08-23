@@ -24,6 +24,25 @@ pub const Plan = struct {
     }
 };
 
+pub fn mergeArguments(plan: *Plan, extra: []const []const u8) !void {
+    if (extra.len == 0) return;
+    var overridden: std.StringHashMapUnmanaged(void) = .empty;
+    for (extra) |argument| if (argumentKey(argument)) |key| try overridden.put(plan.arena.allocator(), key, {});
+    var merged: std.ArrayList([]const u8) = .empty;
+    var index: usize = 0;
+    while (index < plan.argv.len) : (index += 1) {
+        const argument = plan.argv[index];
+        const key = argumentKey(argument);
+        if (index > 0 and key != null and overridden.contains(key.?)) {
+            if (std.mem.indexOfScalar(u8, argument, '=') == null and index + 1 < plan.argv.len and argumentKey(plan.argv[index + 1]) == null) index += 1;
+            continue;
+        }
+        try merged.append(plan.arena.allocator(), argument);
+    }
+    for (extra) |argument| try merged.append(plan.arena.allocator(), try plan.arena.allocator().dupe(u8, argument));
+    plan.argv = try merged.toOwnedSlice(plan.arena.allocator());
+}
+
 pub fn build(allocator: std.mem.Allocator, io: std.Io, document: []const u8, configuration: *const config_module.Config) !Plan {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
@@ -105,6 +124,9 @@ pub fn build(allocator: std.mem.Allocator, io: std.Io, document: []const u8, con
         try appendPair(&argv, arena.allocator(), &overridden, "alias", served_name);
     } else if (std.mem.eql(u8, backend, "mlx")) {
         try appendPair(&argv, arena.allocator(), &overridden, "model", model_path);
+    } else if (std.mem.eql(u8, backend, "exllamav3")) {
+        try appendPair(&argv, arena.allocator(), &overridden, "model-dir", model_path);
+        try appendPair(&argv, arena.allocator(), &overridden, "model-name", served_name);
     } else return error.UnsupportedBackend;
 
     try appendPair(&argv, arena.allocator(), &overridden, "host", "127.0.0.1");
@@ -134,7 +156,7 @@ pub fn build(allocator: std.mem.Allocator, io: std.Io, document: []const u8, con
         .argv = try argv.toOwnedSlice(arena.allocator()),
         .environment = try environment.toOwnedSlice(arena.allocator()),
         .health_path = if (std.mem.eql(u8, backend, "mlx")) "/v1/models" else "/health",
-        .ready_timeout_seconds = if (std.mem.eql(u8, backend, "vllm")) 1800 else if (std.mem.eql(u8, backend, "sglang")) 900 else if (std.mem.eql(u8, backend, "llamacpp")) 600 else 300,
+        .ready_timeout_seconds = if (std.mem.eql(u8, backend, "vllm")) 1800 else if (std.mem.eql(u8, backend, "sglang") or std.mem.eql(u8, backend, "exllamav3")) 900 else if (std.mem.eql(u8, backend, "llamacpp")) 600 else 300,
     };
 }
 
@@ -164,7 +186,9 @@ fn appendTuning(argv: *std.ArrayList([]const u8), allocator: std.mem.Allocator, 
     if (std.mem.eql(u8, backend, "mlx")) {
         try appendInteger(argv, allocator, overridden, "max-tokens", object.get("max_model_len"), false);
         if (booleanField(object, "trust_remote_code")) try appendFlag(argv, allocator, overridden, "trust-remote-code");
+        return;
     }
+    if (std.mem.eql(u8, backend, "exllamav3")) try appendInteger(argv, allocator, overridden, "max-seq-len", object.get("max_model_len"), false);
 }
 
 fn appendInteger(argv: *std.ArrayList([]const u8), allocator: std.mem.Allocator, overridden: *const std.StringHashMapUnmanaged(void), key: []const u8, value: ?std.json.Value, parallel: bool) !void {
@@ -210,6 +234,12 @@ fn normalizedKey(allocator: std.mem.Allocator, key: []const u8) ![]const u8 {
     return output;
 }
 
+fn argumentKey(argument: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, argument, "--") or argument.len <= 2) return null;
+    const end = std.mem.indexOfScalar(u8, argument, '=') orelse argument.len;
+    return argument[2..end];
+}
+
 fn internalKey(key: []const u8) bool {
     for ([_][]const u8{ "visible-devices", "cuda-visible-devices", "hip-visible-devices", "rocr-visible-devices", "venv-path", "env-vars", "description", "tags", "status", "metadata", "llama-bin", "mlx-python", "launch-command", "custom-command", "docker-container", "docker-image" }) |internal| {
         if (std.mem.eql(u8, key, internal)) return true;
@@ -237,6 +267,7 @@ fn defaultBinary(backend: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, backend, "sglang")) return "sglang";
     if (std.mem.eql(u8, backend, "llamacpp")) return "llama-server";
     if (std.mem.eql(u8, backend, "mlx")) return "mlx_lm.server";
+    if (std.mem.eql(u8, backend, "exllamav3")) return "tabbyapi";
     return null;
 }
 
