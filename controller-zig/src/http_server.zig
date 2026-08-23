@@ -27,6 +27,7 @@ const runtime_jobs_service = @import("services/runtime_jobs.zig");
 const huggingface_models = @import("services/huggingface_models.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
+const downloads = @import("repository/downloads.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
@@ -313,6 +314,37 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         defer result.deinit();
         try request.respond(result.body, .{ .status = result.status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads") and request.head.method == .GET) {
+        const response = response: {
+            try database.lock(io);
+            defer database.unlock(io);
+            break :response try downloads.listPayload(allocator, database);
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId") and request.head.method == .GET) {
+        const download_id = try pathParameter(allocator, request.head.target, "/studio/downloads/");
+        defer allocator.free(download_id);
+        const response = response: {
+            try database.lock(io);
+            defer database.unlock(io);
+            break :response try downloads.getPayload(allocator, database, download_id);
+        };
+        const download = response orelse {
+            try request.respond("{\"detail\":\"Download not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(download);
+        var output: Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"download\":");
+        try output.writer.writeAll(download);
+        try output.writer.writeByte('}');
+        try request.respond(output.writer.buffered(), .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm")) {
