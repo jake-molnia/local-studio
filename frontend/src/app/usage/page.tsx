@@ -1,1 +1,5 @@
-export { default } from "@/features/usage/usage-page";
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/settings#machine:local:usage");
+}
