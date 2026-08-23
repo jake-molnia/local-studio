@@ -12,7 +12,7 @@ import type { WorkspaceDispatch } from "@/features/agent/workspace/effects";
 import type { AgentModel, WorkspaceState } from "@/features/agent/workspace/types";
 import { useProjects, type ProjectsContextValue } from "@/features/agent/projects/context";
 import { useTools } from "@/features/agent/tools/context";
-import type { Project } from "@/features/agent/projects/types";
+import { isChatsProject, type Project } from "@/features/agent/projects/types";
 import { focusedSession } from "@/features/agent/runtime/selectors";
 import { useWorkspace, type WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 import { renderWorkspacePane } from "@/features/agent/ui/render-workspace-pane";
@@ -69,7 +69,7 @@ export function shouldShowProjectEmptyState(
     projects.loaded &&
     !projectParam &&
     !projects.selectedProjectId &&
-    projects.projects.length === 0
+    projects.projects.every(isChatsProject)
   );
 }
 

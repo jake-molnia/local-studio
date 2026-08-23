@@ -56,8 +56,24 @@
   }
 }
 
+@keyframes ui-popover-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-1px) scale(0.985);
+  }
+}
+
 .ui-popover-enter {
   animation: ui-popover-enter 120ms var(--ease-enter) both;
+  transform-origin: top center;
+}
+
+.ui-popover-exit {
+  animation: ui-popover-exit 90ms var(--ease-exit) both;
   transform-origin: top center;
 }
 
