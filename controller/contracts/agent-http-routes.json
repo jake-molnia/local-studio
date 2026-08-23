@@ -36,6 +36,36 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/sessions",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/sessions",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions/all",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/sessions/:id",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/sessions/:id",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/setup-checks",
       "ownership": "head",
       "streaming": "never"

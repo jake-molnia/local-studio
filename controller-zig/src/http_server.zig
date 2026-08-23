@@ -556,6 +556,43 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/sessions")) {
+        if (request.head.method == .DELETE) return respondDownloadError(request, .method_not_allowed, "Session deletion is disabled. Archive sessions from the UI instead.");
+        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        defer if (cwd) |value| allocator.free(value);
+        const canonical = agent_projects.resolveAllowedPath(allocator, io, environment, cwd orelse return respondSessionFailure(request, error.SessionCwdRequired)) catch |failure| return respondSessionFailure(request, failure);
+        defer allocator.free(canonical);
+        const response = agent_sessions.historyPayload(allocator, io, database, canonical, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/sessions/all")) {
+        const response = agent_sessions.historyPayload(allocator, io, database, null, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/sessions/:id")) {
+        const session_id = try pathParameter(allocator, request.head.target, "/api/agent/sessions/");
+        defer allocator.free(session_id);
+        if (request.head.method == .PATCH) {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            const response = agent_sessions.archivePayload(allocator, io, database, session_id, document) catch |failure| return respondSessionFailure(request, failure);
+            defer allocator.free(response);
+            try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        var session = (try agent_sessions.find(allocator, io, database, session_id)) orelse return respondSessionFailure(request, error.SessionNotFound);
+        defer session.deinit();
+        const transcript = agent_coordinator.transcriptPayload(allocator, io, mode, client, database, harness, session.id, null) catch |failure| return respondSessionFailure(request, failure);
+        defer allocator.free(transcript);
+        const response = agent_sessions.transcriptResponse(allocator, &session, transcript) catch |failure| return respondSessionFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
         const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
@@ -1992,6 +2029,31 @@ fn respondBrowserFailure(request: *http.Server.Request, failure: anyerror) !bool
     return respondDownloadError(request, status, detail);
 }
 
+fn respondSessionFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.SessionNotFound => .not_found,
+        error.SessionCwdRequired, error.InvalidSessionId, error.InvalidSessionMetadata, error.SessionArchivedRequired, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotFound, error.ProjectPathNotDirectory => .bad_request,
+        error.ProjectPathOutsideRoots => .forbidden,
+        error.AssignedHarnessUnavailable, error.HarnessUnavailable, error.HarnessNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.SessionNotFound => "session not found",
+        error.SessionCwdRequired => "cwd is required",
+        error.InvalidSessionId => "session id is invalid",
+        error.InvalidSessionMetadata => "invalid session payload",
+        error.SessionArchivedRequired => "archived boolean is required",
+        error.ProjectPathMustBeAbsolute => "cwd must be absolute",
+        error.ProjectPathNotFound => "cwd not found",
+        error.ProjectPathNotDirectory => "cwd is not a directory",
+        error.ProjectPathOutsideRoots => "cwd is not an allowed workspace",
+        error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable => "The session's harness node is unavailable",
+        error.HarnessUnavailable => "The session harness is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
 fn respondGoalFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
         error.SessionIdRequired, error.InvalidSessionId, error.InvalidGoalPayload, error.InvalidGoalStatus, error.InvalidGoalBudget => .bad_request,
@@ -2907,6 +2969,24 @@ fn queryUnsigned(target: []const u8, expected_name: []const u8) ?u64 {
         return std.fmt.parseInt(u64, parameter[separator + 1 ..], 10) catch null;
     }
     return null;
+}
+
+fn queryFlag(target: []const u8, expected_name: []const u8) bool {
+    const query_start = std.mem.findScalar(u8, target, '?') orelse return false;
+    var parameters = std.mem.splitScalar(u8, target[query_start + 1 ..], '&');
+    while (parameters.next()) |parameter| {
+        const separator = std.mem.findScalar(u8, parameter, '=') orelse continue;
+        if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
+        const value = parameter[separator + 1 ..];
+        return std.mem.eql(u8, value, "1") or std.ascii.eqlIgnoreCase(value, "true") or std.ascii.eqlIgnoreCase(value, "only");
+    }
+    return false;
+}
+
+fn boundedLimit(target: []const u8) ?usize {
+    const value = queryUnsigned(target, "limit") orelse return null;
+    if (value == 0) return null;
+    return @intCast(@min(value, 10_000));
 }
 
 fn queryParameter(allocator: std.mem.Allocator, target: []const u8, expected_name: []const u8) !?[]u8 {

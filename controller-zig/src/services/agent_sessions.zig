@@ -59,6 +59,118 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
     return output.toOwnedSlice();
 }
 
+pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, project_path: ?[]const u8, archived_only: bool, include_archived: bool, limit: ?usize) ![]u8 {
+    try database.lock(io);
+    defer database.unlock(io);
+    var sessions = try records.list(allocator, database);
+    defer sessions.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"sessions\":[");
+    var count: usize = 0;
+    for (sessions.records) |session| {
+        const archived = std.mem.eql(u8, session.status, "archived");
+        if (archived_only != archived and (archived_only or !include_archived)) continue;
+        if (project_path) |expected| if (session.project_path == null or !std.mem.eql(u8, session.project_path.?, expected)) continue;
+        if (limit) |maximum| if (count >= maximum) break;
+        if (count > 0) try output.writer.writeByte(',');
+        try writeHistorySummary(&output.writer, &session);
+        count += 1;
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
+pub fn find(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id: []const u8) !?records.Session {
+    if (!validSessionId(id)) return error.InvalidSessionId;
+    try database.lock(io);
+    defer database.unlock(io);
+    if (try records.getByNative(allocator, database, id)) |session| return session;
+    return records.get(allocator, database, id);
+}
+
+pub fn archivePayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id: []const u8, document: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidSessionMetadata;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidSessionMetadata;
+    const archived_value = parsed.value.object.get("archived") orelse return error.SessionArchivedRequired;
+    if (archived_value != .bool) return error.SessionArchivedRequired;
+    var session = (try find(allocator, io, database, id)) orelse return error.SessionNotFound;
+    defer session.deinit();
+    try database.lock(io);
+    defer database.unlock(io);
+    try records.save(database, .{
+        .id = session.id,
+        .harness = session.harness,
+        .harness_version = session.harness_version,
+        .capabilities_json = session.capabilities_json,
+        .node_id = session.node_id,
+        .native_session_id = session.native_session_id,
+        .project_id = session.project_id,
+        .project_path = session.project_path,
+        .model_id = session.model_id,
+        .status = if (archived_value.bool) "archived" else "idle",
+        .event_cursor = session.event_cursor,
+        .sharing_policy = session.sharing_policy,
+        .automation_id = session.automation_id,
+    });
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"session\":{\"id\":");
+    try std.json.Stringify.value(id, .{}, &output.writer);
+    try output.writer.print(",\"archived\":{},\"archivedAt\":", .{archived_value.bool});
+    if (archived_value.bool) try std.json.Stringify.value(session.updated_at, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll("}}");
+    return output.toOwnedSlice();
+}
+
+pub fn transcriptResponse(allocator: std.mem.Allocator, session: *const records.Session, document: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHarnessResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidHarnessResponse;
+    const entries = parsed.value.object.get("entries") orelse return error.InvalidHarnessResponse;
+    if (entries != .array) return error.InvalidHarnessResponse;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"events\":");
+    try std.json.Stringify.value(entries, .{}, &output.writer);
+    try output.writer.writeAll(",\"cursor\":null,\"meta\":{\"cwd\":");
+    if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"modelId\":");
+    if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"startedAt\":");
+    try std.json.Stringify.value(session.created_at, .{}, &output.writer);
+    try output.writer.writeAll(",\"piSessionId\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"usage\":null}}");
+    return output.toOwnedSlice();
+}
+
+fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session) !void {
+    const archived = std.mem.eql(u8, session.status, "archived");
+    try writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(session.native_session_id orelse session.id, .{}, writer);
+    try writer.writeAll(",\"filename\":\"\",\"cwd\":");
+    try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
+    try writer.writeAll(",\"startedAt\":");
+    try std.json.Stringify.value(session.created_at, .{}, writer);
+    try writer.writeAll(",\"updatedAt\":");
+    try std.json.Stringify.value(session.updated_at, .{}, writer);
+    try writer.writeAll(",\"modelId\":");
+    if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"provider\":null,\"firstUserMessage\":");
+    try std.json.Stringify.value(session.id, .{}, writer);
+    try writer.print(",\"archived\":{},\"archivedAt\":", .{archived});
+    if (archived) try std.json.Stringify.value(session.updated_at, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"parentSessionId\":null,\"subagentName\":null,\"projectId\":");
+    try std.json.Stringify.value(session.project_id orelse "", .{}, writer);
+    try writer.writeAll(",\"projectName\":");
+    try std.json.Stringify.value(session.project_id orelse "", .{}, writer);
+    try writer.writeAll(",\"projectPath\":");
+    try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
+    try writer.writeByte('}');
+}
+
 fn writeMetadata(writer: *Io.Writer, session: *const records.Session) !void {
     try writer.writeAll("{\"session_id\":");
     try std.json.Stringify.value(session.id, .{}, writer);
