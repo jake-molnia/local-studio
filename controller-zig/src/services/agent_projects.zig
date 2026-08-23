@@ -155,7 +155,7 @@ fn chatsPath(allocator: std.mem.Allocator, io: Io, environment: *const std.proce
     return path;
 }
 
-fn resolveAllowedPath(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, raw: []const u8) ![]u8 {
+pub fn resolveAllowedPath(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, raw: []const u8) ![]u8 {
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) return error.ProjectPathRequired;
     if (!std.fs.path.isAbsolute(trimmed)) return error.ProjectPathMustBeAbsolute;

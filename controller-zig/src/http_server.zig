@@ -43,6 +43,7 @@ const agent_enrollments = @import("services/agent_enrollments.zig");
 const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
+const agent_terminal = @import("services/agent_terminal.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -412,6 +413,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/terminal") or std.mem.eql(u8, route.path, "/api/agent/terminal/resolve-cwd")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        defer if (cwd) |value| allocator.free(value);
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = if (std.mem.endsWith(u8, route.path, "/resolve-cwd"))
+            agent_terminal.resolvePayload(allocator, io, mode, configuration, client, database, node_id, document)
+        else
+            agent_terminal.runPayload(allocator, io, mode, configuration, client, database, node_id, cwd orelse return respondTerminalFailure(request, error.TerminalCwdRequired), document);
+        const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
         const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
@@ -557,6 +574,20 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = agent_connectors.testLocal(allocator, io, configuration, client, database, document) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/terminal") or std.mem.eql(u8, route.path, "/internal/node/v1/terminal/resolve-cwd")) {
+        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        defer if (cwd) |value| allocator.free(value);
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = if (std.mem.endsWith(u8, route.path, "/resolve-cwd"))
+            agent_terminal.resolveLocal(allocator, io, configuration, document)
+        else
+            agent_terminal.runLocal(allocator, io, configuration, cwd orelse return respondTerminalFailure(request, error.TerminalCwdRequired), document);
+        const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/catalog")) {
@@ -1700,6 +1731,31 @@ fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
         error.ConnectorNodeRejected => "The connector node rejected the request",
         error.ConnectorNodeUnavailable => "The connector node is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.InvalidTerminalPayload, error.TerminalCommandRequired, error.TerminalCommandTooLarge, error.TerminalCwdRequired, error.TerminalFromMustBeAbsolute, error.PreviousDirectoryUnavailable, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotDirectory => .bad_request,
+        error.ProjectPathNotFound => .not_found,
+        error.ProjectPathOutsideRoots => .forbidden,
+        error.TerminalNodeRequired, error.TerminalNodeRejected => .conflict,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.InvalidTerminalPayload => "Invalid terminal payload",
+        error.TerminalCommandRequired => "command is required",
+        error.TerminalCommandTooLarge => "command is too large",
+        error.TerminalCwdRequired => "cwd is required",
+        error.TerminalFromMustBeAbsolute => "from must be absolute",
+        error.PreviousDirectoryUnavailable => "OLDPWD not set",
+        error.ProjectPathNotFound => "cwd not found",
+        error.ProjectPathNotDirectory => "cwd is not a directory",
+        error.ProjectPathOutsideRoots => "cwd is not an allowed workspace",
+        error.TerminalNodeRequired => "No enrolled node offers terminal execution",
+        error.TerminalNodeRejected => "The terminal node rejected the request",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);

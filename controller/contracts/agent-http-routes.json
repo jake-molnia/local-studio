@@ -191,6 +191,18 @@
       "streaming": "never"
     },
     {
+      "method": "POST",
+      "path": "/api/agent/terminal",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/terminal/resolve-cwd",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
       "method": "GET",
       "path": "/internal/node/v1/projects",
       "ownership": "worker",
@@ -259,6 +271,18 @@
     {
       "method": "POST",
       "path": "/internal/node/v1/connector-test",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/terminal",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/terminal/resolve-cwd",
       "ownership": "worker",
       "streaming": "never"
     },
