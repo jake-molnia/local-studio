@@ -17,6 +17,7 @@ pub const Config = struct {
     port: u16,
     inference_host: []const u8,
     inference_port: u16,
+    inference_origin: []const u8,
     data_dir: []const u8,
     db_path: []const u8,
     llm_instance_path: []const u8,
@@ -61,6 +62,8 @@ pub const Config = struct {
         const models_value = init.environ_map.get("LOCAL_STUDIO_MODELS_DIR") orelse "/models";
         const host = try allocator.dupe(u8, std.mem.trim(u8, host_value, " \t\r\n"));
         const inference_host = try allocator.dupe(u8, init.environ_map.get("LOCAL_STUDIO_INFERENCE_HOST") orelse "localhost");
+        const inference_port = try parsePort(init.environ_map.get("LOCAL_STUDIO_INFERENCE_PORT") orelse "8000");
+        const inference_origin = try std.fmt.allocPrint(allocator, "http://{s}:{d}", .{ inference_host, inference_port });
         const models_dir = try absolutePath(allocator, cwd, models_value);
         const api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY"));
         const spike_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_UPSTREAM"));
@@ -72,7 +75,8 @@ pub const Config = struct {
             .host = host,
             .port = try parsePort(port_value),
             .inference_host = inference_host,
-            .inference_port = try parsePort(init.environ_map.get("LOCAL_STUDIO_INFERENCE_PORT") orelse "8000"),
+            .inference_port = inference_port,
+            .inference_origin = inference_origin,
             .data_dir = data_dir,
             .db_path = db_path,
             .llm_instance_path = llm_instance_path,

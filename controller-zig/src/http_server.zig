@@ -70,7 +70,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, recipe_column, server.config.llm_instance_path, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_origin, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -78,7 +78,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -100,7 +100,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *ht
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, client, database, recipe_column, llm_instance_path, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, client, database, recipe_column, llm_instance_path, inference_origin, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -117,7 +117,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
@@ -180,6 +180,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
         return try serveHeadChat(allocator, io, client, database, worker_pool, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
+        return try serveLocalChat(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin);
     }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
@@ -246,7 +249,7 @@ fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, dat
     if (model_id.len == 0) return try respondModelRequired(request);
 
     var worker = worker_service.selectServing(allocator, io, client, database, worker_pool, model_id, null) catch null orelse {
-        return try respondModelNotRunning(allocator, request, model_id);
+        return try respondModelNotRunning(allocator, request, null, model_id);
     };
     defer worker.deinit();
     try worker_pool.acquire(io, worker.id);
@@ -280,6 +283,64 @@ fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, dat
     return false;
 }
 
+fn serveLocalChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8) !bool {
+    var captured = try reverse_proxy.captureRequest(allocator, request);
+    defer captured.deinit();
+    const storage = try allocator.alloc(u8, max_chat_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const body = body_writer.buffered();
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
+        try request.respond("{\"detail\":\"Invalid JSON body\"}", .{
+            .status = .bad_request,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    };
+    defer parsed.deinit();
+    if (parsed.value != .object) {
+        try request.respond("{\"detail\":\"Invalid JSON body\"}", .{
+            .status = .bad_request,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
+
+    var rewritten: ?[]u8 = null;
+    defer if (rewritten) |payload| allocator.free(payload);
+    if (parsed.value.object.get("model")) |model_value| {
+        if (model_value == .string) {
+            const requested_model = std.mem.trim(u8, model_value.string, " \t\r\n");
+            if (requested_model.len > 0) {
+                var resolution = try model_service.resolveRequestedModel(allocator, io, database, recipe_column, llm_instance_path, requested_model);
+                defer resolution.deinit();
+                if (resolution.managed and !resolution.active) return try respondModelNotRunning(allocator, request, resolution.active_model, requested_model);
+                if (resolution.canonical) |canonical| {
+                    if (!std.mem.eql(u8, canonical, requested_model)) {
+                        try parsed.value.object.put(parsed.arena.allocator(), "model", .{ .string = canonical });
+                        var output: Io.Writer.Allocating = .init(allocator);
+                        errdefer output.deinit();
+                        try std.json.Stringify.value(parsed.value, .{}, &output.writer);
+                        rewritten = try output.toOwnedSlice();
+                    }
+                }
+            }
+        }
+    }
+    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request) catch return false;
+    return false;
+}
+
 fn respondModelRequired(request: *http.Server.Request) !bool {
     try request.respond("{\"detail\":\"model is required\"}", .{
         .status = .bad_request,
@@ -288,8 +349,11 @@ fn respondModelRequired(request: *http.Server.Request) !bool {
     return request.head.keep_alive;
 }
 
-fn respondModelNotRunning(allocator: std.mem.Allocator, request: *http.Server.Request, model_id: []const u8) !bool {
-    const message = try std.fmt.allocPrint(allocator, "No model is running. Launch {s} from the frontend before sending requests.", .{model_id});
+fn respondModelNotRunning(allocator: std.mem.Allocator, request: *http.Server.Request, active_model: ?[]const u8, model_id: []const u8) !bool {
+    const message = if (active_model) |active|
+        try std.fmt.allocPrint(allocator, "Model {s} is running; {s} is not. Launch it from the frontend before sending requests.", .{ active, model_id })
+    else
+        try std.fmt.allocPrint(allocator, "No model is running. Launch {s} from the frontend before sending requests.", .{model_id});
     defer allocator.free(message);
     var output: Io.Writer.Allocating = .init(allocator);
     defer output.deinit();

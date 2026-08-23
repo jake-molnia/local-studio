@@ -8,6 +8,58 @@ const vision_patterns = [_][]const u8{
     "mimo-v2.5", "mimo-v2-5", "step-3.7", "step-3_7", "step-3-7", "nex-n2", "gemma-4", "gemma4", "llava", "internvl", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "qwen-omni", "pixtral", "minicpm-v", "molmo", "phi-3.5-v", "phi-3-vision", "phi-4-mm", "phi-4-multimodal", "llama-3.2-vision", "llama-4", "deepseek-vl", "idefics", "ovis", "moondream", "fuyu", "kosmos", "-vl-", "-vlm", "vision", "multimodal", "-mm-",
 };
 
+pub const Resolution = struct {
+    allocator: std.mem.Allocator,
+    managed: bool,
+    active: bool,
+    canonical: ?[]u8 = null,
+    active_model: ?[]u8 = null,
+
+    pub fn deinit(resolution: *Resolution) void {
+        if (resolution.canonical) |value| resolution.allocator.free(value);
+        if (resolution.active_model) |value| resolution.allocator.free(value);
+        resolution.* = undefined;
+    }
+};
+
+pub fn resolveRequestedModel(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn, llm_instance_path: []const u8, requested_model: []const u8) !Resolution {
+    var documents = documents: {
+        try database.lock(io);
+        defer database.unlock(io);
+        break :documents try recipes.list(allocator, database, column);
+    };
+    defer documents.deinit();
+    const active_index = activeRecipeIndex(allocator, io, documents.items(), llm_instance_path);
+    const active_model = if (active_index) |index| try modelIdFromDocument(allocator, documents.items()[index]) else null;
+    errdefer if (active_model) |value| allocator.free(value);
+    for (documents.items(), 0..) |document, index| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const id_value = parsed.value.object.get("id") orelse continue;
+        if (id_value != .string or id_value.string.len == 0) continue;
+        const served_name = servedModelName(parsed.value.object);
+        if (!std.mem.eql(u8, id_value.string, requested_model) and (served_name == null or !std.mem.eql(u8, served_name.?, requested_model))) continue;
+        return .{
+            .allocator = allocator,
+            .managed = true,
+            .active = active_index != null and active_index.? == index,
+            .canonical = try allocator.dupe(u8, served_name orelse id_value.string),
+            .active_model = active_model,
+        };
+    }
+    return .{ .allocator = allocator, .managed = false, .active = false, .active_model = active_model };
+}
+
+fn modelIdFromDocument(allocator: std.mem.Allocator, document: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const id_value = parsed.value.object.get("id") orelse return null;
+    if (id_value != .string or id_value.string.len == 0) return null;
+    return try allocator.dupe(u8, servedModelName(parsed.value.object) orelse id_value.string);
+}
+
 pub fn localCatalogPayload(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn, llm_instance_path: []const u8) ![]u8 {
     var documents = documents: {
         try database.lock(io);

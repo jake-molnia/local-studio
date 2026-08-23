@@ -128,6 +128,19 @@ pub fn serveWorkerBuffered(allocator: std.mem.Allocator, client: *http.Client, u
     };
 }
 
+pub fn serveLocalBuffered(client: *http.Client, upstream: []const u8, payload: []const u8, captured: *const CapturedRequest, request: *http.Server.Request) !void {
+    var commitment: ResponseCommitment = .pending;
+    var request_body_state: RequestBodyState = .untouched;
+    const headers = [_]http.Header{.{ .name = "Content-Type", .value = "application/json" }};
+    proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
+        .extra_request_headers = &headers,
+        .strip_credentials = true,
+    }, payload, captured) catch |failure| {
+        if (!commitment.canRetry()) return failure;
+        try respondBadGateway(request);
+    };
+}
+
 fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding, buffered_body: ?[]const u8, captured: ?*const CapturedRequest) !void {
     const uri = try uriForTarget(upstream, if (captured) |metadata| metadata.target else request.head.target);
     var request_headers: [64]http.Header = undefined;
