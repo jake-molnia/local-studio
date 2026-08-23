@@ -75,6 +75,7 @@ export function AgentModelPicker({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<PickerView>("models");
   const [showOtherModels, setShowOtherModels] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
   const active = models.find((model) => model.id === selectedModel) ?? null;
   const visible = useMemo(
     () => splitVisibleAgentModels(models, showOtherModels),
@@ -84,6 +85,20 @@ export function AgentModelPicker({
     () => groupModelsByController(visible.visibleModels),
     [visible.visibleModels],
   );
+  const filteredGroups = useMemo(() => {
+    const query = modelQuery.trim().toLocaleLowerCase();
+    if (!query) return groups;
+    return groups
+      .map((group) => ({
+        ...group,
+        models: group.models.filter((model) =>
+          [model.name, model.rawId, model.id, model.controllerName]
+            .filter(Boolean)
+            .some((value) => value?.toLocaleLowerCase().includes(query)),
+        ),
+      }))
+      .filter((group) => group.models.length > 0);
+  }, [groups, modelQuery]);
   const disabled = loading;
   const modelLabel = modelTriggerLabel(
     active,
@@ -104,6 +119,7 @@ export function AgentModelPicker({
   const close = useCallback(() => {
     setOpen(false);
     setView("models");
+    setModelQuery("");
   }, []);
   const closeAndFocus = useCallback(() => {
     const trigger = view;
@@ -118,7 +134,11 @@ export function AgentModelPicker({
   useMountSubscription(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
-      panelRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+      const selector =
+        view === "models"
+          ? 'input[type="search"], [role^="menuitem"]:not(:disabled)'
+          : '[role^="menuitem"]:not(:disabled)';
+      panelRef.current?.querySelector<HTMLElement>(selector)?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [open, view]);
@@ -206,7 +226,7 @@ export function AgentModelPicker({
         ? createPortal(
             <div
               ref={placePanel}
-              className={`fixed z-[300] w-[20rem] max-w-[calc(100vw-1rem)] ${POPOVER_MENU_CLASS}`}
+              className={`fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[19rem]" : "w-[11rem]"} ${POPOVER_MENU_CLASS}`}
               role="menu"
               aria-label={view === "models" ? "Models" : "Reasoning"}
               onKeyDown={(event) => handleMenuKeyDown(event, closeAndFocus)}
@@ -215,7 +235,9 @@ export function AgentModelPicker({
             >
               {view === "models" ? (
                 <ModelList
-                  groups={groups}
+                  groups={filteredGroups}
+                  query={modelQuery}
+                  onQueryChange={setModelQuery}
                   selectedModel={selectedModel}
                   defaultModel={defaultModel}
                   showOtherModels={showOtherModels}
@@ -258,6 +280,8 @@ function PickerHeader({ title }: { title: string }) {
 
 function ModelList({
   groups,
+  query,
+  onQueryChange,
   selectedModel,
   defaultModel,
   showOtherModels,
@@ -268,6 +292,8 @@ function ModelList({
   onClose,
 }: {
   groups: ModelGroup[];
+  query: string;
+  onQueryChange: (query: string) => void;
   selectedModel: string;
   defaultModel?: string;
   showOtherModels: boolean;
@@ -280,13 +306,25 @@ function ModelList({
   return (
     <div>
       <PickerHeader title="Model" />
+      {groups.length > 0 || query ? (
+        <div className="px-1.5 pt-1">
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Search models"
+            aria-label="Search models"
+            className="h-7 w-full rounded-[4px] border border-(--border) bg-(--color-input) px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none transition-[border-color,background-color] duration-[var(--motion-fast)] placeholder:text-(--dim) focus:border-(--accent) focus:bg-(--input-focus)"
+          />
+        </div>
+      ) : null}
       {otherModelCount > 0 ? (
         <button
           type="button"
           role="menuitemcheckbox"
           aria-checked={showOtherModels}
           onClick={onToggleOtherModels}
-          className="mt-1 flex min-h-8 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover)"
+          className="mt-1 flex min-h-8 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover)"
         >
           <span className="min-w-0 flex-1">
             <span className="block font-medium">Other models</span>
@@ -297,13 +335,13 @@ function ModelList({
           <span
             aria-hidden="true"
             className={cx(
-              "relative h-4 w-7 shrink-0 rounded-full border border-(--border) bg-(--color-input) transition-colors",
+              "relative h-4 w-7 shrink-0 rounded-full border border-(--border) bg-(--color-input) transition-colors duration-[var(--motion-fast)]",
               showOtherModels && "border-(--accent) bg-(--accent)",
             )}
           >
             <span
               className={cx(
-                "absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-(--fg) transition-transform",
+                "absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-(--fg) transition-transform duration-[var(--motion-fast)]",
                 showOtherModels && "translate-x-3",
               )}
             />
@@ -312,16 +350,19 @@ function ModelList({
       ) : null}
       <div className="max-h-[min(24rem,55vh)] overflow-y-auto pt-1">
         {groups.length === 0 ? (
-          <div className="w-64 px-2.5 py-2 text-[length:var(--fs-sm)] text-(--dim)">
+          <div className="w-full min-w-0 px-2.5 py-2 text-[length:var(--fs-sm)] text-(--dim)">
             <p>
-              {otherModelCount > 0
-                ? "No controller models are available."
-                : "No chat models are available."}
+              {query
+                ? `No models match “${query}”.`
+                : otherModelCount > 0
+                  ? "No controller models are available."
+                  : "No chat models are available."}
             </p>
             <Link
               href="/models"
+              role="menuitem"
               onClick={onClose}
-              className="mt-2 inline-flex h-7 items-center rounded-lg bg-(--active) px-2.5 text-(--fg) hover:bg-(--hover)"
+              className="mt-2 inline-flex h-7 items-center rounded-lg bg-(--active) px-2.5 text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover)"
             >
               Open Models
             </Link>
@@ -376,7 +417,7 @@ function ReasoningList({
             disabled={disabled}
             onClick={() => onSelect(level)}
             className={cx(
-              "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover) disabled:opacity-45",
+              "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) disabled:opacity-45",
               level === value && "bg-(--color-input)",
             )}
           >
@@ -417,7 +458,7 @@ function ModelPickerTrigger({
       onClick={onToggle}
       disabled={disabled}
       className={cx(
-        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[5px] bg-transparent px-1.5 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-colors duration-100 hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
+        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[5px] bg-transparent px-1.5 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
         open && "bg-(--hover) text-(--fg)",
       )}
       title={notRunning ? `${title} is not running — launch it or pick a running model` : title}
@@ -475,7 +516,7 @@ function ModelOption({
   return (
     <div
       className={cx(
-        "flex min-h-7 w-full min-w-0 items-center rounded-[4px] text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover)",
+        "group/model-option flex min-h-7 w-full min-w-0 items-center rounded-[4px] text-[length:var(--fs-sm)] text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover)",
         selected && "bg-(--color-input)",
       )}
     >
@@ -498,8 +539,8 @@ function ModelOption({
           aria-label={isDefault ? `${label} is the default model` : `Set ${label} as default model`}
           title={isDefault ? "Default model" : "Set as default"}
           className={cx(
-            "mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-(--dim) transition-colors hover:bg-(--active) hover:text-(--fg) focus-visible:outline-none",
-            isDefault && "bg-(--active) text-(--fg)",
+            "mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] hover:bg-(--active) hover:text-(--fg) focus-visible:opacity-100 focus-visible:outline-none group-hover/model-option:opacity-100 group-focus-within/model-option:opacity-100",
+            isDefault && "bg-(--active) text-(--fg) opacity-100",
           )}
         >
           <Pin className={cx("h-3 w-3", isDefault && "fill-current")} strokeWidth={1.5} />

@@ -50,6 +50,7 @@ const searchInputClass =
   "h-7 w-full min-w-0 rounded-md bg-(--fg)/[0.04] px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none placeholder:text-(--fg)/30 focus:bg-(--fg)/[0.06]";
 
 type ComposerContextView = "root" | "goal" | "projects" | "git";
+type ComposerContextPlacement = "above" | "below";
 
 export function ComposerProjectDrawer({
   piSessionId,
@@ -113,7 +114,27 @@ export function ComposerProjectDrawer({
     [controlledOpen, onOpenChange],
   );
   const sectionRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const [panelPlacement, setPanelPlacement] = useState<ComposerContextPlacement>("below");
+  const [panelMaxHeight, setPanelMaxHeight] = useState(448);
+  const positionPanel = useCallback(() => {
+    const section = sectionRef.current;
+    const panel = panelRef.current;
+    const box = section?.parentElement?.nextElementSibling;
+    if (!section || !panel || !(box instanceof HTMLElement)) return;
+    const boxRect = box.getBoundingClientRect();
+    const stripBottom =
+      document.querySelector<HTMLElement>(".workbench-tab-strip")?.getBoundingClientRect().bottom ??
+      8;
+    const availableAbove = Math.max(0, boxRect.top - stripBottom - 8);
+    const availableBelow = Math.max(0, window.innerHeight - boxRect.bottom - 8);
+    const placement =
+      panel.scrollHeight <= availableBelow || availableBelow >= availableAbove ? "below" : "above";
+    section.style.setProperty("--composer-context-box-height", `${boxRect.height}px`);
+    setPanelPlacement(placement);
+    setPanelMaxHeight(Math.max(96, placement === "above" ? availableAbove : availableBelow));
+  }, []);
   const {
     goal,
     error: goalError,
@@ -167,7 +188,12 @@ export function ComposerProjectDrawer({
     }
     setView("root");
     setQuery("");
-    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      positionPanel();
+      searchRef.current?.focus();
+    });
+    const observer = new ResizeObserver(positionPanel);
+    if (panelRef.current) observer.observe(panelRef.current);
     const onPointerDown = (event: PointerEvent) => {
       if (!(event.target instanceof Node) || sectionRef.current?.contains(event.target)) return;
       if (
@@ -191,12 +217,17 @@ export function ComposerProjectDrawer({
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", positionPanel);
+    window.addEventListener("scroll", positionPanel, true);
     return () => {
       cancelAnimationFrame(frame);
+      observer.disconnect();
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", positionPanel);
+      window.removeEventListener("scroll", positionPanel, true);
     };
-  }, [open, setOpen]);
+  }, [open, positionPanel, setOpen]);
 
   const pickProject = (project: Project) => {
     projects.selectProject(project);
@@ -239,7 +270,18 @@ export function ComposerProjectDrawer({
         className="agent-composer-project-drawer relative z-20 h-0 w-full overflow-visible text-[length:var(--fs-xs)] md:text-[length:var(--fs-sm)]"
       >
         {open ? (
-          <div className="absolute bottom-2 left-0 right-0 max-h-[min(28rem,58vh)] overflow-y-auto rounded-[9px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_14px_34px_-16px_rgba(0,0,0,0.84)]">
+          <div
+            ref={panelRef}
+            style={
+              panelPlacement === "above"
+                ? { bottom: "0.5rem", maxHeight: panelMaxHeight }
+                : {
+                    top: "calc(var(--composer-context-box-height) + 0.5rem)",
+                    maxHeight: panelMaxHeight,
+                  }
+            }
+            className="absolute left-0 right-0 overflow-y-auto rounded-[9px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_14px_34px_-16px_rgba(0,0,0,0.84)]"
+          >
             {view === "root" || view === "projects" ? (
               <div className="flex items-center gap-1 border-b border-(--border) px-0.5 pb-1.5">
                 {view === "projects" ? (

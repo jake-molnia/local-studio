@@ -131,12 +131,12 @@ export function AgentComposerFrame({
     <form
       onSubmit={onSubmit}
       className={cx(
-        "agent-composer-form relative z-[100] mx-auto w-full max-w-[calc(var(--composer-w)*0.9+2rem)] shrink-0 sm:w-[90%]",
+        "agent-composer-form relative z-[100] mx-auto w-full max-w-[calc(var(--composer-w)*0.9+1.75rem)] shrink-0 sm:w-[90%]",
         floating
           ? "bg-transparent p-[calc(var(--space-base)*1.5)]"
           : dense
             ? "bg-(--agent-bg) px-2 pb-0.5 pt-0.5"
-            : "bg-transparent px-2 pb-1.5 pt-0 sm:px-4",
+            : "bg-transparent px-2.5 pb-1.5 pt-0 sm:px-4",
       )}
     >
       {banner ? (
