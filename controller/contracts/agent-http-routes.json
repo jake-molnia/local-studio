@@ -36,6 +36,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/harnesses",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/models",
       "ownership": "head",
       "streaming": "never"
@@ -151,6 +157,12 @@
     {
       "method": "GET",
       "path": "/internal/harness/v1/setup-checks",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/harness/v1/catalog",
       "ownership": "worker",
       "streaming": "never"
     }

@@ -1,5 +1,7 @@
 const std = @import("std");
 const config_module = @import("../config.zig");
+const harness_catalog = @import("harness_catalog.zig");
+const harness_events = @import("harness_events.zig");
 const pi_model_route = @import("pi_model_route.zig");
 const harness_session_id = @import("harness_session_id.zig");
 
@@ -21,6 +23,7 @@ const Session = struct {
     allocator: std.mem.Allocator,
     id: []u8,
     native_id: []u8,
+    harness_version: ?[]u8,
     model_id: []u8,
     cwd: []u8,
     session_dir: []u8,
@@ -36,6 +39,7 @@ const Session = struct {
         if (session.child.id != null) session.child.kill(io);
         session.allocator.free(session.id);
         session.allocator.free(session.native_id);
+        if (session.harness_version) |value| session.allocator.free(value);
         session.allocator.free(session.model_id);
         session.allocator.free(session.cwd);
         session.allocator.free(session.session_dir);
@@ -55,24 +59,23 @@ pub const Manager = struct {
     allocator: std.mem.Allocator,
     io: Io,
     mode: config_module.Mode,
-    environment: *const std.process.Environ.Map,
     data_dir: []u8,
-    pi_binary: []u8,
+    pi: harness_catalog.Installation,
     model_route: pi_model_route.Config,
     mutex: Io.Mutex = .init,
     tasks: Io.Group = .init,
     sessions: std.StringHashMapUnmanaged(*Session) = .empty,
     pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config_module.Config) !Manager {
-        const configured = configuration.environment.get("LOCAL_STUDIO_PI_BIN") orelse "pi";
         var model_route = try pi_model_route.Config.init(allocator, io, configuration);
         errdefer model_route.deinit();
+        var pi = try harness_catalog.discoverPi(allocator, io, configuration);
+        errdefer pi.deinit();
         return .{
             .allocator = allocator,
             .io = io,
             .mode = configuration.mode,
-            .environment = configuration.environment,
             .data_dir = try allocator.dupe(u8, configuration.data_dir),
-            .pi_binary = try allocator.dupe(u8, std.mem.trim(u8, configured, " \t\r\n")),
+            .pi = pi,
             .model_route = model_route,
         };
     }
@@ -82,7 +85,7 @@ pub const Manager = struct {
         while (iterator.next()) |session| session.*.deinit(manager.io);
         manager.sessions.deinit(manager.allocator);
         manager.allocator.free(manager.data_dir);
-        manager.allocator.free(manager.pi_binary);
+        manager.pi.deinit();
         manager.model_route.deinit();
         manager.* = undefined;
     }
@@ -92,12 +95,21 @@ pub const Manager = struct {
         errdefer output.deinit();
         try output.writer.writeAll("{\"checks\":[{\"id\":\"pi-rpc\",\"label\":\"Pi RPC harness\",\"ok\":");
         try output.writer.print("{},\"value\":", .{available});
-        try std.json.Stringify.value(manager.pi_binary, .{}, &output.writer);
+        try std.json.Stringify.value(manager.pi.executable, .{}, &output.writer);
         try output.writer.writeAll(",\"guidance\":\"Install Pi and configure LOCAL_STUDIO_HEAD_URL plus LOCAL_STUDIO_HEAD_API_KEY on an enrolled harness node.\"}],\"diagnostics\":[]}");
         return output.toOwnedSlice();
     }
     pub fn piIsAvailable(manager: *Manager) bool {
-        return manager.piAvailable() and manager.model_route.available();
+        return manager.pi.available() and manager.model_route.available();
+    }
+    pub fn piVersion(manager: *const Manager) ?[]const u8 {
+        return manager.pi.version;
+    }
+    pub fn catalogPayload(manager: *Manager) ![]u8 {
+        var output: Io.Writer.Allocating = .init(manager.allocator);
+        errdefer output.deinit();
+        try harness_catalog.writeCatalog(&output.writer, &manager.pi);
+        return output.toOwnedSlice();
     }
     pub fn sessionsPayload(manager: *Manager) ![]u8 {
         try manager.mutex.lock(manager.io);
@@ -142,6 +154,9 @@ pub const Manager = struct {
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidTurnPayload;
         const object = parsed.value.object;
+        const harness = optionalString(object, "harness") orelse "pi";
+        if (!std.mem.eql(u8, harness, "pi")) return error.HarnessDriverUnavailable;
+        if (!manager.piIsAvailable()) return error.HarnessUnavailable;
         const session_id = optionalString(object, "sessionId") orelse "default";
         const model_id = requiredString(object, "modelId") orelse return error.ModelIdRequired;
         const message = requiredString(object, "message") orelse return error.MessageRequired;
@@ -153,7 +168,7 @@ pub const Manager = struct {
         const thinking = optionalString(object, "thinkingLevel");
         const tool_access = optionalString(object, "toolAccess") orelse "read_only";
         const session = if (std.mem.eql(u8, mode, "prompt"))
-            try manager.ensureSession(session_id, optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
+            try manager.ensureSession(session_id, optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
         else
             try manager.existingActiveSession(session_id);
         const was_active = session.active;
@@ -187,6 +202,10 @@ pub const Manager = struct {
         try output.writer.writeAll(",\"runtimeSessionId\":");
         try std.json.Stringify.value(session.id, .{}, &output.writer);
         try output.writer.writeAll(",\"piSessionId\":");
+        try std.json.Stringify.value(session.native_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"harness\":\"pi\",\"harnessVersion\":");
+        if (manager.pi.version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        try output.writer.writeAll(",\"nativeSessionId\":");
         try std.json.Stringify.value(session.native_id, .{}, &output.writer);
         try output.writer.print(",\"active\":{},\"status\":", .{session.active});
         try writeStatus(&output.writer, session);
@@ -280,7 +299,9 @@ pub const Manager = struct {
             }
             var sent = false;
             for (session.?.events.items) |event| if (event.seq > after) {
-                try body.writer.print("id: {d}\ndata: {{\"type\":\"pi\",\"seq\":{d},\"event\":{s}}}\n\n", .{ event.seq, event.seq, event.document });
+                try body.writer.print("id: {d}\ndata: ", .{event.seq});
+                try harness_events.writeStreamEnvelope(manager.allocator, &body.writer, "pi", event.seq, event.document);
+                try body.writer.writeAll("\n\n");
                 after = event.seq;
                 sent = true;
             };
@@ -335,7 +356,7 @@ pub const Manager = struct {
         defer model_route.deinit();
         const native_id = try harness_session_id.resolve(manager.allocator, session_id, native_value);
         errdefer manager.allocator.free(native_id);
-        try argv.appendSlice(manager.allocator, &.{ manager.pi_binary, "--mode", "rpc", "--session-dir", session_dir, "--session-id", native_id, "--model", model_route.model_name });
+        try argv.appendSlice(manager.allocator, &.{ manager.pi.executable, "--mode", "rpc", "--session-dir", session_dir, "--session-id", native_id, "--model", model_route.model_name });
         if (thinking) |level| if (!std.mem.eql(u8, level, "auto")) try argv.appendSlice(manager.allocator, &.{ "--thinking", level });
         if (!std.mem.eql(u8, tool_access, "full")) try argv.appendSlice(manager.allocator, &.{ "--tools", "read,grep,find,ls" });
         var child = try std.process.spawn(manager.io, .{
@@ -354,6 +375,7 @@ pub const Manager = struct {
             .allocator = manager.allocator,
             .id = try manager.allocator.dupe(u8, session_id),
             .native_id = native_id,
+            .harness_version = if (manager.pi.version) |value| try manager.allocator.dupe(u8, value) else null,
             .model_id = try manager.allocator.dupe(u8, model_id),
             .cwd = try manager.allocator.dupe(u8, cwd),
             .session_dir = session_dir,
@@ -361,6 +383,7 @@ pub const Manager = struct {
         };
         errdefer {
             manager.allocator.free(session.id);
+            if (session.harness_version) |value| manager.allocator.free(value);
             manager.allocator.free(session.model_id);
             manager.allocator.free(session.cwd);
         }
@@ -418,22 +441,6 @@ pub const Manager = struct {
         var bytes: [16]u8 = undefined;
         manager.io.random(&bytes);
         return std.fmt.bytesToHex(bytes, .lower);
-    }
-
-    fn piAvailable(manager: *Manager) bool {
-        const result = std.process.run(manager.allocator, manager.io, .{
-            .argv = &.{ manager.pi_binary, "--version" },
-            .environ_map = manager.environment,
-            .stdout_limit = .limited(64 * 1024),
-            .stderr_limit = .limited(64 * 1024),
-            .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(3) } },
-        }) catch return false;
-        defer manager.allocator.free(result.stdout);
-        defer manager.allocator.free(result.stderr);
-        return switch (result.term) {
-            .exited => |code| code == 0,
-            else => false,
-        };
     }
 
     fn handleLine(manager: *Manager, session: *Session, line_value: []const u8) !void {
@@ -523,12 +530,18 @@ fn readHarness(manager: *Manager, session: *Session) Io.Cancelable!void {
 }
 
 fn writeStatus(writer: *Io.Writer, session: *const Session) !void {
-    try writer.print("{{\"running\":{},\"active\":{},\"modelId\":", .{ session.running, session.active });
+    try writer.print("{{\"running\":{},\"active\":{},\"harness\":\"pi\",\"modelId\":", .{ session.running, session.active });
     try std.json.Stringify.value(session.model_id, .{}, writer);
     try writer.writeAll(",\"cwd\":");
     try std.json.Stringify.value(session.cwd, .{}, writer);
     try writer.writeAll(",\"piSessionId\":");
     try std.json.Stringify.value(session.native_id, .{}, writer);
+    try writer.writeAll(",\"nativeSessionId\":");
+    try std.json.Stringify.value(session.native_id, .{}, writer);
+    try writer.writeAll(",\"harnessVersion\":");
+    if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"capabilities\":");
+    try harness_catalog.writeCapabilities(writer, "pi");
     try writer.writeAll(",\"agentDir\":");
     try std.json.Stringify.value(session.session_dir, .{}, writer);
     try writer.print(",\"eventSeq\":{d},\"lastError\":", .{session.event_seq});
@@ -547,7 +560,13 @@ fn writeEvents(writer: *Io.Writer, session: *const Session, after: u64) !void {
     var wrote = false;
     for (session.events.items) |event| if (event.seq > after) {
         if (wrote) try writer.writeByte(',');
-        try writer.print("{{\"seq\":{d},\"event\":{s},\"timestamp\":", .{ event.seq, event.document });
+        try writer.print("{{\"seq\":{d},\"harness\":\"pi\",\"normalized\":", .{event.seq});
+        try harness_events.writeNormalized(session.allocator, writer, "pi", event.document);
+        try writer.writeAll(",\"event\":");
+        try writer.writeAll(event.document);
+        try writer.writeAll(",\"native\":");
+        try writer.writeAll(event.document);
+        try writer.writeAll(",\"timestamp\":");
         try std.json.Stringify.value(event.timestamp[0..], .{}, writer);
         try writer.writeByte('}');
         wrote = true;

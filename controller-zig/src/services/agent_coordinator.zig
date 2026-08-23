@@ -3,6 +3,8 @@ const config = @import("../config.zig");
 const records = @import("../repository/agent_control.zig");
 const sqlite = @import("../repository/sqlite.zig");
 const harness_nodes = @import("harness_nodes.zig");
+const harness_catalog = @import("harness_catalog.zig");
+const harness_events = @import("harness_events.zig");
 const harness_runtime = @import("harness_runtime.zig");
 
 const Io = std.Io;
@@ -41,6 +43,35 @@ pub fn setupPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, dat
     return output.toOwnedSlice();
 }
 
+pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, database: *sqlite.Database, harness: *harness_runtime.Manager) ![]u8 {
+    if (mode == .standalone) return harness.catalogPayload();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"harnesses\":[");
+    for ([_]struct { id: []const u8, name: []const u8, transport: []const u8 }{
+        .{ .id = "pi", .name = "Pi", .transport = "jsonl-rpc" },
+        .{ .id = "opencode", .name = "OpenCode", .transport = "http-sse" },
+        .{ .id = "codex", .name = "Codex", .transport = "app-server" },
+        .{ .id = "claude", .name = "Claude Code", .transport = "stream-json" },
+    }, 0..) |descriptor, index| {
+        if (index > 0) try output.writer.writeByte(',');
+        const node_count = try harness_nodes.count(allocator, io, database, descriptor.id);
+        try output.writer.writeAll("{\"id\":");
+        try std.json.Stringify.value(descriptor.id, .{}, &output.writer);
+        try output.writer.writeAll(",\"name\":");
+        try std.json.Stringify.value(descriptor.name, .{}, &output.writer);
+        try output.writer.writeAll(",\"status\":");
+        try std.json.Stringify.value(if (node_count > 0) "available" else "missing", .{}, &output.writer);
+        try output.writer.writeAll(",\"transport\":");
+        try std.json.Stringify.value(descriptor.transport, .{}, &output.writer);
+        try output.writer.print(",\"installation\":null,\"nodeCount\":{d},\"capabilities\":", .{node_count});
+        try harness_catalog.writeCapabilities(&output.writer, descriptor.id);
+        try output.writer.writeByte('}');
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
 pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) ![]u8 {
     try database.lock(io);
     defer database.unlock(io);
@@ -55,6 +86,10 @@ pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.D
         try std.json.Stringify.value(session.id, .{}, &output.writer);
         try output.writer.writeAll(",\"harness\":");
         try std.json.Stringify.value(session.harness, .{}, &output.writer);
+        try output.writer.writeAll(",\"harnessVersion\":");
+        if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        try output.writer.writeAll(",\"capabilities\":");
+        try output.writer.writeAll(session.capabilities_json);
         try output.writer.writeAll(",\"nodeId\":");
         try std.json.Stringify.value(session.node_id, .{}, &output.writer);
         try output.writer.writeAll(",\"nativeSessionId\":");
@@ -88,15 +123,18 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     _ = message;
     const project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
-    const native_session_id = optionalString(object, "piSessionId");
+    const native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
     var existing = try lockedGet(allocator, io, database, session_id);
     defer if (existing) |*session| session.deinit();
+    const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
+    if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
+    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
-    var target = if (mode == .head) try harness_nodes.select(allocator, io, database, "pi", preferred_node) else null;
+    var target = if (mode == .head) try harness_nodes.select(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
     if (mode == .head and target == null) return if (preferred_node != null) error.AssignedHarnessUnavailable else error.HarnessNodeRequired;
     const node_id = if (mode == .standalone) "local" else target.?.id;
@@ -104,7 +142,9 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
 
     try lockedSave(allocator, io, database, .{
         .id = session_id,
-        .harness = "pi",
+        .harness = requested_harness,
+        .harness_version = if (mode == .standalone) harness.piVersion() else if (existing) |session| session.harness_version else null,
+        .capabilities_json = if (existing) |session| session.capabilities_json else if (std.mem.eql(u8, requested_harness, "pi")) "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]" else "[]",
         .node_id = node_id,
         .native_session_id = native_session_id,
         .project_id = project_id,
@@ -203,7 +243,9 @@ pub fn serveEvents(allocator: std.mem.Allocator, io: Io, _: config.Mode, _: *htt
         for (snapshot.events.records) |event| {
             const payload = try storedEventPayload(allocator, event.document);
             defer allocator.free(payload);
-            try body.writer.print("id: {d}\ndata: {{\"type\":\"pi\",\"seq\":{d},\"event\":{s}}}\n\n", .{ event.sequence, event.sequence, payload });
+            try body.writer.print("id: {d}\ndata: ", .{event.sequence});
+            try harness_events.writeStreamEnvelope(allocator, &body.writer, snapshot.session.harness, event.sequence, payload);
+            try body.writer.writeAll("\n\n");
             after = event.sequence;
             sent = true;
         }
@@ -268,6 +310,14 @@ fn writeStatusEvent(writer: *Io.Writer, session: *const records.Session, phase: 
     try writer.writeAll(if (std.mem.eql(u8, phase, "running")) "true" else "false");
     try writer.writeAll(",\"active\":");
     try writer.writeAll(if (std.mem.eql(u8, phase, "running")) "true" else "false");
+    try writer.writeAll(",\"harness\":");
+    try std.json.Stringify.value(session.harness, .{}, writer);
+    try writer.writeAll(",\"harnessVersion\":");
+    if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"capabilities\":");
+    try writer.writeAll(session.capabilities_json);
+    try writer.writeAll(",\"nativeSessionId\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"piSessionId\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"modelId\":");
@@ -327,7 +377,10 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     const active = booleanField(status.object, "active") orelse false;
     const running = booleanField(status.object, "running") orelse active;
     const phase = if (active) "running" else if (running) "idle" else "stopped";
-    const native_session_id = optionalString(status.object, "piSessionId");
+    const native_session_id = optionalString(status.object, "nativeSessionId") orelse optionalString(status.object, "piSessionId");
+    const harness_version = optionalString(status.object, "harnessVersion");
+    const capabilities_json = if (status.object.get("capabilities")) |value| try serialize(allocator, value) else null;
+    defer if (capabilities_json) |value| allocator.free(value);
     var committed_cursor: ?u64 = null;
     if (parsed.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
         if (event != .object) continue;
@@ -339,13 +392,15 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     var transaction = try database.begin();
     defer transaction.deinit();
     if (parsed.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
-            if (event != .object) continue;
-            const sequence = unsignedField(event.object, "seq") orelse continue;
-            const serialized = try serialize(allocator, event);
-            defer allocator.free(serialized);
-            try records.appendEvent(database, session_id, sequence, "pi", serialized);
-        };
+        if (event != .object) continue;
+        const sequence = unsignedField(event.object, "seq") orelse continue;
+        const serialized = try serialize(allocator, event);
+        defer allocator.free(serialized);
+        const session_harness = optionalString(status.object, "harness") orelse "pi";
+        try records.appendEvent(database, session_id, sequence, session_harness, serialized);
+    };
     try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
+    try records.updateDriver(database, session_id, harness_version, capabilities_json);
     try transaction.commit();
 }
 
@@ -358,7 +413,15 @@ fn storedStatus(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database
     errdefer output.deinit();
     try output.writer.writeAll("{\"sessionId\":");
     try std.json.Stringify.value(session.id, .{}, &output.writer);
-    try output.writer.writeAll(",\"status\":{\"running\":false,\"active\":false,\"piSessionId\":");
+    try output.writer.writeAll(",\"status\":{\"running\":false,\"active\":false,\"harness\":");
+    try std.json.Stringify.value(session.harness, .{}, &output.writer);
+    try output.writer.writeAll(",\"harnessVersion\":");
+    if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"capabilities\":");
+    try output.writer.writeAll(session.capabilities_json);
+    try output.writer.writeAll(",\"nativeSessionId\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"piSessionId\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.print(",\"modelId\":", .{});
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");

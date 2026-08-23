@@ -37,8 +37,10 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
     try records.save(database, .{
         .id = session_id,
         .harness = harness,
+        .harness_version = optionalString(object, "harness_version") orelse if (existing) |session| session.harness_version else null,
+        .capabilities_json = if (existing) |session| session.capabilities_json else "[]",
         .node_id = node_id,
-        .native_session_id = optionalString(object, "pi_session_id"),
+        .native_session_id = optionalString(object, "native_session_id") orelse optionalString(object, "pi_session_id"),
         .project_id = optionalString(object, "project_id"),
         .project_path = optionalString(object, "project_path"),
         .model_id = optionalString(object, "model_id"),
@@ -62,6 +64,8 @@ fn writeMetadata(writer: *Io.Writer, session: *const records.Session) !void {
     try std.json.Stringify.value(session.id, .{}, writer);
     try writer.writeAll(",\"pi_session_id\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"native_session_id\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"desktop_id\":");
     try std.json.Stringify.value(session.node_id, .{}, writer);
     try writer.writeAll(",\"desktop_name\":");
@@ -82,6 +86,10 @@ fn writeMetadata(writer: *Io.Writer, session: *const records.Session) !void {
     try std.json.Stringify.value(session.updated_at, .{}, writer);
     try writer.writeAll(",\"attachment_count\":0,\"attachments\":[],\"usage\":null,\"harness\":");
     try std.json.Stringify.value(session.harness, .{}, writer);
+    try writer.writeAll(",\"harness_version\":");
+    if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"capabilities\":");
+    try writer.writeAll(session.capabilities_json);
     try writer.writeAll(",\"sharing_policy\":");
     try std.json.Stringify.value(session.sharing_policy, .{}, writer);
     try writer.print(",\"event_cursor\":{d},\"automation_id\":", .{session.event_cursor});

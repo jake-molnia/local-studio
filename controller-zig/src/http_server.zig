@@ -242,6 +242,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/harnesses")) {
+        const response = try agent_coordinator.harnessesPayload(allocator, io, mode, database, harness);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/models")) {
         if (request.head.method == .POST) {
             const document = try readBoundedAgentBody(allocator, request) orelse return false;
@@ -379,6 +385,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/setup-checks")) {
         const response = try harness.setupPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/catalog")) {
+        const response = try harness.catalogPayload();
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1426,17 +1438,20 @@ fn respondHeadProviderFailure(request: *http.Server.Request, failure: anyerror) 
 
 fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.RemoteHarnessRequired, error.HarnessNodeRequired, error.SessionNodeMismatch, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected => .conflict,
+        error.RemoteHarnessRequired, error.HarnessNodeRequired, error.SessionNodeMismatch, error.SessionHarnessMismatch, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected, error.HarnessDriverUnavailable => .conflict,
         error.SessionNotFound => .not_found,
         error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
-        error.FileNotFound, error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable => .service_unavailable,
+        error.FileNotFound, error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable, error.HarnessUnavailable => .service_unavailable,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
         error.RemoteHarnessRequired => "This Head has no enrolled harness node assigned to the session",
-        error.HarnessNodeRequired => "No enrolled Pi harness node is available",
+        error.HarnessNodeRequired => "No enrolled node offers the requested harness",
         error.AssignedHarnessUnavailable => "The session's assigned harness node is unavailable",
         error.SessionNodeMismatch => "The session is pinned to a different harness node",
+        error.SessionHarnessMismatch => "The session is pinned to a different harness",
+        error.HarnessDriverUnavailable => "The requested harness driver is not available on this node",
+        error.HarnessUnavailable => "The requested harness installation is unavailable or unsupported",
         error.SessionNotActive => "Runtime session is no longer active",
         error.SessionNotFound => "Runtime session not found",
         error.ModelChangeRequiresNewSession => "Changing models requires a new harness session",

@@ -7,6 +7,8 @@ pub const Session = struct {
     allocator: std.mem.Allocator,
     id: []u8,
     harness: []u8,
+    harness_version: ?[]u8,
+    capabilities_json: []u8,
     node_id: []u8,
     native_session_id: ?[]u8,
     project_id: ?[]u8,
@@ -22,6 +24,8 @@ pub const Session = struct {
     pub fn deinit(session: *Session) void {
         session.allocator.free(session.id);
         session.allocator.free(session.harness);
+        if (session.harness_version) |value| session.allocator.free(value);
+        session.allocator.free(session.capabilities_json);
         session.allocator.free(session.node_id);
         if (session.native_session_id) |value| session.allocator.free(value);
         if (session.project_id) |value| session.allocator.free(value);
@@ -50,6 +54,8 @@ pub const SessionList = struct {
 pub const SessionInput = struct {
     id: []const u8,
     harness: []const u8,
+    harness_version: ?[]const u8 = null,
+    capabilities_json: []const u8 = "[]",
     node_id: []const u8,
     native_session_id: ?[]const u8 = null,
     project_id: ?[]const u8 = null,
@@ -127,11 +133,13 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\);
         \\CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(session_id, created_at);
     );
+    try ensureColumn(database, "harness_version", "ALTER TABLE agent_sessions ADD COLUMN harness_version TEXT");
+    try ensureColumn(database, "capabilities_json", "ALTER TABLE agent_sessions ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'");
 }
 
 pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?Session {
     var statement = try database.prepare(
-        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE session_id = ?",
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE session_id = ?",
     );
     defer statement.deinit();
     try statement.bindText(1, session_id);
@@ -140,14 +148,18 @@ pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id:
 }
 
 pub fn list(allocator: std.mem.Allocator, database: *sqlite.Database) !SessionList {
-    return querySessions(allocator, database,
-        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC LIMIT 10000",
+    return querySessions(
+        allocator,
+        database,
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC LIMIT 10000",
     );
 }
 
 pub fn listActive(allocator: std.mem.Allocator, database: *sqlite.Database) !SessionList {
-    return querySessions(allocator, database,
-        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE status IN ('queued', 'running') ORDER BY updated_at LIMIT 10000",
+    return querySessions(
+        allocator,
+        database,
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE status IN ('queued', 'running') ORDER BY updated_at LIMIT 10000",
     );
 }
 
@@ -169,11 +181,13 @@ fn querySessions(allocator: std.mem.Allocator, database: *sqlite.Database, query
 pub fn save(database: *sqlite.Database, input: SessionInput) !void {
     var statement = try database.prepare(
         \\INSERT INTO agent_sessions (
-        \\  session_id, harness, node_id, native_session_id, project_id, project_path,
+        \\  session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path,
         \\  model_id, status, event_cursor, sharing_policy, automation_id, updated_at
-        \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         \\ON CONFLICT(session_id) DO UPDATE SET
         \\  harness = excluded.harness,
+        \\  harness_version = COALESCE(excluded.harness_version, agent_sessions.harness_version),
+        \\  capabilities_json = excluded.capabilities_json,
         \\  node_id = excluded.node_id,
         \\  native_session_id = COALESCE(excluded.native_session_id, agent_sessions.native_session_id),
         \\  project_id = COALESCE(excluded.project_id, agent_sessions.project_id),
@@ -188,15 +202,17 @@ pub fn save(database: *sqlite.Database, input: SessionInput) !void {
     defer statement.deinit();
     try statement.bindText(1, input.id);
     try statement.bindText(2, input.harness);
-    try statement.bindText(3, input.node_id);
-    try bindOptionalText(&statement, 4, input.native_session_id);
-    try bindOptionalText(&statement, 5, input.project_id);
-    try bindOptionalText(&statement, 6, input.project_path);
-    try bindOptionalText(&statement, 7, input.model_id);
-    try statement.bindText(8, input.status);
-    try statement.bindInt(9, @intCast(input.event_cursor));
-    try statement.bindText(10, input.sharing_policy);
-    try bindOptionalText(&statement, 11, input.automation_id);
+    try bindOptionalText(&statement, 3, input.harness_version);
+    try statement.bindText(4, input.capabilities_json);
+    try statement.bindText(5, input.node_id);
+    try bindOptionalText(&statement, 6, input.native_session_id);
+    try bindOptionalText(&statement, 7, input.project_id);
+    try bindOptionalText(&statement, 8, input.project_path);
+    try bindOptionalText(&statement, 9, input.model_id);
+    try statement.bindText(10, input.status);
+    try statement.bindInt(11, @intCast(input.event_cursor));
+    try statement.bindText(12, input.sharing_policy);
+    try bindOptionalText(&statement, 13, input.automation_id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
@@ -220,6 +236,21 @@ pub fn updateRuntime(database: *sqlite.Database, session_id: []const u8, status:
         try statement.bindNull(4);
     }
     try statement.bindText(5, session_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn updateDriver(database: *sqlite.Database, session_id: []const u8, harness_version: ?[]const u8, capabilities_json: ?[]const u8) !void {
+    var statement = try database.prepare(
+        \\UPDATE agent_sessions SET
+        \\  harness_version = COALESCE(?, harness_version),
+        \\  capabilities_json = COALESCE(?, capabilities_json),
+        \\  updated_at = CURRENT_TIMESTAMP
+        \\WHERE session_id = ?
+    );
+    defer statement.deinit();
+    try bindOptionalText(&statement, 1, harness_version);
+    try bindOptionalText(&statement, 2, capabilities_json);
+    try statement.bindText(3, session_id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
@@ -289,18 +320,29 @@ fn readSession(allocator: std.mem.Allocator, statement: *const sqlite.Statement)
         .allocator = allocator,
         .id = try requiredColumn(allocator, statement, 0),
         .harness = try requiredColumn(allocator, statement, 1),
-        .node_id = try requiredColumn(allocator, statement, 2),
-        .native_session_id = try optionalColumn(allocator, statement, 3),
-        .project_id = try optionalColumn(allocator, statement, 4),
-        .project_path = try optionalColumn(allocator, statement, 5),
-        .model_id = try optionalColumn(allocator, statement, 6),
-        .status = try requiredColumn(allocator, statement, 7),
-        .event_cursor = @intCast(@max(statement.columnInt(8), 0)),
-        .sharing_policy = try requiredColumn(allocator, statement, 9),
-        .automation_id = try optionalColumn(allocator, statement, 10),
-        .created_at = try requiredColumn(allocator, statement, 11),
-        .updated_at = try requiredColumn(allocator, statement, 12),
+        .harness_version = try optionalColumn(allocator, statement, 2),
+        .capabilities_json = try requiredColumn(allocator, statement, 3),
+        .node_id = try requiredColumn(allocator, statement, 4),
+        .native_session_id = try optionalColumn(allocator, statement, 5),
+        .project_id = try optionalColumn(allocator, statement, 6),
+        .project_path = try optionalColumn(allocator, statement, 7),
+        .model_id = try optionalColumn(allocator, statement, 8),
+        .status = try requiredColumn(allocator, statement, 9),
+        .event_cursor = @intCast(@max(statement.columnInt(10), 0)),
+        .sharing_policy = try requiredColumn(allocator, statement, 11),
+        .automation_id = try optionalColumn(allocator, statement, 12),
+        .created_at = try requiredColumn(allocator, statement, 13),
+        .updated_at = try requiredColumn(allocator, statement, 14),
     };
+}
+
+fn ensureColumn(database: *sqlite.Database, name: []const u8, migration: []const u8) !void {
+    var statement = try database.prepare("PRAGMA table_info(agent_sessions)");
+    defer statement.deinit();
+    while (try statement.step() == .row) {
+        if (statement.columnText(1)) |column| if (std.mem.eql(u8, column, name)) return;
+    }
+    try database.execute(migration);
 }
 
 fn bindOptionalText(statement: *sqlite.Statement, index: u31, value: ?[]const u8) !void {
