@@ -62,7 +62,7 @@ export class OpenRouterProviderService implements HeadCompletionsProviderAdapter
         ? {
             authSource: credential.source,
             authLabel: credential.source === "controller" ? "Head API key" : "OPENROUTER_API_KEY",
-            credentialType: "api_key" as const,
+            ...(credential.source === "controller" ? { credentialType: "api_key" as const } : {}),
           }
         : {}),
       modelCount: this.#provider.getModels().length,
