@@ -27,6 +27,10 @@ const artifacts = {
     url: "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz",
     sha256: "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
   },
+  "x64-win32": {
+    url: "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+    sha256: "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+  },
 };
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -80,7 +84,7 @@ const extract = async () => {
   const temporary = join(versionRoot, `toolchain.tmp-${process.pid}`);
   await rm(temporary, { recursive: true, force: true });
   await mkdir(temporary, { recursive: true });
-  const result = spawnSync("tar", ["-xJf", archive, "-C", temporary, "--strip-components=1"], { stdio: "inherit" });
+  const result = spawnSync("tar", ["-xf", archive, "-C", temporary, "--strip-components=1"], { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Failed to extract Zig archive: tar exited ${result.status}`);
   await rm(installationRoot, { recursive: true, force: true });

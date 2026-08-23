@@ -16,6 +16,10 @@ files:
 extraResources:
   - from: desktop/resources/app-update.yml
     to: app-update.yml
+  - from: ../controller-zig/zig-out/bin
+    to: app/controller
+    filter:
+      - "local-studio-controller*"
   - from: ../services/agent-runtime/dist/standalone.mjs
     to: app/agent-runtime/standalone.mjs
   - from: ../services/agent-runtime/dist/node_modules/playwright-core

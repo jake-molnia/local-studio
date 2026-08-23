@@ -1704,6 +1704,9 @@ async function afterPack(context) {
       "Re-run the build (run `npm run build` first if .next/standalone is absent)."
     ].join(`
   `));
+  let controllerRoot = path.join(resourcesDir, "app", "controller"), controllerExecutable = path.join(controllerRoot, electronPlatformName === "win32" ? "local-studio-controller.exe" : "local-studio-controller");
+  if (!existsSync(controllerExecutable))
+    throw Error(`Packaged app is missing its Zig controller executable: ${controllerExecutable}`);
   let standaloneRoot = path.dirname(standaloneServer), missingRuntimeFile = [
     path.join(standaloneRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
     path.join(standaloneRoot, "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "@earendil-works", "pi-ai", "package.json"),
@@ -1743,7 +1746,7 @@ async function afterPack(context) {
   let packagedPiCli = path.join(resourcesDir, "app", "frontend", ".next", "standalone", "frontend", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
   if (!existsSync(packagedPiCli))
     throw Error(`Packaged app is missing its Pi CLI: ${packagedPiCli}`);
-  console.log(`  afterPack: embedded frontend and agent runtime present, app.asar ${appArchiveBytes} bytes (${electronPlatformName})`);
+  console.log(`  afterPack: embedded frontend, Zig controller, and agent runtime present, app.asar ${appArchiveBytes} bytes (${electronPlatformName})`);
 }
 
 var project_entry_default = afterPack, root5 = path11.resolve(path11.dirname(fileURLToPath11(import.meta.url)), "../.."), commands = new Map([
