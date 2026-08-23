@@ -35,7 +35,6 @@ import { MachinesSection } from "@/features/configure/machines-section";
 import UsagePage from "@/features/usage/usage-page";
 import { LogsView } from "@/features/logs/logs-view";
 import { useLogs, type LogsTarget } from "@/features/logs/use-logs";
-import type { UsageTarget } from "@/features/usage/use-usage";
 import { ServerContent } from "@/features/logs/server-view";
 import { ErrorBox } from "@/ui";
 import { cx } from "@/ui/utils";
@@ -133,6 +132,12 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
       terms: ["preflight", "prerequisite", "controller connection", "requirements"],
     },
   ],
+  usage: [
+    {
+      label: "Usage overview",
+      terms: ["tokens", "requests", "activity", "models", "controller", "errors"],
+    },
+  ],
 };
 const SECTIONS: SettingsSectionDef[] = [
   [
@@ -191,6 +196,13 @@ const SECTIONS: SettingsSectionDef[] = [
     ServerCog,
     "prerequisite check install first run local environment requirements",
   ],
+  [
+    "usage",
+    "Usage",
+    "Inference and session usage across the active controller.",
+    UsageIcon,
+    "usage tokens requests activity models controller errors",
+  ],
 ].map(([id, label, description, Icon, searchTerms]) => ({
   id: id as SettingsSectionId,
   label: label as string,
@@ -209,13 +221,13 @@ const normalizeSectionId = (value: string): SettingsSectionId | null => {
   return null;
 };
 
-type MachineView = "usage" | "logs";
+type MachineView = "logs";
 
 const machineSectionId = (nodeId: string, view: MachineView): string => `machine:${nodeId}:${view}`;
 
 const machineViewFromSection = (section: string): MachineView | null => {
   const view = section.split(":").at(-1);
-  return view === "usage" || view === "logs" ? view : null;
+  return view === "logs" ? view : null;
 };
 
 const machineNodeIdFromSection = (section: string): string | null => {
@@ -225,7 +237,7 @@ const machineNodeIdFromSection = (section: string): string | null => {
   return separator > 0 ? value.slice(0, separator) : null;
 };
 
-const machineTargetKey = (target: UsageTarget | LogsTarget): string =>
+const machineTargetKey = (target: LogsTarget): string =>
   target.kind === "local"
     ? "local"
     : target.kind +
@@ -235,12 +247,10 @@ const machineTargetKey = (target: UsageTarget | LogsTarget): string =>
       (target.kind === "worker" ? target.workerId : "");
 
 const machineViewLabel: Record<MachineView, string> = {
-  usage: "Usage",
   logs: "Logs",
 };
 
 const machineViewIcon: Record<MachineView, ReactNode> = {
-  usage: <UsageIcon className="h-3 w-3" />,
   logs: <FileIcon className="h-3 w-3" />,
 };
 const MACHINES_SECTION: SettingsSectionDef = {
@@ -251,19 +261,18 @@ const MACHINES_SECTION: SettingsSectionDef = {
   searchTerms: ["machines", "hardware", "compute", "gpu"],
 };
 
-type MachineTargets = { usage?: UsageTarget; logs: LogsTarget };
+type MachineTargets = { logs: LogsTarget };
 
 const machineTargetsFor = (
   node: { id: string; role: string },
   localNodeId: string,
   headConnection: ReturnType<typeof useConfigure>["headConnection"],
 ): MachineTargets | null => {
-  if (node.id === localNodeId) return { usage: { kind: "local" }, logs: { kind: "local" } };
+  if (node.id === localNodeId) return { logs: { kind: "local" } };
   if (!node.id.startsWith("head:") || !headConnection) return null;
   const workerId = node.id.slice("head:".length);
   if (node.role === "head") {
     return {
-      usage: { kind: "head", connection: headConnection },
       logs: { kind: "head", connection: headConnection },
     };
   }
@@ -393,6 +402,7 @@ export function SettingsView({
       ) : null}
       {activeSection === "controller" ? <ServerContent embedded /> : null}
       {activeSection === "profile" ? <ProfileSettings /> : null}
+      <SettingsUsage active={activeSection === "usage"} />
       {activeSection === "system" ? (
         <div className="space-y-5">
           <SystemOverview
@@ -415,13 +425,6 @@ export function SettingsView({
           {configure.error ? <ErrorBox>{configure.error}</ErrorBox> : null}
           <MachinesSection state={configure} />
         </div>
-      ) : null}
-      {activeMachineView === "usage" && activeMachineTargets?.usage ? (
-        <UsagePage
-          key={"usage:" + machineTargetKey(activeMachineTargets.usage)}
-          embedded
-          target={activeMachineTargets.usage}
-        />
       ) : null}
       {activeMachineView === "logs" && activeMachineTargets?.logs ? (
         <SettingsLogs
@@ -460,11 +463,10 @@ function SettingsMachineRail({
   hasMachines: boolean;
   machineTargets: Map<string, MachineTargets>;
 }) {
-  const [localOpen, setLocalOpen] = useState(true);
   const [machinesOpen, setMachinesOpen] = useState(hasMachines);
   const [openNodes, setOpenNodes] = useState<Record<string, boolean>>({});
   const machinesInteracted = useRef(false);
-  const localSections = sections.filter(
+  const generalSections = sections.filter(
     (section) => !section.id.startsWith("machine:") && section.id !== MACHINES_SECTION.id,
   );
   const renderButton = (id: string, label: string, icon: ReactNode, nested = false) => (
@@ -489,9 +491,6 @@ function SettingsMachineRail({
   }, [hasMachines]);
 
   useMountSubscription(() => {
-    if (activeSection !== MACHINES_SECTION.id && !activeSection.startsWith("machine:")) {
-      setLocalOpen(true);
-    }
     if (activeSection === MACHINES_SECTION.id || activeSection.startsWith("machine:")) {
       setMachinesOpen(true);
     }
@@ -505,25 +504,9 @@ function SettingsMachineRail({
       className="flex flex-col gap-2 pb-1 max-lg:flex-row max-lg:items-center max-lg:gap-1"
     >
       <div className="max-lg:contents">
-        <button
-          type="button"
-          aria-expanded={localOpen}
-          onClick={() => setLocalOpen((current) => !current)}
-          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60 max-lg:w-auto max-lg:shrink-0"
-        >
-          <ChevronDown
-            className={cx(
-              "h-3 w-3 transition-transform duration-[var(--motion-fast)]",
-              localOpen ? "" : "-rotate-90",
-            )}
-          />
-          Local settings
-        </button>
-        {localOpen ? (
-          <div className="mt-0.5 flex flex-col gap-px max-lg:flex-row max-lg:items-center">
-            {localSections.map((section) => renderButton(section.id, section.label, section.icon))}
-          </div>
-        ) : null}
+        <div className="flex flex-col gap-px max-lg:flex-row max-lg:items-center">
+          {generalSections.map((section) => renderButton(section.id, section.label, section.icon))}
+        </div>
       </div>
       <div className="max-lg:contents">
         <button
@@ -637,4 +620,8 @@ function SettingsLogs({ target }: { target: LogsTarget }) {
       formatDateTime={logs.formatDateTime}
     />
   );
+}
+
+function SettingsUsage({ active }: { active: boolean }) {
+  return active ? <UsagePage embedded /> : null;
 }

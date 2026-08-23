@@ -34,7 +34,7 @@ const APP_DESTINATIONS: AppDestination[] = [
     description: "Controller, GPU, model status, and live metrics.",
   },
   {
-    href: settingsHref("machine:local:usage"),
+    href: settingsHref("usage"),
     label: "Usage",
     keywords: "tokens requests analytics costs provider pi sessions peaks",
     description: "Token, request, and model usage analytics.",
