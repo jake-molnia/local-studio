@@ -289,7 +289,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs")) {
-        const response = try rig_service.payload(allocator, io, mode, system, database);
+        const response = try rig_service.payload(allocator, io, mode, system, database, harness.piIsAvailable());
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},

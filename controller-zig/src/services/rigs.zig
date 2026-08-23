@@ -4,7 +4,7 @@ const system_info = @import("../platform/system_info.zig");
 const repository = @import("../repository/rigs.zig");
 const sqlite = @import("../repository/sqlite.zig");
 
-pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot, database: *sqlite.Database) ![]u8 {
+pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot, database: *sqlite.Database, pi_available: bool) ![]u8 {
     try database.lock(io);
     defer database.unlock(io);
     var stored = try repository.list(allocator, database);
@@ -12,7 +12,7 @@ pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, syst
 
     var found_local = false;
     for (stored.storage[0..stored.len]) |*document| {
-        const reconciled = try reconcileDocument(allocator, mode, system, document.*);
+        const reconciled = try reconcileDocument(allocator, mode, system, pi_available, document.*);
         if (reconciled) |updated| {
             allocator.free(document.*);
             document.* = updated.data;
@@ -22,7 +22,7 @@ pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, syst
         }
     }
 
-    const seed = if (found_local) null else try seedDocument(allocator, io, mode, system);
+    const seed = if (found_local) null else try seedDocument(allocator, io, mode, system, pi_available);
     defer if (seed) |document| allocator.free(document);
     if (seed) |document| try repository.save(database, "default", document);
 
@@ -46,7 +46,7 @@ const UpdatedDocument = struct {
     data: []u8,
 };
 
-fn reconcileDocument(allocator: std.mem.Allocator, mode: config.Mode, system: *const system_info.Snapshot, document: []const u8) !?UpdatedDocument {
+fn reconcileDocument(allocator: std.mem.Allocator, mode: config.Mode, system: *const system_info.Snapshot, pi_available: bool, document: []const u8) !?UpdatedDocument {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return null;
     defer parsed.deinit();
     if (parsed.value != .object) return null;
@@ -66,6 +66,7 @@ fn reconcileDocument(allocator: std.mem.Allocator, mode: config.Mode, system: *c
         try node_value.object.put(arena, "cpu_cores", .{ .integer = @intCast(system.cpu_cores) });
         try node_value.object.put(arena, "memory_gb", .{ .integer = @intCast(system.memory_gb) });
         try node_value.object.put(arena, "accelerators", try acceleratorsValue(arena, system));
+        try node_value.object.put(arena, "capabilities", try capabilitiesValue(arena, mode, pi_available));
 
         var output: std.Io.Writer.Allocating = .init(allocator);
         errdefer output.deinit();
@@ -90,7 +91,7 @@ fn acceleratorsValue(allocator: std.mem.Allocator, system: *const system_info.Sn
     return .{ .array = values };
 }
 
-fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot) ![]u8 {
+fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot, pi_available: bool) ![]u8 {
     const Accelerator = struct {
         name: []const u8,
         count: u8,
@@ -98,6 +99,13 @@ fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, sys
         memory_type: []const u8,
         memory_bandwidth_gbs: ?u64,
         unified_memory: bool,
+    };
+    const Capabilities = struct {
+        compute: bool,
+        harnesses: []const []const u8,
+        mcp: bool,
+        terminal: bool,
+        browser: bool,
     };
     const Node = struct {
         id: []const u8,
@@ -113,6 +121,7 @@ fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, sys
         memory_gb: u64,
         accelerators: []const Accelerator,
         notes: ?[]const u8,
+        capabilities: Capabilities,
     };
     const Rig = struct {
         id: []const u8,
@@ -146,6 +155,13 @@ fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, sys
         .memory_gb = system.memory_gb,
         .accelerators = accelerator_list,
         .notes = null,
+        .capabilities = .{
+            .compute = mode != .head,
+            .harnesses = if (mode != .head and pi_available) &.{"pi"} else &.{},
+            .mcp = mode != .head and pi_available,
+            .terminal = mode != .head and pi_available,
+            .browser = false,
+        },
     };
     var timestamp_buffer: [24]u8 = undefined;
     const timestamp = formatTimestamp(io, &timestamp_buffer);
@@ -161,6 +177,19 @@ fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, sys
     errdefer output.deinit();
     try std.json.Stringify.value(rig, .{}, &output.writer);
     return try output.toOwnedSlice();
+}
+
+fn capabilitiesValue(allocator: std.mem.Allocator, mode: config.Mode, pi_available: bool) !std.json.Value {
+    const enabled = mode != .head and pi_available;
+    var harnesses: std.json.Array = .init(allocator);
+    if (enabled) try harnesses.append(.{ .string = "pi" });
+    var capabilities: std.json.ObjectMap = .empty;
+    try capabilities.put(allocator, "compute", .{ .bool = mode != .head });
+    try capabilities.put(allocator, "harnesses", .{ .array = harnesses });
+    try capabilities.put(allocator, "mcp", .{ .bool = enabled });
+    try capabilities.put(allocator, "terminal", .{ .bool = enabled });
+    try capabilities.put(allocator, "browser", .{ .bool = false });
+    return .{ .object = capabilities };
 }
 
 fn formatTimestamp(io: std.Io, buffer: *[24]u8) []const u8 {

@@ -84,7 +84,7 @@ pub const Manager = struct {
     }
 
     pub fn setupPayload(manager: *Manager) ![]u8 {
-        const available = manager.piAvailable();
+        const available = manager.piIsAvailable();
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"checks\":[{\"id\":\"pi-rpc\",\"label\":\"Pi RPC harness\",\"ok\":");
@@ -92,6 +92,10 @@ pub const Manager = struct {
         try std.json.Stringify.value(manager.pi_binary, .{}, &output.writer);
         try output.writer.writeAll(",\"guidance\":\"Install Pi or set LOCAL_STUDIO_PI_BIN to a Pi executable with RPC mode.\"}],\"diagnostics\":[]}");
         return output.toOwnedSlice();
+    }
+
+    pub fn piIsAvailable(manager: *Manager) bool {
+        return manager.piAvailable();
     }
 
     pub fn sessionsPayload(manager: *Manager) ![]u8 {

@@ -36,6 +36,15 @@ export interface RigNode {
   memory_gb: number | null;
   accelerators: RigAccelerator[];
   notes: string | null;
+  capabilities?: RigNodeCapabilities;
+}
+
+export interface RigNodeCapabilities {
+  compute: boolean;
+  harnesses: string[];
+  mcp: boolean;
+  terminal: boolean;
+  browser: boolean;
 }
 
 export interface Rig {
@@ -103,6 +112,15 @@ export const RigNodeSchema = Schema.Struct({
   memory_gb: Schema.NullOr(Schema.Number),
   accelerators: Schema.Array(RigAcceleratorSchema),
   notes: Schema.NullOr(Schema.String),
+  capabilities: Schema.optional(
+    Schema.Struct({
+      compute: Schema.Boolean,
+      harnesses: Schema.Array(Schema.String),
+      mcp: Schema.Boolean,
+      terminal: Schema.Boolean,
+      browser: Schema.Boolean,
+    }),
+  ),
 });
 
 export const RigSchema = Schema.Struct({
