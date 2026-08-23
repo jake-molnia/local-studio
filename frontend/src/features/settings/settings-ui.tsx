@@ -43,6 +43,7 @@ type LayoutProps<Id extends SettingsSectionId = SettingsSectionId> = {
   showRefresh?: boolean;
   width?: "default" | "wide";
   takeover?: boolean;
+  navigationOverride?: ReactNode;
   children: ReactNode;
 };
 
@@ -76,6 +77,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
   showRefresh = true,
   width = "default",
   takeover = false,
+  navigationOverride,
   children,
 }: LayoutProps<Id>) {
   const [navigationQuery, setNavigationQuery] = useState("");
@@ -158,12 +160,14 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
       </div>
     )
   ) : (
-    <SectionNav
-      label={`${title} sections`}
-      items={sections}
-      activeItem={activeSection}
-      onSelectItem={onSelectSection}
-    />
+    (navigationOverride ?? (
+      <SectionNav
+        label={`${title} sections`}
+        items={sections}
+        activeItem={activeSection}
+        onSelectItem={onSelectSection}
+      />
+    ))
   );
   const content = (
     <>
@@ -243,7 +247,12 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 {navigation}
               </div>
             </div>
-            <div className="mx-auto w-full max-w-[32rem] px-4 pb-12 pt-5 sm:px-6 lg:pt-7">
+            <div
+              className={cx(
+                "mx-auto w-full px-4 pb-12 pt-5 sm:px-6 lg:pt-7",
+                width === "wide" ? "max-w-[68rem]" : "max-w-[32rem]",
+              )}
+            >
               {content}
             </div>
           </section>

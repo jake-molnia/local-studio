@@ -1,14 +1,18 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
+  ChevronDown,
   Cable,
   Cpu,
+  FileIcon,
   Keyboard,
   type LucideIcon,
+  Monitor,
   Paintbrush,
   ServerCog,
   Smartphone,
+  UsageIcon,
 } from "@/ui/icon-registry";
 import {
   SettingsLayout,
@@ -26,6 +30,14 @@ import { EnginesSection } from "./engines-section";
 import { ServicesSettings, SystemDetails, SystemOverview } from "./system-settings-section";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ProfileSettings } from "./profile-settings";
+import { useConfigure } from "@/features/configure/use-configure";
+import { MachinesSection } from "@/features/configure/machines-section";
+import UsagePage from "@/features/usage/usage-page";
+import { LogsView } from "@/features/logs/logs-view";
+import { useLogs, type LogsTarget } from "@/features/logs/use-logs";
+import type { UsageTarget } from "@/features/usage/use-usage";
+import { ServerContent } from "@/features/logs/server-view";
+import { ErrorBox } from "@/ui";
 interface SettingsViewProps {
   data: ConfigData | null;
   compatibilityReport: CompatibilityReport | null;
@@ -61,6 +73,11 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
       terms: ["controller name", "controller url", "endpoint", "api key", "censor urls"],
     },
     { label: "Active connection check", terms: ["test", "probe", "save active"] },
+  ],
+  controller: [
+    { label: "Controller status", terms: ["server", "health", "running", "inference"] },
+    { label: "Server logs", terms: ["logs", "sessions", "runtime"] },
+    { label: "API docs", terms: ["openapi", "reference", "endpoints"] },
   ],
   system: [
     { label: "Services & endpoints", terms: ["controller", "service", "health", "url"] },
@@ -131,6 +148,13 @@ const SECTIONS: SettingsSectionDef[] = [
     "controller api endpoint url key connection version release update censor",
   ],
   [
+    "controller",
+    "Controller",
+    "Status, logs, and API documentation for the local controller.",
+    ServerCog,
+    "controller server health logs sessions api docs openapi status inference",
+  ],
+  [
     "system",
     "System",
     "Engines, services, storage, and hardware.",
@@ -177,9 +201,73 @@ const isSectionId = (value: string): value is SettingsSectionId =>
   SECTIONS.some((section) => section.id === value);
 const normalizeSectionId = (value: string): SettingsSectionId | null => {
   if (isSectionId(value)) return value;
+  if (value === "machines") return "machines";
   if (value === "desktop") return "terminal";
   if (value === "engines" || value === "services") return "system";
   return null;
+};
+
+type MachineView = "usage" | "logs";
+
+const machineSectionId = (nodeId: string, view: MachineView): string => `machine:${nodeId}:${view}`;
+
+const machineViewFromSection = (section: string): MachineView | null => {
+  const view = section.split(":").at(-1);
+  return view === "usage" || view === "logs" ? view : null;
+};
+
+const machineNodeIdFromSection = (section: string): string | null => {
+  if (!section.startsWith("machine:")) return null;
+  const value = section.slice("machine:".length);
+  const separator = value.lastIndexOf(":");
+  return separator > 0 ? value.slice(0, separator) : null;
+};
+
+const machineTargetKey = (target: UsageTarget | LogsTarget): string =>
+  target.kind === "local"
+    ? "local"
+    : target.kind +
+      ":" +
+      target.connection.url +
+      ":" +
+      (target.kind === "worker" ? target.workerId : "");
+
+const machineViewLabel: Record<MachineView, string> = {
+  usage: "Usage",
+  logs: "Logs",
+};
+
+const machineViewIcon: Record<MachineView, ReactNode> = {
+  usage: <UsageIcon className="h-3 w-3" />,
+  logs: <FileIcon className="h-3 w-3" />,
+};
+const MACHINES_SECTION: SettingsSectionDef = {
+  id: "machines",
+  label: "All machines",
+  description: "Configure the machines available to this workspace.",
+  icon: <Monitor className="h-3.5 w-3.5" />,
+  searchTerms: ["machines", "hardware", "compute", "gpu"],
+};
+
+type MachineTargets = { usage?: UsageTarget; logs: LogsTarget };
+
+const machineTargetsFor = (
+  node: { id: string; role: string },
+  localNodeId: string,
+  headConnection: ReturnType<typeof useConfigure>["headConnection"],
+): MachineTargets | null => {
+  if (node.id === localNodeId) return { usage: { kind: "local" }, logs: { kind: "local" } };
+  if (!node.id.startsWith("head:") || !headConnection) return null;
+  const workerId = node.id.slice("head:".length);
+  if (node.role === "head") {
+    return {
+      usage: { kind: "head", connection: headConnection },
+      logs: { kind: "head", connection: headConnection },
+    };
+  }
+  return {
+    logs: { kind: "worker", connection: headConnection, workerId },
+  };
 };
 export function SettingsView({
   data,
@@ -198,7 +286,49 @@ export function SettingsView({
   onSaveSettings,
   onSystemSectionActive,
 }: SettingsViewProps) {
+  const configure = useConfigure();
+  const machineNodes = useMemo(() => configure.rigs.flatMap((rig) => rig.nodes), [configure.rigs]);
+  const machineTargets = useMemo(
+    () =>
+      new Map(
+        machineNodes.flatMap((node) => {
+          const targets = machineTargetsFor(node, configure.localNodeId, configure.headConnection);
+          return targets ? [[node.id, targets] as const] : [];
+        }),
+      ),
+    [configure.headConnection, configure.localNodeId, machineNodes],
+  );
+  const machineSections = useMemo(
+    () =>
+      machineNodes.flatMap((node) => {
+        if (!machineTargets.has(node.id)) return [];
+        const targets = machineTargets.get(node.id);
+        return (Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
+          targets?.[view]
+            ? [
+                {
+                  id: machineSectionId(node.id, view),
+                  label: `${node.name} · ${machineViewLabel[view]}`,
+                  description: `${machineViewLabel[view]} for ${node.name}.`,
+                  icon: machineViewIcon[view],
+                  searchTerms: [node.name, machineViewLabel[view], "machine", "head", "compute"],
+                },
+              ]
+            : [],
+        );
+      }),
+    [machineNodes, machineTargets],
+  );
+  const sections = useMemo(
+    () => [...SECTIONS, MACHINES_SECTION, ...machineSections],
+    [machineSections],
+  );
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("connection");
+  const activeMachineNodeId = machineNodeIdFromSection(activeSection);
+  const activeMachineTargets = activeMachineNodeId
+    ? machineTargets.get(activeMachineNodeId)
+    : undefined;
+  const activeMachineView = machineViewFromSection(activeSection);
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
@@ -206,7 +336,8 @@ export function SettingsView({
         window.location.replace(`/customize#${hash}`);
         return;
       }
-      const normalized = normalizeSectionId(hash);
+      const normalized =
+        normalizeSectionId(hash) ?? (sections.some((section) => section.id === hash) ? hash : null);
       if (!normalized) return;
       setActiveSection(normalized);
       if (normalized === "system") onSystemSectionActive();
@@ -214,7 +345,7 @@ export function SettingsView({
     onHashChange();
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  }, [onSystemSectionActive, sections]);
   const selectSection = (section: SettingsSectionId) => {
     setActiveSection(section);
     if (section === "system") onSystemSectionActive();
@@ -224,13 +355,24 @@ export function SettingsView({
   };
   return (
     <SettingsLayout
-      sections={SECTIONS}
+      sections={sections}
       activeSection={activeSection}
       title="Settings"
       loading={loading}
+      width="wide"
       takeover
       onReload={onReload}
       onSelectSection={selectSection}
+      navigationOverride={
+        <SettingsMachineRail
+          sections={SECTIONS}
+          nodes={machineNodes}
+          activeSection={activeSection}
+          onSelectSection={selectSection}
+          hasMachines={machineNodes.length > 0}
+          machineTargets={machineTargets}
+        />
+      }
     >
       {activeSection === "connection" ? (
         <ApiConnectionSection
@@ -245,6 +387,7 @@ export function SettingsView({
           onSave={onSaveSettings}
         />
       ) : null}
+      {activeSection === "controller" ? <ServerContent embedded /> : null}
       {activeSection === "profile" ? <ProfileSettings /> : null}
       {activeSection === "system" ? (
         <div className="space-y-5">
@@ -263,6 +406,183 @@ export function SettingsView({
       {activeSection === "terminal" ? <ShortcutsSettings /> : null}
       {activeSection === "archive" ? <ArchivedChatsSettings /> : null}
       {activeSection === "setup" ? <SetupChecksSettings /> : null}
+      {activeSection === MACHINES_SECTION.id ? (
+        <div className="space-y-3">
+          {configure.error ? <ErrorBox>{configure.error}</ErrorBox> : null}
+          <MachinesSection state={configure} />
+        </div>
+      ) : null}
+      {activeMachineView === "usage" && activeMachineTargets?.usage ? (
+        <UsagePage
+          key={"usage:" + machineTargetKey(activeMachineTargets.usage)}
+          embedded
+          target={activeMachineTargets.usage}
+        />
+      ) : null}
+      {activeMachineView === "logs" && activeMachineTargets?.logs ? (
+        <SettingsLogs
+          key={"logs:" + machineTargetKey(activeMachineTargets.logs)}
+          target={activeMachineTargets.logs}
+        />
+      ) : null}
+      {activeMachineView && !activeMachineTargets?.[activeMachineView] ? (
+        <div className="rounded-[6px] border border-(--ui-separator) bg-(--ui-surface) px-3 py-3 text-[length:var(--fs-sm)] text-(--ui-muted)">
+          This machine or view is no longer available.
+          <button
+            type="button"
+            onClick={() => selectSection(MACHINES_SECTION.id)}
+            className="ml-2 text-(--ui-fg) underline underline-offset-2 hover:text-(--ui-accent)"
+          >
+            Open machines
+          </button>
+        </div>
+      ) : null}
     </SettingsLayout>
+  );
+}
+
+function SettingsMachineRail({
+  sections,
+  nodes,
+  activeSection,
+  onSelectSection,
+  hasMachines,
+  machineTargets,
+}: {
+  sections: SettingsSectionDef[];
+  nodes: Array<{ id: string; name: string; role: string }>;
+  activeSection: string;
+  onSelectSection: (section: string) => void;
+  hasMachines: boolean;
+  machineTargets: Map<string, MachineTargets>;
+}) {
+  const machinesDetailsRef = useRef<HTMLDetailsElement>(null);
+  const nodeDetailsRef = useRef(new Map<string, HTMLDetailsElement>());
+  const setMachinesDetails = useCallback(
+    (element: HTMLDetailsElement | null) => {
+      machinesDetailsRef.current = element;
+      if (element && hasMachines) element.open = true;
+    },
+    [hasMachines],
+  );
+  const localSections = sections.filter(
+    (section) => !section.id.startsWith("machine:") && section.id !== MACHINES_SECTION.id,
+  );
+  const renderButton = (id: string, label: string, icon: ReactNode, nested = false) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => onSelectSection(id)}
+      className={`group flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] transition-[color,background-color] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 ${
+        activeSection === id
+          ? "bg-(--ui-active) text-(--ui-fg)"
+          : "text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg)"
+      } ${nested ? "pl-5" : ""}`}
+    >
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center opacity-75">{icon}</span>
+      <span className="min-w-0 truncate">{label}</span>
+    </button>
+  );
+
+  useMountSubscription(() => {
+    if (activeSection === MACHINES_SECTION.id || activeSection.startsWith("machine:")) {
+      if (machinesDetailsRef.current) machinesDetailsRef.current.open = true;
+    }
+    const nodeId = machineNodeIdFromSection(activeSection);
+    if (nodeId) nodeDetailsRef.current.get(nodeId)?.setAttribute("open", "");
+  }, [activeSection]);
+
+  return (
+    <nav aria-label="Settings sections" className="flex flex-col gap-2 pb-1">
+      <details className="group/local" open>
+        <summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) [&::-webkit-details-marker]:hidden">
+          <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/local:rotate-0" />
+          Local settings
+        </summary>
+        <div className="mt-0.5 flex flex-col gap-px">
+          {localSections.map((section) => renderButton(section.id, section.label, section.icon))}
+        </div>
+      </details>
+      <details ref={setMachinesDetails} className="group/machines">
+        <summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) [&::-webkit-details-marker]:hidden">
+          <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/machines:rotate-0" />
+          Machines
+        </summary>
+        <div className="mt-0.5 flex flex-col gap-1">
+          {renderButton(MACHINES_SECTION.id, MACHINES_SECTION.label, MACHINES_SECTION.icon)}
+          {nodes.length ? (
+            nodes.map((node) => (
+              <details
+                key={node.id}
+                className="group/node"
+                ref={(element) => {
+                  if (element) nodeDetailsRef.current.set(node.id, element);
+                  else nodeDetailsRef.current.delete(node.id);
+                }}
+              >
+                <summary className="flex h-6 cursor-pointer list-none items-center gap-1.5 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg) [&::-webkit-details-marker]:hidden">
+                  <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/node:rotate-0" />
+                  <Monitor className="h-3 w-3 opacity-75" />
+                  <span className="min-w-0 truncate">{node.name}</span>
+                  {node.role === "head" ? (
+                    <span className="ml-auto text-[10px] text-(--ui-muted)/65">Head</span>
+                  ) : null}
+                </summary>
+                <div className="mt-0.5 flex flex-col gap-px">
+                  {(Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
+                    machineTargets.get(node.id)?.[view]
+                      ? [
+                          renderButton(
+                            machineSectionId(node.id, view),
+                            machineViewLabel[view],
+                            machineViewIcon[view],
+                            true,
+                          ),
+                        ]
+                      : [],
+                  )}
+                </div>
+              </details>
+            ))
+          ) : (
+            <div className="px-1.5 py-1 text-[length:var(--fs-xs)] text-(--ui-muted)">
+              No machines connected
+            </div>
+          )}
+        </div>
+      </details>
+    </nav>
+  );
+}
+
+function SettingsLogs({ target }: { target: LogsTarget }) {
+  const logs = useLogs(target);
+  return (
+    <LogsView
+      embedded
+      sessions={logs.sessions}
+      filteredSessions={logs.filteredSessions}
+      selectedSession={logs.selectedSession}
+      hasLogContent={logs.hasLogContent}
+      filter={logs.filter}
+      contentFilter={logs.contentFilter}
+      loading={logs.loading}
+      loadingContent={logs.loadingContent}
+      autoScroll={logs.autoScroll}
+      autoRefresh={logs.autoRefresh}
+      sidebarOpen={logs.sidebarOpen}
+      logRef={logs.logRef}
+      onFilterChange={logs.setFilter}
+      onContentFilterChange={logs.setContentFilter}
+      onAutoScrollChange={logs.setAutoScroll}
+      onAutoRefreshChange={logs.setAutoRefresh}
+      onSidebarToggle={logs.setSidebarOpen}
+      onLoadLogContent={logs.loadLogContent}
+      onDeleteSession={logs.deleteSession}
+      onDownloadLog={logs.downloadLog}
+      onRenderLogs={logs.renderLogs}
+      onSelectSession={logs.handleSelectSession}
+      formatDateTime={logs.formatDateTime}
+    />
   );
 }
