@@ -84,7 +84,7 @@ export function ProjectRow({
   return (
     <div className="flex flex-col">
       <div
-        className={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] px-2 text-(--fg) transition-colors hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
+        className={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] px-2 text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
         draggable={reorderDraggable}
         onDragStart={onReorderDragStart}
         onDragEnd={onReorderDragEnd}
@@ -98,9 +98,9 @@ export function ProjectRow({
           className="flex min-w-0 flex-1 items-center gap-2 px-0 pr-[62px] text-left"
         >
           {icon === "chat" ? (
-            <ChatIcon className="h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100" />
+            <ChatIcon className="h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100" />
           ) : (
-            <span className="relative h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100">
+            <span className="relative h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
               <Folder
                 className={`absolute inset-0 h-3.5 w-3.5 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
               />
@@ -130,7 +130,7 @@ export function ProjectRow({
                 event.stopPropagation();
                 onRemove();
               }}
-              className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--err) focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
+              className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--err) focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
               title="Remove from list"
               aria-label="Remove project"
             >
@@ -140,7 +140,7 @@ export function ProjectRow({
           <NewChatPlusButton
             project={project}
             label={`New task in ${project.name}`}
-            className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--fg)/80 focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
+            className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--fg)/80 focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
             onNavigateStart={onNewChatStart}
           />
         </div>
@@ -281,7 +281,7 @@ export function ProjectSessions({
         <button
           type="button"
           onClick={() => setVisibleLimit((value) => value + SESSIONS_PAGE_SIZE)}
-          className="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-3 pr-2 text-left text-[length:var(--fs-sm)] text-(--dim) transition-colors hover:bg-(--hover) hover:text-(--fg)"
+          className="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-3 pr-2 text-left text-[length:var(--fs-sm)] text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
         >
           Show more
         </button>
@@ -305,7 +305,7 @@ function SubagentSessionRows({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex h-[var(--sidebar-row-height)] items-center gap-1.5 rounded-[var(--sidebar-row-radius)] pl-2 pr-2 text-left text-[length:var(--fs-sm)] text-(--dim) transition-colors hover:bg-(--hover) hover:text-(--fg)"
+        className="flex h-[var(--sidebar-row-height)] items-center gap-1.5 rounded-[var(--sidebar-row-radius)] pl-2 pr-2 text-left text-[length:var(--fs-sm)] text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
         aria-expanded={open}
       >
         <span
@@ -357,7 +357,7 @@ export function ActiveSessionRow({
   const label =
     cleanSessionTitle(pref.title) || cleanSessionTitle(session.title) || "Current session";
   const isFocused = session.focused === true;
-  const rowClass = `group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] ${dragging ? "opacity-45" : ""} ${isFocused ? "bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
+  const rowClass = `group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
 
   return (
     <SessionNavRow
@@ -458,7 +458,7 @@ export function SessionRow({
       initialDraft={cleanSessionTitle(pref.title) || cleanSessionTitle(session.firstUserMessage)}
       activity={activity}
       timestamp={session.updatedAt || session.startedAt}
-      rowClass={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
+      rowClass={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
       renameRowClass="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] bg-(--surface)/40 pl-2 pr-1"
       href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&replace=1`}
       onPatchPref={(patch) => patchSessionPref(session.id, patch)}

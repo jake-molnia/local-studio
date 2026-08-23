@@ -151,7 +151,7 @@ function RecentSessionRow({ session, prefs }: { session: AggregatedSession; pref
       // Two lines, not the single-line row the other sections use: the prompt
       // preview is the point of this list, so it gets its own line under the
       // title rather than competing with it for width.
-      className={`group flex flex-col gap-0.5 rounded-[var(--sidebar-row-radius)] px-2 py-1.5 transition-colors hover:bg-(--hover) ${
+      className={`group flex flex-col gap-0.5 rounded-[var(--sidebar-row-radius)] px-2 py-1.5 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) ${
         isOpen ? "bg-(--hover)" : ""
       }`}
     >

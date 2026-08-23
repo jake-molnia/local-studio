@@ -99,7 +99,7 @@ export function SidebarSectionHeader({
 }) {
   return (
     <div
-      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-2.5 text-[length:var(--fs-xs)] font-medium text-(--hl2) opacity-70 transition-opacity group-hover:opacity-100"
+      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-2.5 text-[length:var(--fs-xs)] font-medium text-(--hl2) opacity-70 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100"
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -119,11 +119,11 @@ export function SidebarSectionHeader({
           />
         ) : null}
         <ChevronDownIcon
-          className={`h-2.5 w-2.5 shrink-0 opacity-0 transition-[opacity,transform] group-hover:opacity-100 group-focus-within:opacity-100 ${open ? "" : "-rotate-90"}`}
+          className={`h-2.5 w-2.5 shrink-0 opacity-0 transition-[opacity,transform] duration-[var(--motion-fast)] group-hover:opacity-100 group-focus-within:opacity-100 ${open ? "" : "-rotate-90"}`}
         />
       </button>
       {action ? (
-        <div className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        <div className="opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100 group-focus-within:opacity-100">
           {action}
         </div>
       ) : null}
