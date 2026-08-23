@@ -112,7 +112,7 @@ pub const HttpServer = struct {
         errdefer harness.deinit();
         var pty = agent_pty.Manager.init(allocator, io, &config);
         errdefer pty.deinit();
-        var browser = agent_browser.Manager.init(allocator, io, config.environment);
+        var browser = try agent_browser.Manager.init(allocator, io, config.environment, config.data_dir);
         errdefer browser.deinit();
         return .{
             .allocator = allocator,
@@ -1948,7 +1948,8 @@ fn localBrowserPayload(allocator: std.mem.Allocator, browser: *agent_browser.Man
     if (std.mem.endsWith(u8, route_path, "/history")) return browser.historyPayload(queryUnsigned(target, "visited") == 1);
     if (std.mem.endsWith(u8, route_path, "/engines")) return browser.enginesPayload();
     if (std.mem.endsWith(u8, route_path, "/localhosts")) return allocator.dupe(u8, "{\"sites\":[]}");
-    if (std.mem.endsWith(u8, route_path, "/frame") or std.mem.endsWith(u8, route_path, "/input") or std.mem.endsWith(u8, route_path, "/viewport") or std.mem.endsWith(u8, route_path, "/engine")) return error.BrowserInteractiveUnavailable;
+    if (std.mem.endsWith(u8, route_path, "/engine")) return browser.selectEnginePayload(document orelse "");
+    if (std.mem.endsWith(u8, route_path, "/frame") or std.mem.endsWith(u8, route_path, "/input") or std.mem.endsWith(u8, route_path, "/viewport")) return error.BrowserInteractiveUnavailable;
     if (method != .POST) return error.InvalidBrowserPath;
     const prefix = if (std.mem.startsWith(u8, route_path, "/internal/node/v1/browser/")) "/internal/node/v1/browser/" else "/api/agent/browser/";
     const verb = try pathParameter(allocator, target, prefix);
@@ -1958,7 +1959,7 @@ fn localBrowserPayload(allocator: std.mem.Allocator, browser: *agent_browser.Man
 
 fn respondBrowserFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.BrowserUrlRequired, error.InvalidBrowserUrl, error.BrowserAddressRejected, error.InvalidBrowserPayload, error.InvalidBrowserPath => .bad_request,
+        error.BrowserUrlRequired, error.InvalidBrowserUrl, error.BrowserAddressRejected, error.InvalidBrowserPayload, error.InvalidBrowserPath, error.BrowserEngineRequired, error.UnknownBrowserEngine => .bad_request,
         error.BrowserNodeRequired => .conflict,
         error.BrowserNodeUnavailable, error.BrowserInteractiveUnavailable => .service_unavailable,
         error.BrowserUpstreamRejected, error.BrowserRedirectUnsupported => .bad_gateway,
@@ -1970,6 +1971,8 @@ fn respondBrowserFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.BrowserAddressRejected => "browser target address is not allowed",
         error.InvalidBrowserPayload => "invalid browser payload",
         error.InvalidBrowserPath => "invalid browser operation",
+        error.BrowserEngineRequired => "engine is required",
+        error.UnknownBrowserEngine => "unknown browser engine",
         error.BrowserNodeRequired => "No enrolled node offers browser execution",
         error.BrowserNodeUnavailable => "The browser node is unavailable",
         error.BrowserInteractiveUnavailable => "Interactive browser engine unavailable",
