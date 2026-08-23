@@ -50,3 +50,32 @@ pub fn list(allocator: std.mem.Allocator, database: *sqlite.Database) !List {
     }
     return result;
 }
+
+pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, id: []const u8) !?[]u8 {
+    var statement = try database.prepare("SELECT data FROM rigs WHERE id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, id);
+    if (try statement.step() != .row) return null;
+    const data = statement.columnText(0) orelse return null;
+    if (!try std.json.validate(allocator, data)) return null;
+    return try allocator.dupe(u8, data);
+}
+
+pub fn save(database: *sqlite.Database, id: []const u8, data: []const u8) !void {
+    var statement = try database.prepare(
+        \\INSERT INTO rigs (id, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+        \\ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
+    );
+    defer statement.deinit();
+    try statement.bindText(1, id);
+    try statement.bindText(2, data);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn delete(database: *sqlite.Database, id: []const u8) !bool {
+    var statement = try database.prepare("DELETE FROM rigs WHERE id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+    return database.changes() > 0;
+}
