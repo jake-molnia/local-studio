@@ -278,7 +278,10 @@ export function WorkbenchTabStrip() {
     requestKeyboardTabFocus(tab.id);
     activateTab(tab, "keyboard");
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => tabElementsRef.current.get(tab.id)?.focus());
+      requestAnimationFrame(() => {
+        tabElementsRef.current.get(tab.id)?.focus();
+        clearKeyboardTabFocus();
+      });
     });
   };
 

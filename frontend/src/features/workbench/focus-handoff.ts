@@ -9,5 +9,8 @@ export function clearKeyboardTabFocus(): void {
 }
 
 export function isKeyboardTabFocusPending(): boolean {
-  return keyboardTabFocusTarget !== null;
+  return (
+    keyboardTabFocusTarget !== null ||
+    (typeof document !== "undefined" && document.activeElement?.id === "workbench-active-tab")
+  );
 }
