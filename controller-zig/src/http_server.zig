@@ -19,6 +19,7 @@ const storage_service = @import("services/storage.zig");
 const studio_operations = @import("services/studio_operations.zig");
 const model_files = @import("services/model_files.zig");
 const model_index = @import("services/model_index.zig");
+const studio_models = @import("services/studio_models.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -224,6 +225,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/model-index")) {
         return serveModelIndex(allocator, configuration, model_index_cache, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/studio/models")) {
+        const models_dir = try studio.modelsDirectory(allocator, io);
+        defer allocator.free(models_dir);
+        const response = try studio_models.payload(allocator, io, database, recipe_column, models_dir, environment);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);

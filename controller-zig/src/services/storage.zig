@@ -22,13 +22,13 @@ pub const Disk = struct {
 };
 
 pub fn payload(allocator: std.mem.Allocator, io: std.Io, models_dir: []const u8) ![]u8 {
-    var directories = try discover(allocator, io, models_dir);
+    var directories = try discover(allocator, io, &.{models_dir}, max_depth, max_models);
     defer {
         for (directories.items) |directory| allocator.free(directory);
         directories.deinit(allocator);
     }
     var model_bytes: u64 = 0;
-    for (directories.items) |directory| model_bytes +|= directWeightBytes(io, directory);
+    for (directories.items) |directory| model_bytes +|= weightBytes(io, directory);
     const disk = inspectDisk(allocator, models_dir);
     const Payload = struct {
         models_dir: []const u8,
@@ -47,26 +47,30 @@ pub fn payload(allocator: std.mem.Allocator, io: std.Io, models_dir: []const u8)
     return output.toOwnedSlice();
 }
 
-fn discover(allocator: std.mem.Allocator, io: std.Io, root: []const u8) !std.ArrayList([]u8) {
+pub fn discover(allocator: std.mem.Allocator, io: std.Io, roots: []const []const u8, depth_limit: usize, model_limit: usize) !std.ArrayList([]u8) {
     var queue: std.ArrayList(QueueEntry) = .empty;
     defer {
         for (queue.items) |entry| allocator.free(entry.path);
         queue.deinit(allocator);
     }
-    try queue.append(allocator, .{ .path = try allocator.dupe(u8, root), .depth = 0 });
+    for (roots) |root| if (root.len > 0) try queue.append(allocator, .{ .path = try allocator.dupe(u8, root), .depth = 0 });
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(allocator);
     var discovered: std.ArrayList([]u8) = .empty;
     errdefer {
         for (discovered.items) |directory| allocator.free(directory);
         discovered.deinit(allocator);
     }
     var index: usize = 0;
-    while (index < queue.items.len and discovered.items.len < max_models and index < max_directories) : (index += 1) {
+    while (index < queue.items.len and discovered.items.len < model_limit and index < max_directories) : (index += 1) {
         const entry = queue.items[index];
+        const seen_entry = try seen.getOrPut(allocator, entry.path);
+        if (seen_entry.found_existing) continue;
         if (looksLikeModelDirectory(io, entry.path)) {
             try discovered.append(allocator, try allocator.dupe(u8, entry.path));
             continue;
         }
-        if (entry.depth >= max_depth or queue.items.len >= max_directories) continue;
+        if (entry.depth >= depth_limit or queue.items.len >= max_directories) continue;
         var directory = std.Io.Dir.cwd().openDir(io, entry.path, .{ .iterate = true }) catch continue;
         defer directory.close(io);
         var iterator = directory.iterateAssumeFirstIteration();
@@ -101,7 +105,7 @@ fn looksLikeModelDirectory(io: std.Io, path: []const u8) bool {
     return false;
 }
 
-fn directWeightBytes(io: std.Io, path: []const u8) u64 {
+pub fn weightBytes(io: std.Io, path: []const u8) u64 {
     var directory = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return 0;
     defer directory.close(io);
     var iterator = directory.iterateAssumeFirstIteration();
