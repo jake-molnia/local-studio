@@ -40,6 +40,8 @@ jobs:
         run: node scripts/project.mjs validate-contracts
       - name: Barrel/dir sibling structure gate
         run: node scripts/project.mjs validate-structure
+      - name: Zig controller build
+        run: node controller-zig/toolchain.mjs build
 
   controller:
     if: github.event_name != 'schedule'
