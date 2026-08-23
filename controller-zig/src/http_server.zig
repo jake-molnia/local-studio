@@ -23,6 +23,7 @@ const studio_models = @import("services/studio_models.zig");
 const runtime_routes = @import("services/runtime_routes.zig");
 const vram_calculator = @import("services/vram_calculator.zig");
 const benchmark_service = @import("services/benchmark.zig");
+const runtime_jobs_service = @import("services/runtime_jobs.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const sqlite = @import("repository/sqlite.zig");
@@ -61,6 +62,7 @@ pub const HttpServer = struct {
     client: http.Client,
     studio: studio_settings.State,
     model_index_cache: model_index.Cache,
+    runtime_jobs: runtime_jobs_service.State,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -75,6 +77,7 @@ pub const HttpServer = struct {
             .client = .{ .allocator = allocator, .io = io },
             .studio = studio,
             .model_index_cache = model_index.Cache.init(allocator, io),
+            .runtime_jobs = runtime_jobs_service.State.init(allocator, io),
         };
     }
 
@@ -83,6 +86,7 @@ pub const HttpServer = struct {
         server.client.deinit();
         server.studio.deinit();
         server.model_index_cache.deinit();
+        server.runtime_jobs.deinit();
     }
 
     pub fn run(server: *HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) !void {
@@ -97,7 +101,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -105,7 +109,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -127,7 +131,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -144,7 +148,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -330,6 +334,46 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs") and request.head.method == .GET) {
+        const response = try runtime_jobs.listPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs") and request.head.method == .POST) {
+        return serveRuntimeJobCreate(allocator, configuration, runtime_jobs, runtime_cache, request, null, false);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs/:jobId") and request.head.method == .GET) {
+        const job_id = try pathParameter(allocator, request.head.target, "/runtime/jobs/");
+        defer allocator.free(job_id);
+        const response = try runtime_jobs.onePayload(job_id) orelse {
+            try request.respond("{\"detail\":\"Runtime job not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs/:jobId/cancel")) {
+        const job_id = try pathParameterBetween(allocator, request.head.target, "/runtime/jobs/", "/cancel");
+        defer allocator.free(job_id);
+        const response = try runtime_jobs.cancelPayload(job_id) orelse {
+            try request.respond("{\"detail\":\"Runtime job not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/:backend/upgrade")) {
+        const backend = try pathParameterBetween(allocator, request.head.target, "/runtime/", "/upgrade");
+        defer allocator.free(backend);
+        if (!runtimeJobBackend(backend)) {
+            try request.respond("{\"detail\":\"Unknown runtime backend\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        return serveRuntimeJobCreate(allocator, configuration, runtime_jobs, runtime_cache, request, backend, true);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
@@ -693,6 +737,71 @@ fn serveVramCalculator(allocator: std.mem.Allocator, io: Io, configuration: *con
     defer allocator.free(response);
     try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
+}
+
+fn serveRuntimeJobCreate(allocator: std.mem.Allocator, configuration: *const Config, jobs: *runtime_jobs_service.State, cache: *runtime_info.Cache, request: *http.Server.Request, backend_override: ?[]const u8, legacy: bool) !bool {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{ .status = .payload_too_large, .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return false;
+    };
+    const document = if (body_writer.buffered().len == 0) "{}" else body_writer.buffered();
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondBadRuntimeJob(request, "Invalid payload");
+    defer parsed.deinit();
+    if (parsed.value != .object) return respondBadRuntimeJob(request, "Invalid payload");
+    const object = parsed.value.object;
+    if (object.get("command") != null or object.get("args") != null) return respondBadRuntimeJob(request, "Invalid payload");
+    const payload_backend = runtimeJobOptionalString(object, "backend") catch return respondBadRuntimeJob(request, "Invalid payload");
+    const backend = backend_override orelse payload_backend orelse return respondBadRuntimeJob(request, "backend is required");
+    if (!runtimeJobBackend(backend)) return respondBadRuntimeJob(request, "Invalid payload");
+    const payload_type = runtimeJobOptionalString(object, "type") catch return respondBadRuntimeJob(request, "Invalid payload");
+    const job_type = if (legacy) "update" else payload_type orelse "update";
+    if (!std.mem.eql(u8, job_type, "install") and !std.mem.eql(u8, job_type, "update")) return respondBadRuntimeJob(request, "Invalid payload");
+    const target_id = runtimeJobOptionalString(object, "targetId") catch return respondBadRuntimeJob(request, "Invalid payload");
+    const version = runtimeJobOptionalString(object, "version") catch return respondBadRuntimeJob(request, "Invalid payload");
+    const prefer_bundled = if (object.get("prefer_bundled")) |value| if (value == .bool) value.bool else return respondBadRuntimeJob(request, "Invalid payload") else null;
+    const response = jobs.createPayload(configuration, cache, .{
+        .backend = backend,
+        .job_type = job_type,
+        .target_id = target_id,
+        .version = version,
+        .prefer_bundled = prefer_bundled,
+    }, legacy) catch |failure| switch (failure) {
+        error.InvalidJobPayload => return respondBadRuntimeJob(request, "Invalid payload"),
+        error.TooManyRuntimeJobs => {
+            try request.respond("{\"detail\":\"Too many runtime jobs\"}", .{ .status = .service_unavailable, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        },
+        else => return failure,
+    };
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn respondBadRuntimeJob(request: *http.Server.Request, detail: []const u8) !bool {
+    var buffer: [256]u8 = undefined;
+    var output: Io.Writer = .fixed(&buffer);
+    try output.writeAll("{\"detail\":");
+    try std.json.Stringify.value(detail, .{}, &output);
+    try output.writeByte('}');
+    try request.respond(output.buffered(), .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn runtimeJobOptionalString(object: std.json.ObjectMap, name: []const u8) !?[]const u8 {
+    const value = object.get(name) orelse return null;
+    if (value != .string) return error.InvalidRuntimeJobField;
+    return value.string;
+}
+
+fn runtimeJobBackend(value: []const u8) bool {
+    for ([_][]const u8{ "vllm", "sglang", "llamacpp", "mlx", "cuda", "rocm" }) |backend| if (std.mem.eql(u8, value, backend)) return true;
+    return false;
 }
 
 const ModelMutation = enum { delete, move };

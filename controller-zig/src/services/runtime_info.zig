@@ -41,6 +41,14 @@ pub const Cache = struct {
         cache.expires_at = now.addDuration(.fromSeconds(cache_seconds));
         return try allocator.dupe(u8, next);
     }
+
+    pub fn invalidate(cache: *Cache) !void {
+        try cache.mutex.lock(cache.io);
+        defer cache.mutex.unlock(cache.io);
+        if (cache.value) |value| cache.allocator.free(value);
+        cache.value = null;
+        cache.expires_at = null;
+    }
 };
 
 pub const Backend = struct {
