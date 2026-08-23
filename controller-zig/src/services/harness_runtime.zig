@@ -151,6 +151,139 @@ pub const Manager = struct {
         return output.toOwnedSlice();
     }
 
+    pub fn transcriptPayload(manager: *Manager, session_id: []const u8, native_session_id: ?[]const u8, since: ?[]const u8) ![]u8 {
+        if (!harness_session_id.validRuntime(session_id)) return error.InvalidSessionId;
+        if (since) |entry_id| if (!validEntryId(entry_id)) return error.InvalidTranscriptCursor;
+        try manager.mutex.lock(manager.io);
+        const active_session = manager.sessions.get(session_id);
+        manager.mutex.unlock(manager.io);
+        if (active_session == null) {
+            const native_id = native_session_id orelse return error.NativeSessionIdRequired;
+            if (!harness_session_id.validNative(native_id)) return error.InvalidNativeSessionId;
+            const acknowledgement = try manager.readPersistedTranscript(native_id, since);
+            defer manager.allocator.free(acknowledgement);
+            return manager.transcriptEnvelope(session_id, native_id, acknowledgement);
+        }
+        const session = active_session.?;
+        var command: Io.Writer.Allocating = .init(manager.allocator);
+        defer command.deinit();
+        const command_id = manager.commandId();
+        try command.writer.writeAll("{\"id\":");
+        try std.json.Stringify.value(command_id[0..], .{}, &command.writer);
+        try command.writer.writeAll(",\"type\":\"get_entries\"");
+        if (since) |entry_id| {
+            try command.writer.writeAll(",\"since\":");
+            try std.json.Stringify.value(entry_id, .{}, &command.writer);
+        }
+        try command.writer.writeByte('}');
+        const acknowledgement = try manager.sendCommand(session, command_id[0..], command.writer.buffered());
+        defer manager.allocator.free(acknowledgement);
+        return manager.transcriptEnvelope(session_id, session.native_id, acknowledgement);
+    }
+
+    fn transcriptEnvelope(manager: *Manager, session_id: []const u8, native_id: []const u8, acknowledgement: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, acknowledgement, .{}) catch return error.InvalidHarnessResponse;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidHarnessResponse;
+        const data = parsed.value.object.get("data") orelse return error.InvalidHarnessResponse;
+        if (data != .object) return error.InvalidHarnessResponse;
+        const entries = data.object.get("entries") orelse return error.InvalidHarnessResponse;
+        if (entries != .array) return error.InvalidHarnessResponse;
+        const leaf_id = data.object.get("leafId") orelse .null;
+        if (leaf_id != .null and leaf_id != .string) return error.InvalidHarnessResponse;
+        var output: Io.Writer.Allocating = .init(manager.allocator);
+        errdefer output.deinit();
+        try output.writer.writeAll("{\"sessionId\":");
+        try std.json.Stringify.value(session_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"harness\":\"pi\",\"nativeSessionId\":");
+        try std.json.Stringify.value(native_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"entries\":");
+        try std.json.Stringify.value(entries, .{}, &output.writer);
+        try output.writer.writeAll(",\"leafId\":");
+        try std.json.Stringify.value(leaf_id, .{}, &output.writer);
+        try output.writer.writeByte('}');
+        return output.toOwnedSlice();
+    }
+
+    fn readPersistedTranscript(manager: *Manager, native_id: []const u8, since: ?[]const u8) ![]u8 {
+        if (!manager.pi.available()) return error.HarnessUnavailable;
+        const session_path = try manager.nativeSessionPath(native_id);
+        defer manager.allocator.free(session_path);
+        var environment = try manager.model_route.environment.clone(manager.allocator);
+        defer environment.deinit();
+        try environment.put("PI_CODING_AGENT_DIR", manager.model_route.agent_dir);
+        var child = try std.process.spawn(manager.io, .{
+            .argv = &.{ manager.pi.executable, "--mode", "rpc", "--session", session_path },
+            .environ_map = &environment,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .ignore,
+            .pgid = 0,
+        });
+        defer child.kill(manager.io);
+        const command_id = manager.commandId();
+        var command: Io.Writer.Allocating = .init(manager.allocator);
+        defer command.deinit();
+        try command.writer.writeAll("{\"id\":");
+        try std.json.Stringify.value(command_id[0..], .{}, &command.writer);
+        try command.writer.writeAll(",\"type\":\"get_entries\"");
+        if (since) |entry_id| {
+            try command.writer.writeAll(",\"since\":");
+            try std.json.Stringify.value(entry_id, .{}, &command.writer);
+        }
+        try command.writer.writeAll("}\n");
+        try child.stdin.?.writeStreamingAll(manager.io, command.writer.buffered());
+        child.stdin.?.close(manager.io);
+        child.stdin = null;
+        var received: std.ArrayList(u8) = .empty;
+        defer received.deinit(manager.allocator);
+        var chunk: [64 * 1024]u8 = undefined;
+        while (true) {
+            const count = child.stdout.?.readStreaming(manager.io, &.{&chunk}) catch |failure| switch (failure) {
+                error.EndOfStream => break,
+                else => return failure,
+            };
+            if (count == 0) break;
+            if (received.items.len + count > max_event_bytes) return error.TranscriptTooLarge;
+            try received.appendSlice(manager.allocator, chunk[0..count]);
+        }
+        var lines = std.mem.splitScalar(u8, received.items, '\n');
+        while (lines.next()) |line_value| {
+            const line = std.mem.trim(u8, line_value, " \t\r");
+            var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, line, .{}) catch continue;
+            defer parsed.deinit();
+            if (parsed.value != .object) continue;
+            const response_id = optionalString(parsed.value.object, "id") orelse continue;
+            if (!std.mem.eql(u8, response_id, command_id[0..])) continue;
+            try validateAcknowledgement(manager.allocator, line);
+            return manager.allocator.dupe(u8, line);
+        }
+        return error.InvalidHarnessResponse;
+    }
+
+    fn nativeSessionPath(manager: *Manager, native_id: []const u8) ![]u8 {
+        const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "pi", "sessions" });
+        defer manager.allocator.free(session_dir);
+        var directory = Io.Dir.cwd().openDir(manager.io, session_dir, .{ .iterate = true }) catch return error.SessionNotFound;
+        defer directory.close(manager.io);
+        const suffix = try std.fmt.allocPrint(manager.allocator, "_{s}.jsonl", .{native_id});
+        defer manager.allocator.free(suffix);
+        const exact = try std.fmt.allocPrint(manager.allocator, "{s}.jsonl", .{native_id});
+        defer manager.allocator.free(exact);
+        var selected: ?[]u8 = null;
+        defer if (selected) |value| manager.allocator.free(value);
+        var iterator = directory.iterateAssumeFirstIteration();
+        while (try iterator.next(manager.io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.eql(u8, entry.name, exact) and !std.mem.endsWith(u8, entry.name, suffix)) continue;
+            if (selected == null or std.mem.order(u8, entry.name, selected.?) == .gt) {
+                if (selected) |value| manager.allocator.free(value);
+                selected = try manager.allocator.dupe(u8, entry.name);
+            }
+        }
+        return std.fs.path.join(manager.allocator, &.{ session_dir, selected orelse return error.SessionNotFound });
+    }
+
     pub fn turnPayload(manager: *Manager, document: []const u8) ![]u8 {
         if (manager.mode == .head) return error.RemoteHarnessRequired;
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidTurnPayload;
@@ -604,6 +737,12 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     return optionalString(object, name);
+}
+
+fn validEntryId(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return false;
+    return true;
 }
 
 fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {

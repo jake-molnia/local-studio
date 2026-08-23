@@ -370,6 +370,16 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         return false;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/transcript")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        const since = try queryParameter(allocator, request.head.target, "since");
+        defer if (since) |value| allocator.free(value);
+        const response = agent_coordinator.transcriptPayload(allocator, io, mode, client, database, harness, session_id_value orelse "default", since) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/turn")) {
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -452,6 +462,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             return false;
         };
         return false;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/transcript")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        const native_session_id = try queryParameter(allocator, request.head.target, "nativeSessionId");
+        defer if (native_session_id) |value| allocator.free(value);
+        const since = try queryParameter(allocator, request.head.target, "since");
+        defer if (since) |value| allocator.free(value);
+        const response = harness.transcriptPayload(session_id_value orelse "default", native_session_id, since) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/turn") or std.mem.eql(u8, route.path, "/internal/harness/v1/abort") or std.mem.eql(u8, route.path, "/internal/harness/v1/compact") or std.mem.eql(u8, route.path, "/internal/harness/v1/extension-ui")) {
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
@@ -1475,7 +1497,7 @@ fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool
     const status: http.Status = switch (failure) {
         error.RemoteHarnessRequired, error.HarnessNodeRequired, error.SessionNodeMismatch, error.SessionHarnessMismatch, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected, error.HarnessDriverUnavailable => .conflict,
         error.SessionNotFound => .not_found,
-        error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
+        error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidNativeSessionId, error.NativeSessionIdRequired, error.InvalidTranscriptCursor, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
         error.FileNotFound, error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable, error.HarnessUnavailable => .service_unavailable,
         else => .internal_server_error,
     };

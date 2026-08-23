@@ -30,6 +30,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/runtime/transcript",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/setup-checks",
       "ownership": "head",
       "streaming": "never"
@@ -189,6 +195,12 @@
       "path": "/internal/harness/v1/events",
       "ownership": "worker",
       "streaming": "always"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/harness/v1/transcript",
+      "ownership": "worker",
+      "streaming": "never"
     },
     {
       "method": "GET",

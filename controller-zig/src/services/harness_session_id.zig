@@ -15,7 +15,7 @@ pub fn resolve(allocator: std.mem.Allocator, runtime_id: []const u8, requested: 
     return output;
 }
 
-fn validNative(value: []const u8) bool {
+pub fn validNative(value: []const u8) bool {
     if (value.len == 0 or value.len > 128 or !std.ascii.isAlphanumeric(value[0]) or !std.ascii.isAlphanumeric(value[value.len - 1])) return false;
     for (value) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-' and byte != '.') return false;
     return true;

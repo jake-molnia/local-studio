@@ -6,6 +6,7 @@ const harness_nodes = @import("harness_nodes.zig");
 const harness_catalog = @import("harness_catalog.zig");
 const harness_events = @import("harness_events.zig");
 const harness_runtime = @import("harness_runtime.zig");
+const harness_session_id = @import("harness_session_id.zig");
 const node_transport = @import("node_transport.zig");
 
 const Io = std.Io;
@@ -183,6 +184,24 @@ pub fn statusPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, cl
     errdefer allocator.free(payload);
     try ingestRuntimeDocument(allocator, io, database, session_id, payload);
     return payload;
+}
+
+pub fn transcriptPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, since: ?[]const u8) ![]u8 {
+    if (!validSessionId(session_id)) return error.InvalidSessionId;
+    if (since) |entry_id| if (!validEntryId(entry_id)) return error.InvalidTranscriptCursor;
+    var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
+    defer session.deinit();
+    if (mode == .standalone) return harness.transcriptPayload(session_id, session.native_session_id, since);
+    const native_session_id = session.native_session_id orelse return error.NativeSessionIdRequired;
+    if (!harness_session_id.validNative(native_session_id)) return error.InvalidNativeSessionId;
+    var target = (try harness_nodes.select(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
+    defer target.deinit();
+    const path = if (since) |entry_id|
+        try std.fmt.allocPrint(allocator, "/internal/harness/v1/transcript?sessionId={s}&nativeSessionId={s}&since={s}", .{ session_id, native_session_id, entry_id })
+    else
+        try std.fmt.allocPrint(allocator, "/internal/harness/v1/transcript?sessionId={s}&nativeSessionId={s}", .{ session_id, native_session_id });
+    defer allocator.free(path);
+    return remoteGet(allocator, client, &target, path);
 }
 
 pub fn controlPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, operation: []const u8, document: []const u8) ![]u8 {
@@ -454,6 +473,12 @@ fn commandId(io: Io) [32]u8 {
     var random: [16]u8 = undefined;
     io.random(&random);
     return std.fmt.bytesToHex(random, .lower);
+}
+
+fn validEntryId(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return false;
+    return true;
 }
 
 fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
