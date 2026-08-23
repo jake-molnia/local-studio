@@ -162,10 +162,96 @@ a.nav-link:hover,
 
 /* Focus */
 :focus-visible {
-  outline: none;
-  ring: 2px solid var(--accent);
-  ring-offset: 2px;
-  ring-offset-color: var(--bg);
+  outline: 1px solid var(--focus-ring, var(--accent));
+  outline-offset: var(--focus-ring-offset, 1px);
+}
+
+[data-ui-control] {
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-standard);
+}
+
+[data-ui-control]:focus-visible {
+  outline: 1px solid var(--focus-ring, var(--accent)) !important;
+  outline-offset: var(--focus-ring-offset, 1px) !important;
+}
+
+[data-ui-control]:active:not(:disabled) {
+  transition-duration: var(--motion-instant);
+}
+
+[data-ui-control="field"] {
+  min-height: var(--control-height);
+}
+
+[data-ui-control="field"]:focus-visible {
+  outline: none !important;
+}
+
+[data-customize-surface] .space-y-7 > :not(:last-child) {
+  margin-block-end: 16px;
+}
+
+[data-customize-surface] .catalog-table-frame table {
+  min-width: 100% !important;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+}
+
+[data-customize-surface] .catalog-table-frame thead {
+  display: none;
+}
+
+[data-customize-surface] .catalog-table-frame tbody td {
+  background: color-mix(in srgb, var(--ui-surface) 72%, transparent);
+}
+
+[data-customize-surface] .catalog-table-frame tbody tr:hover td {
+  background: var(--ui-hover);
+}
+
+[data-customize-surface] .catalog-table-frame tbody td:first-child {
+  width: 70%;
+}
+
+[data-customize-surface] .catalog-table-frame tbody td:not(:first-child):not(:last-child) {
+  display: none;
+}
+
+[data-customize-surface] .catalog-table-frame tbody td:last-child {
+  width: 30%;
+}
+
+[data-customize-surface] .catalog-table-heading p {
+  display: none;
+}
+
+[data-customize-surface] .catalog-table-notice {
+  border: 1px solid var(--ui-separator);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ui-surface) 68%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-control] {
+    transition-duration: 1ms;
+  }
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-weight: inherit;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: default;
 }
 
 /* Selection */
