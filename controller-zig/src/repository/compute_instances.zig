@@ -1,5 +1,6 @@
 const std = @import("std");
 const instances = @import("instances.zig");
+const references = @import("compute_references.zig");
 
 const max_document_bytes = 1024 * 1024;
 const max_instances = 1024;
@@ -13,7 +14,7 @@ pub const Record = struct {
     engine: []u8,
     recipe_id: []u8,
     runtime: []u8,
-    process: ?instances.ProcessReference,
+    reference: ?references.Reference,
     port: u16,
     devices: [][]u8,
     nonce: []u8,
@@ -26,7 +27,7 @@ pub const Record = struct {
         record.allocator.free(record.engine);
         record.allocator.free(record.recipe_id);
         record.allocator.free(record.runtime);
-        if (record.process) |reference| if (reference.start_token) |token| record.allocator.free(token);
+        if (record.reference) |*reference| reference.deinit(record.allocator);
         for (record.devices) |device| record.allocator.free(device);
         record.allocator.free(record.devices);
         record.allocator.free(record.nonce);
@@ -44,7 +45,7 @@ pub const Record = struct {
             .nonce = record.nonce,
             .started_at = record.started_at,
             .ready_deadline_at = record.ready_deadline_at,
-            .process = record.process,
+            .process = if (record.reference) |*reference| reference.processValue() else null,
         };
     }
 };
@@ -114,13 +115,14 @@ pub fn createReservation(allocator: std.mem.Allocator, io: std.Io, name: []const
 }
 
 pub fn setProcess(record: *Record, reference: instances.ProcessReference) !void {
-    if (record.process) |current| if (current.start_token) |token| record.allocator.free(token);
-    record.process = .{
+    const token = if (reference.start_token) |value| try record.allocator.dupe(u8, value) else null;
+    if (record.reference) |*current| current.deinit(record.allocator);
+    record.reference = .{ .process = .{
         .pid = reference.pid,
         .process_group_id = reference.process_group_id,
         .session_id = reference.session_id,
-        .start_token = if (reference.start_token) |token| try record.allocator.dupe(u8, token) else null,
-    };
+        .start_token = token,
+    } };
 }
 
 pub fn write(io: std.Io, directory: []const u8, record: *const Record) !void {
@@ -162,16 +164,7 @@ pub fn payload(allocator: std.mem.Allocator, record: *const Record) ![]u8 {
     try output.writer.writeAll(",\"runtime\":");
     try std.json.Stringify.value(record.runtime, .{}, &output.writer);
     try output.writer.writeAll(",\"ref\":");
-    if (record.process) |reference| {
-        try output.writer.writeAll("{\"kind\":\"process\",\"pid\":");
-        try output.writer.print("{d},\"processGroupId\":", .{reference.pid});
-        if (reference.process_group_id) |value| try output.writer.print("{d}", .{value}) else try output.writer.writeAll("null");
-        try output.writer.writeAll(",\"sessionId\":");
-        if (reference.session_id) |value| try output.writer.print("{d}", .{value}) else try output.writer.writeAll("null");
-        try output.writer.writeAll(",\"startToken\":");
-        if (reference.start_token) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
-        try output.writer.writeByte('}');
-    } else try output.writer.writeAll("null");
+    if (record.reference) |*reference| try reference.writeJson(&output.writer) else try output.writer.writeAll("null");
     try output.writer.print(",\"port\":{d},\"devices\":", .{record.port});
     try std.json.Stringify.value(record.devices, .{}, &output.writer);
     try output.writer.writeAll(",\"nonce\":");
@@ -190,6 +183,7 @@ fn readPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !?Record
         else => return failure,
     };
     defer allocator.free(document);
+    try hardenFile(allocator, path);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidInstanceRecord;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidInstanceRecord;
@@ -214,12 +208,12 @@ fn readPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !?Record
         devices[device_count] = try allocator.dupe(u8, device.string);
         device_count += 1;
     }
-    const process = try parseProcess(allocator, object.get("ref"));
-    errdefer if (process) |reference| if (reference.start_token) |token| allocator.free(token);
-    return @as(?Record, try createOwned(allocator, object, name, node_id, engine, recipe_id, runtime, process, port, devices));
+    var reference = try references.parse(allocator, object.get("ref"));
+    errdefer if (reference) |*value| value.deinit(allocator);
+    return @as(?Record, try createOwned(allocator, object, name, node_id, engine, recipe_id, runtime, reference, port, devices));
 }
 
-fn create(allocator: std.mem.Allocator, name: []const u8, node_id: []const u8, engine: []const u8, recipe_id: []const u8, runtime: []const u8, process: ?instances.ProcessReference, port: u16, devices: []const []const u8, nonce: []const u8, started_at: []const u8, deadline: []const u8) !Record {
+fn create(allocator: std.mem.Allocator, name: []const u8, node_id: []const u8, engine: []const u8, recipe_id: []const u8, runtime: []const u8, reference: ?references.Reference, port: u16, devices: []const []const u8, nonce: []const u8, started_at: []const u8, deadline: []const u8) !Record {
     var object: std.json.ObjectMap = .empty;
     defer object.deinit(allocator);
     try object.put(allocator, "nonce", .{ .string = nonce });
@@ -235,10 +229,10 @@ fn create(allocator: std.mem.Allocator, name: []const u8, node_id: []const u8, e
         owned_devices[count] = try allocator.dupe(u8, device);
         count += 1;
     }
-    return createOwned(allocator, object, name, node_id, engine, recipe_id, runtime, process, port, owned_devices);
+    return createOwned(allocator, object, name, node_id, engine, recipe_id, runtime, reference, port, owned_devices);
 }
 
-fn createOwned(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8, node_id: []const u8, engine: []const u8, recipe_id: []const u8, runtime: []const u8, process: ?instances.ProcessReference, port: u16, devices: [][]u8) !Record {
+fn createOwned(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8, node_id: []const u8, engine: []const u8, recipe_id: []const u8, runtime: []const u8, reference: ?references.Reference, port: u16, devices: [][]u8) !Record {
     const name_copy = try allocator.dupe(u8, name);
     errdefer allocator.free(name_copy);
     const node_copy = try allocator.dupe(u8, node_id);
@@ -257,41 +251,13 @@ fn createOwned(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: [
     const started_copy = try allocator.dupe(u8, started_at);
     errdefer allocator.free(started_copy);
     const deadline_copy = try allocator.dupe(u8, deadline);
-    return .{ .allocator = allocator, .name = name_copy, .node_id = node_copy, .engine = engine_copy, .recipe_id = recipe_copy, .runtime = runtime_copy, .process = process, .port = port, .devices = devices, .nonce = nonce_copy, .started_at = started_copy, .ready_deadline_at = deadline_copy };
-}
-
-fn parseProcess(allocator: std.mem.Allocator, value: ?std.json.Value) !?instances.ProcessReference {
-    const present = value orelse return null;
-    if (present == .null) return null;
-    if (present != .object) return error.InvalidInstanceRecord;
-    const kind = stringField(present.object, "kind") orelse return error.InvalidInstanceRecord;
-    if (!std.mem.eql(u8, kind, "process")) return error.UnsupportedInstanceReference;
-    const pid = positiveI32(present.object.get("pid")) orelse return error.InvalidInstanceRecord;
-    const group = nullableI32(present.object.get("processGroupId")) orelse return error.InvalidInstanceRecord;
-    const session = nullableI32(present.object.get("sessionId")) orelse return error.InvalidInstanceRecord;
-    const token_value = present.object.get("startToken") orelse return error.InvalidInstanceRecord;
-    const token = if (token_value == .null) null else if (token_value == .string and token_value.string.len > 0 and token_value.string.len <= max_field_bytes) try allocator.dupe(u8, token_value.string) else return error.InvalidInstanceRecord;
-    return .{ .pid = pid, .process_group_id = group.value, .session_id = session.value, .start_token = token };
-}
-
-const NullableI32 = struct { value: ?i32 };
-
-fn nullableI32(value: ?std.json.Value) ?NullableI32 {
-    const present = value orelse return null;
-    if (present == .null) return .{ .value = null };
-    return .{ .value = positiveI32(present) orelse return null };
+    return .{ .allocator = allocator, .name = name_copy, .node_id = node_copy, .engine = engine_copy, .recipe_id = recipe_copy, .runtime = runtime_copy, .reference = reference, .port = port, .devices = devices, .nonce = nonce_copy, .started_at = started_copy, .ready_deadline_at = deadline_copy };
 }
 
 fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     const value = object.get(name) orelse return null;
     if (value != .string or value.string.len == 0 or value.string.len > max_field_bytes) return null;
     return value.string;
-}
-
-fn positiveI32(value: ?std.json.Value) ?i32 {
-    const present = value orelse return null;
-    if (present != .integer or present.integer <= 0 or present.integer > std.math.maxInt(i32)) return null;
-    return @intCast(present.integer);
 }
 
 fn positiveU16(value: ?std.json.Value) ?u16 {
@@ -322,6 +288,12 @@ fn safeName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
 
 fn lessThanName(_: void, left: Record, right: Record) bool {
     return std.mem.lessThan(u8, left.name, right.name);
+}
+
+fn hardenFile(allocator: std.mem.Allocator, path: []const u8) !void {
+    const path_z = try allocator.dupeZ(u8, path);
+    defer allocator.free(path_z);
+    if (std.c.chmod(path_z.ptr, 0o600) != 0) return error.PermissionHardeningFailed;
 }
 
 fn formatTimestampAt(io: std.Io, offset_seconds: u64, buffer: *[24]u8) []const u8 {

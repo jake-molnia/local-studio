@@ -228,21 +228,26 @@ pub const Manager = struct {
         defer list.deinit();
         for (list.records) |*record| {
             if (std.mem.eql(u8, record.name, "llm")) continue;
-            if (record.process == null) {
+            if (record.reference == null) {
                 if (instances.timestampOlderThan(manager.io, record.started_at, 60)) try compute_instances.drop(manager.allocator, manager.io, manager.directory, record.name);
-            } else if (!recordOwned(manager, record)) try compute_instances.drop(manager.allocator, manager.io, manager.directory, record.name);
+            } else if (processReference(record) != null and !recordOwned(manager, record)) try compute_instances.drop(manager.allocator, manager.io, manager.directory, record.name);
         }
     }
 
     fn state(manager: *Manager, client: *std.http.Client, record: *const compute_instances.Record) ![]const u8 {
-        if (record.process == null) return "reserving";
-        if (!recordOwned(manager, record)) return "exited";
+        if (record.reference == null) return "reserving";
+        if (processReference(record) != null and !recordOwned(manager, record)) return "exited";
         if (try healthy(manager.allocator, manager.io, client, record.port, healthPath(record.engine))) return "ready";
         return if (instances.timestampPassed(manager.io, record.ready_deadline_at)) "unhealthy" else "starting";
     }
 
     fn stopRecordLocked(manager: *Manager, record: *const compute_instances.Record) !bool {
-        if (record.process == null or !recordOwned(manager, record)) {
+        if (record.reference == null) {
+            try compute_instances.drop(manager.allocator, manager.io, manager.directory, record.name);
+            return true;
+        }
+        if (processReference(record) == null) return false;
+        if (!recordOwned(manager, record)) {
             try compute_instances.drop(manager.allocator, manager.io, manager.directory, record.name);
             return true;
         }
@@ -284,7 +289,7 @@ pub const Manager = struct {
         for (candidates) |candidate| {
             var held = false;
             if (!shareable) for (records) |*record| {
-                if (record.process != null and !recordOwned(manager, record)) continue;
+                if (processReference(record) != null and !recordOwned(manager, record)) continue;
                 for (record.devices) |device| if (std.mem.eql(u8, device, candidate)) {
                     held = true;
                     break;
@@ -366,7 +371,7 @@ fn cleanupChildRecord(manager: *Manager, pid: i32, name: []const u8, nonce: []co
     if (record_value) |loaded| {
         var record = loaded;
         defer record.deinit();
-        const reference = record.process orelse return;
+        const reference = processReference(&record) orelse return;
         if (reference.pid == pid and std.mem.eql(u8, record.nonce, nonce)) compute_instances.drop(manager.allocator, manager.io, manager.directory, name) catch {};
     }
 }
@@ -383,6 +388,11 @@ fn captureProcess(manager: *Manager, pid: i32) !instances.ProcessReference {
 fn recordOwned(manager: *Manager, record: *const compute_instances.Record) bool {
     var legacy = record.legacyView();
     return processes.owns(manager.allocator, manager.io, &legacy);
+}
+
+fn processReference(record: *const compute_instances.Record) ?instances.ProcessReference {
+    const legacy = record.legacyView();
+    return legacy.process;
 }
 
 fn waitOwned(manager: *Manager, record: *const compute_instances.Record) !void {
