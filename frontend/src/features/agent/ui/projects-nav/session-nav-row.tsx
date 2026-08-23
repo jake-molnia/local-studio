@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MenuItem } from "@/ui";
+import { handleMenuKeyboard, MenuItem } from "@/ui";
 import { POPOVER_MENU_CLASS } from "@/ui/popover";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type DragEvent, type MouseEvent } from "react";
@@ -150,6 +150,8 @@ export function SessionNavRow({
           }`}
           aria-label="Session options"
           title="Session options"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
         >
           <MoreIcon className="pointer-events-none h-3.5 w-3.5" />
         </button>
@@ -299,7 +301,7 @@ function SessionRowContent({
   const age = visibleSessionAge(activity === "running", timestamp, activity === "finished");
   return (
     <>
-      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-md)] font-normal leading-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
+      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-sm)] font-normal leading-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
         {label}
       </span>
       <SessionStatusMark
@@ -308,7 +310,7 @@ function SessionRowContent({
         dotClass="h-1.5 w-1.5 shrink-0 rounded-full"
       />
       {age ? (
-        <span className="shrink-0 pl-3 text-[length:var(--fs-sm)] tabular-nums text-(--hl2) transition-opacity duration-150 group-hover:opacity-0">
+        <span className="shrink-0 pl-2 text-[length:var(--fs-2xs)] tabular-nums text-(--hl2)/70 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-0">
           {age}
         </span>
       ) : null}
@@ -340,7 +342,7 @@ function SessionOptionsMenu({
   };
 
   return (
-    <div className={SESSION_MENU_CLASS} role="menu">
+    <div className={SESSION_MENU_CLASS} role="menu" onKeyDown={handleMenuKeyboard}>
       <MenuItem Icon={pref.pinned ? PinOffIcon : PinIcon} onClick={run(onPin)}>
         {pref.pinned ? "Unpin" : "Pin"}
       </MenuItem>

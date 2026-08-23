@@ -44,9 +44,6 @@ export function SessionStatusMark({
   return null;
 }
 
-/** The one pin control for every sidebar row (sessions and projects). It sits in
- *  the row's hover action cluster and, once pinned, stays lit as the pinned
- *  indicator. */
 export function PinButton({
   pinned,
   onToggle,
@@ -66,13 +63,10 @@ export function PinButton({
       }}
       aria-label={pinned ? `Unpin ${target}` : `Pin ${target}`}
       title={pinned ? "Unpin" : "Pin"}
-      // Hidden at rest even when pinned — living in the Pinned section already
-      // says so, and an always-on glyph collided with the date column. On hover
-      // it slides in from the left over the trailing text with a fade.
-      className={`inline-flex h-5 w-5 items-center justify-center rounded-[var(--rad-xs)] transition-[opacity,transform,color] duration-150 hover:text-(--fg) ${
-        pinned ? "text-(--fg)/75" : "text-(--dim)/70"
-      } ${
-        "-translate-x-1.5 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 focus-visible:translate-x-0 focus-visible:opacity-100 pointer-coarse:translate-x-0 pointer-coarse:opacity-100"
+      className={`inline-flex h-5 w-5 items-center justify-center rounded-[3px] transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) ${
+        pinned
+          ? "bg-(--active) text-(--fg)/80 opacity-75"
+          : "opacity-0 text-(--dim)/70 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
       }`}
     >
       <PinIcon className="pointer-events-none h-3 w-3" />
@@ -80,8 +74,6 @@ export function PinButton({
   );
 }
 
-/** Flat column that session rows live in - no guide line, no indent, so rows
- *  start at the same x-column as the section header text. */
 export function SidebarRail({ children }: { children: ReactNode }) {
   return <div className="flex flex-col">{children}</div>;
 }
@@ -107,7 +99,7 @@ export function SidebarSectionHeader({
 }) {
   return (
     <div
-      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-5 text-[length:var(--fs-md)] font-medium text-(--hl2) opacity-75 transition-opacity group-hover:opacity-100"
+      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-2.5 text-[length:var(--fs-xs)] font-medium text-(--hl2) opacity-70 transition-opacity group-hover:opacity-100"
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}

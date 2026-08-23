@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Suspense,
   useCallback,
   useRef,
   useState,
@@ -29,14 +30,12 @@ import {
   routeHidesAppSidebar,
   routeOwnsMobileHeader,
 } from "@/features/shell/left-sidebar-nav";
+import { WorkbenchTabStrip } from "@/features/workbench/workbench-tab-strip";
 
-// Search and recents are the same palette in two modes: one lazy chunk, one
-// dialog, and only ever one of them open.
 type PaletteMode = "search" | null;
 
-// Codex desktop sidebar clamp: min(240px, 275px preferred, max min(520px, 100vw-320px)).
-const SIDEBAR_MIN_WIDTH = 240;
-const SIDEBAR_MAX_WIDTH = 520;
+const SIDEBAR_MIN_WIDTH = 194;
+const SIDEBAR_MAX_WIDTH = 360;
 function clampSidebarWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_SIDEBAR_WIDTH;
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
@@ -46,7 +45,8 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const hidesAppSidebar = routeHidesAppSidebar(pathname);
-  const projectsNavImmediate = pathname.startsWith("/agent");
+  const ownsThreadTabs = pathname === "/agent";
+  const projectsNavImmediate = !hidesAppSidebar;
   const {
     desktopSidebarPinnedOpen,
     setDesktopSidebarPinnedOpen,
@@ -66,17 +66,10 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
   );
   const isExpanded = desktopSidebarPinnedOpen;
   const clampedSidebarWidth = clampSidebarWidth(sidebarWidth);
-  // Agent routes carry their own header (hamburger + surface title), so the app
-  // topbar would be a second stacked row there.
   const ownsMobileHeader = routeOwnsMobileHeader(pathname);
   const [paletteMode, setPaletteMode] = useState<PaletteMode>(null);
-  // The bell swaps the nav body rather than opening a panel; projects is the
-  // resting view, so the toggle always has somewhere to fall back to.
   const [navView, setNavView] = useState<NavView>("projects");
   const sessionActivity = useSessionActivity();
-  // The bell used to carry a bare "something happened" dot, which said nothing
-  // about what. What the nav can usefully show is session state: how many runs
-  // are live right now, and how many finished while you were elsewhere.
   const runningSessions = sessionActivity.active.size;
   const finishedSessions = sessionActivity.finished.size;
   const activeSessions = useOpenSessions();
@@ -97,8 +90,6 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [mobileMenuOpen, setMobileMenuOpen]);
 
-  // Navigating anywhere dismisses the drawer — it covers the whole screen, so
-  // leaving it open over the destination is never what you want.
   useMountSubscription(() => {
     setMobileMenuOpen(false);
   }, [pathname, setMobileMenuOpen]);
@@ -185,6 +176,18 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     [router],
   );
 
+  useMountSubscription(() => {
+    if (pathname === "/agent") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "n") return;
+      event.preventDefault();
+      openNewTask();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openNewTask, pathname]);
+
   if (hidesAppSidebar) {
     return <div className="h-full w-full">{children}</div>;
   }
@@ -213,28 +216,6 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         onNewTask={openNewTask}
       />
 
-      {ownsMobileHeader ? null : (
-        <div className="mobile-pwa-topbar md:hidden fixed left-0 right-0 top-0 z-40 border-b border-(--border)/70 bg-(--bg) px-4">
-          <Link href="/" className="flex min-w-0 items-center gap-2.5">
-            <span className="truncate text-[length:var(--fs-base)] font-semibold tracking-tight text-(--fg)">
-              {mobilePageTitle(pathname)}
-            </span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="flex !h-8 !min-h-8 !w-8 !min-w-8 items-center justify-center rounded-md border-0 bg-transparent text-(--dim) transition-colors hover:bg-(--surface) hover:text-(--fg)"
-              aria-label="Open navigation menu"
-              aria-expanded={mobileMenuOpen}
-              aria-controls="mobile-navigation-drawer"
-            >
-              <Menu className="h-[17px] w-[17px]" />
-            </button>
-          </div>
-        </div>
-      )}
-
       {mobileMenuOpen ? (
         <MobileNavigationDrawer
           pathname={pathname}
@@ -242,6 +223,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
           ProjectsNavSection={ProjectsNavSection}
           onClose={() => setMobileMenuOpen(false)}
           onNewTask={openNewTask}
+          onOpenSearch={() => setPaletteMode("search")}
         />
       ) : null}
 
@@ -253,12 +235,53 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         />
       ) : null}
 
-      <main
-        data-no-topbar={ownsMobileHeader ? "true" : undefined}
-        className="mobile-pwa-main flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden bg-(--agent-bg) md:pt-0"
-      >
-        {children}
-      </main>
+      <section className="workbench-shell flex min-h-0 min-w-0 flex-1 flex-col bg-(--agent-bg)">
+        {ownsMobileHeader ? null : (
+          <div className="mobile-pwa-topbar z-40 shrink-0 border-b border-(--border)/70 bg-(--bg) px-4 md:hidden">
+            <Link href="/" className="flex min-w-0 items-center gap-2.5">
+              <span className="truncate text-[length:var(--fs-base)] font-semibold tracking-tight text-(--fg)">
+                {mobilePageTitle(pathname)}
+              </span>
+            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                className="flex !h-8 !min-h-8 !w-8 !min-w-8 items-center justify-center rounded-md border-0 bg-transparent text-(--dim) transition-colors hover:bg-(--surface) hover:text-(--fg)"
+                aria-label="Open navigation menu"
+                aria-expanded={mobileMenuOpen}
+                aria-controls="mobile-navigation-drawer"
+              >
+                <Menu className="h-[17px] w-[17px]" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {ownsThreadTabs ? (
+          <Suspense fallback={<WorkbenchTabFallback />}>
+            <WorkbenchTabStrip />
+          </Suspense>
+        ) : null}
+
+        <div
+          id={ownsThreadTabs ? "workbench-active-surface" : undefined}
+          role={ownsThreadTabs ? "tabpanel" : undefined}
+          aria-labelledby={ownsThreadTabs ? "workbench-active-tab" : undefined}
+          data-no-topbar={ownsMobileHeader ? "true" : undefined}
+          className={`mobile-pwa-main workbench-surface min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-(--agent-bg) md:pt-0 ${
+            ownsThreadTabs ? "workbench-tabpanel" : ""
+          }`}
+        >
+          {children}
+        </div>
+      </section>
     </div>
+  );
+}
+
+function WorkbenchTabFallback() {
+  return (
+    <div className="h-[var(--workbench-tab-height)] shrink-0 border-b border-(--border) bg-(--color-header)" />
   );
 }

@@ -174,12 +174,12 @@ export default function AutomationsPage() {
   return (
     // h-full, not h-[100dvh]: the scroll parent already subtracts the phone's
     // bottom safe-area inset, so a viewport-height child overflows it.
-    <div className="flex h-full min-h-0 w-full bg-(--ui-bg) text-(--ui-fg) md:h-[100dvh]">
+    <div className="flex h-full min-h-0 w-full bg-(--ui-bg) text-(--ui-fg)">
       <div
         className={
           editorOpen
-            ? "hidden min-h-0 shrink-0 md:flex md:w-[min(380px,38%)]"
-            : "flex min-h-0 w-full shrink-0 md:w-[min(380px,38%)]"
+            ? "hidden min-h-0 shrink-0 md:flex md:w-[min(320px,32%)]"
+            : "flex min-h-0 w-full shrink-0 md:w-[min(320px,32%)]"
         }
       >
         <AutomationList
@@ -222,7 +222,7 @@ export default function AutomationsPage() {
 
 function AutomationWelcome({ onCreate }: { onCreate: () => void }) {
   return (
-    <section className="hidden min-h-0 flex-1 items-center justify-center px-8 md:flex">
+    <section className="hidden min-h-0 flex-1 items-center justify-center px-6 md:flex">
       <div className="max-w-sm text-left">
         <span className="flex h-9 w-9 items-center justify-center rounded-[var(--ui-radius)] border border-(--ui-separator) bg-(--ui-surface) text-(--ui-muted)">
           <Clock className="h-4 w-4" />

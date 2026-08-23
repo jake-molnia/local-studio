@@ -100,18 +100,18 @@ export function ProjectRow({
           }`}
         >
           {icon === "chat" ? (
-            <ChatIcon className="h-4 w-4 shrink-0 opacity-80 transition-opacity group-hover:opacity-100" />
+            <ChatIcon className="h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100" />
           ) : (
-            <span className="relative h-4 w-4 shrink-0 opacity-80 transition-opacity group-hover:opacity-100">
+            <span className="relative h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100">
               <Folder
-                className={`absolute inset-0 h-4 w-4 transition-all duration-150 ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
+                className={`absolute inset-0 h-3.5 w-3.5 transition-all duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
               />
               <FolderOpen
-                className={`absolute inset-0 h-4 w-4 transition-all duration-150 ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
+                className={`absolute inset-0 h-3.5 w-3.5 transition-all duration-[var(--motion-fast)] ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
               />
             </span>
           )}
-          <span className="truncate text-[length:var(--fs-md)] font-normal">{project.name}</span>
+          <span className="truncate text-[length:var(--fs-sm)] font-normal">{project.name}</span>
           {!project.exists ? (
             <span
               className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--warn)"

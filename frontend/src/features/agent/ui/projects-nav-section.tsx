@@ -125,7 +125,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
     projects: (
       <>
         <SidebarSectionHeader
-          label="Projects"
+          label="Workspaces"
           open={projectsExpanded}
           onToggle={() => setProjectsExpanded((value) => !value)}
           {...sections.headerDragProps("projects")}
