@@ -10,6 +10,14 @@ pub const routes = [_]http_routes.Route{
     .{ .method = .GET, .path = "/api/agent/runtime/status", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/runtime/events", .ownership = .head, .streaming = .always },
     .{ .method = .GET, .path = "/api/agent/setup-checks", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/internal/harness/v1/turn", .ownership = .worker, .streaming = .never },
+    .{ .method = .POST, .path = "/internal/harness/v1/abort", .ownership = .worker, .streaming = .never },
+    .{ .method = .POST, .path = "/internal/harness/v1/compact", .ownership = .worker, .streaming = .never },
+    .{ .method = .POST, .path = "/internal/harness/v1/extension-ui", .ownership = .worker, .streaming = .never },
+    .{ .method = .GET, .path = "/internal/harness/v1/sessions", .ownership = .worker, .streaming = .never },
+    .{ .method = .GET, .path = "/internal/harness/v1/status", .ownership = .worker, .streaming = .never },
+    .{ .method = .GET, .path = "/internal/harness/v1/events", .ownership = .worker, .streaming = .always },
+    .{ .method = .GET, .path = "/internal/harness/v1/setup-checks", .ownership = .worker, .streaming = .never },
 };
 
 comptime {

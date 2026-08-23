@@ -34,6 +34,7 @@ const openai_protocol = @import("services/openai_protocol.zig");
 const head_providers = @import("services/head_providers.zig");
 const codex_gateway = @import("services/codex_gateway.zig");
 const harness_runtime = @import("services/harness_runtime.zig");
+const agent_coordinator = @import("services/agent_coordinator.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -51,6 +52,7 @@ const net = Io.net;
 const http = std.http;
 const max_connection_tasks = 256;
 const max_chat_request_bytes = 16 * 1024 * 1024;
+const max_agent_request_bytes = 16 * 1024 * 1024;
 const max_settings_request_bytes = 64 * 1024;
 
 const ConnectionLimiter = struct {
@@ -227,13 +229,13 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/setup-checks")) {
-        const response = try harness.setupPayload();
+        const response = try agent_coordinator.setupPayload(allocator, io, mode, database, harness);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
-        const response = try harness.sessionsPayload();
+        const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -242,12 +244,74 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
         const session_id = session_id_value orelse "default";
-        const response = try harness.statusPayload(session_id, queryUnsigned(request.head.target, "after") orelse 0);
+        const response = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, queryUnsigned(request.head.target, "after") orelse 0);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/events")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        agent_coordinator.serveEvents(allocator, io, mode, client, database, harness, session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
+            if (failure == error.SessionNotFound) return respondHarnessFailure(request, failure);
+            if (failure == error.AssignedHarnessUnavailable) return respondHarnessFailure(request, failure);
+            return false;
+        };
+        return false;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/turn")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_coordinator.turnPayload(allocator, io, mode, client, database, harness, document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/abort")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_coordinator.controlPayload(allocator, io, mode, client, database, harness, "abort", document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/compact")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_coordinator.controlPayload(allocator, io, mode, client, database, harness, "compact", document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/extension-ui")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_coordinator.controlPayload(allocator, io, mode, client, database, harness, "extension-ui", document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/setup-checks")) {
+        const response = try harness.setupPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/sessions")) {
+        const response = try harness.sessionsPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/status")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        const response = try harness.statusPayload(session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/events")) {
         const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
         harness.serveEvents(session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
@@ -256,36 +320,20 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         return false;
     }
-    if (std.mem.eql(u8, route.path, "/api/agent/turn")) {
-        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/turn") or std.mem.eql(u8, route.path, "/internal/harness/v1/abort") or std.mem.eql(u8, route.path, "/internal/harness/v1/compact") or std.mem.eql(u8, route.path, "/internal/harness/v1/extension-ui")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = harness.turnPayload(document) catch |failure| return respondHarnessFailure(request, failure);
-        defer allocator.free(response);
-        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
-        return request.head.keep_alive;
-    }
-    if (std.mem.eql(u8, route.path, "/api/agent/abort")) {
-        const document = try readBoundedJsonBody(allocator, request) orelse return false;
-        defer allocator.free(document);
-        const response = harness.abortPayload(document) catch |failure| return respondHarnessFailure(request, failure);
-        defer allocator.free(response);
-        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
-        return request.head.keep_alive;
-    }
-    if (std.mem.eql(u8, route.path, "/api/agent/compact")) {
-        const document = try readBoundedJsonBody(allocator, request) orelse return false;
-        defer allocator.free(document);
-        const response = harness.compactPayload(document) catch |failure| return respondHarnessFailure(request, failure);
-        defer allocator.free(response);
-        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
-        return request.head.keep_alive;
-    }
-    if (std.mem.eql(u8, route.path, "/api/agent/runtime/extension-ui")) {
-        const document = try readBoundedJsonBody(allocator, request) orelse return false;
-        defer allocator.free(document);
-        const response = harness.extensionUiPayload(document) catch |failure| return respondHarnessFailure(request, failure);
-        defer allocator.free(response);
-        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        const response = if (std.mem.endsWith(u8, route.path, "/turn"))
+            harness.turnPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/abort"))
+            harness.abortPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/compact"))
+            harness.compactPayload(document)
+        else
+            harness.extensionUiPayload(document);
+        const payload = response catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs")) {
@@ -1088,6 +1136,19 @@ fn readBoundedJsonBody(allocator: std.mem.Allocator, request: *http.Server.Reque
     return try allocator.dupe(u8, body_writer.buffered());
 }
 
+fn readBoundedAgentBody(allocator: std.mem.Allocator, request: *http.Server.Request) !?[]u8 {
+    const storage = try allocator.alloc(u8, max_agent_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{ .status = .payload_too_large, .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return null;
+    };
+    return try allocator.dupe(u8, body_writer.buffered());
+}
+
 fn requiredDownloadString(object: std.json.ObjectMap, name: []const u8) ![]const u8 {
     const value = object.get(name) orelse return error.MissingDownloadField;
     if (value != .string or std.mem.trim(u8, value.string, " \t\r\n").len == 0) return error.InvalidDownloadField;
@@ -1214,14 +1275,17 @@ fn respondHeadProviderFailure(request: *http.Server.Request, failure: anyerror) 
 
 fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.RemoteHarnessRequired, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected => .conflict,
+        error.RemoteHarnessRequired, error.HarnessNodeRequired, error.SessionNodeMismatch, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected => .conflict,
         error.SessionNotFound => .not_found,
         error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
-        error.FileNotFound => .service_unavailable,
+        error.FileNotFound, error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable => .service_unavailable,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
         error.RemoteHarnessRequired => "This Head has no enrolled harness node assigned to the session",
+        error.HarnessNodeRequired => "No enrolled Pi harness node is available",
+        error.AssignedHarnessUnavailable => "The session's assigned harness node is unavailable",
+        error.SessionNodeMismatch => "The session is pinned to a different harness node",
         error.SessionNotActive => "Runtime session is no longer active",
         error.SessionNotFound => "Runtime session not found",
         error.ModelChangeRequiresNewSession => "Changing models requires a new harness session",
