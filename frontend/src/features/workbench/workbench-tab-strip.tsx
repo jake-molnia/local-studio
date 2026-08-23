@@ -278,10 +278,7 @@ export function WorkbenchTabStrip() {
     requestKeyboardTabFocus(tab.id);
     activateTab(tab, "keyboard");
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        tabElementsRef.current.get(tab.id)?.focus();
-        clearKeyboardTabFocus();
-      });
+      requestAnimationFrame(() => tabElementsRef.current.get(tab.id)?.focus());
     });
   };
 
@@ -289,6 +286,28 @@ export function WorkbenchTabStrip() {
     const fallback = initialState(currentProjectId);
     setState(loadWorkbenchState(fallback));
     setHydrated(true);
+  }, []);
+
+  useMountSubscription(() => {
+    const releasePointerHandoff = () => clearKeyboardTabFocus();
+    const releaseKeyboardHandoff = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.getAttribute("role") === "tab" &&
+        ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+      ) {
+        return;
+      }
+      clearKeyboardTabFocus();
+    };
+    window.addEventListener("pointerdown", releasePointerHandoff, true);
+    window.addEventListener("keydown", releaseKeyboardHandoff, true);
+    return () => {
+      clearKeyboardTabFocus();
+      window.removeEventListener("pointerdown", releasePointerHandoff, true);
+      window.removeEventListener("keydown", releaseKeyboardHandoff, true);
+    };
   }, []);
 
   useMountSubscription(() => {
