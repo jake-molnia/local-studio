@@ -25,6 +25,7 @@ const vram_calculator = @import("services/vram_calculator.zig");
 const benchmark_service = @import("services/benchmark.zig");
 const runtime_jobs_service = @import("services/runtime_jobs.zig");
 const huggingface_models = @import("services/huggingface_models.zig");
+const download_manager = @import("services/download_manager.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const downloads = @import("repository/downloads.zig");
@@ -65,6 +66,7 @@ pub const HttpServer = struct {
     studio: studio_settings.State,
     model_index_cache: model_index.Cache,
     runtime_jobs: runtime_jobs_service.State,
+    downloads: download_manager.State,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -80,11 +82,13 @@ pub const HttpServer = struct {
             .studio = studio,
             .model_index_cache = model_index.Cache.init(allocator, io),
             .runtime_jobs = runtime_jobs_service.State.init(allocator, io),
+            .downloads = download_manager.State.init(allocator, io),
         };
     }
 
     pub fn deinit(server: *HttpServer) void {
         server.listener.deinit(server.io);
+        server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
         server.model_index_cache.deinit();
@@ -103,7 +107,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -111,7 +115,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -133,7 +137,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -150,7 +154,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -326,6 +330,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads") and request.head.method == .POST) {
+        return serveDownloadStart(allocator, io, configuration, studio, download_state, client, database, request);
+    }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId") and request.head.method == .GET) {
         const download_id = try pathParameter(allocator, request.head.target, "/studio/downloads/");
         defer allocator.free(download_id);
@@ -346,6 +353,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try output.writer.writeByte('}');
         try request.respond(output.writer.buffered(), .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId/pause")) {
+        return serveDownloadControl(allocator, configuration, download_state, client, database, request, .pause);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId/resume")) {
+        return serveDownloadControl(allocator, configuration, download_state, client, database, request, .@"resume");
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId/cancel")) {
+        return serveDownloadControl(allocator, configuration, download_state, client, database, request, .cancel);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm")) {
         return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .vllm, request);
@@ -726,6 +742,174 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         .status = .not_implemented,
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
+    return request.head.keep_alive;
+}
+
+const DownloadControl = enum { pause, @"resume", cancel };
+
+fn serveDownloadStart(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, state: *download_manager.State, client: *http.Client, database: *sqlite.Database, request: *http.Server.Request) !bool {
+    const header_token = try capturedDownloadTokenHeader(allocator, request);
+    defer if (header_token) |value| allocator.free(value);
+    const document = try readBoundedJsonBody(allocator, request) orelse return false;
+    defer allocator.free(document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+    defer parsed.deinit();
+    if (parsed.value != .object) return respondDownloadError(request, .bad_request, "Invalid JSON body");
+    const object = parsed.value.object;
+    const model_id = requiredDownloadString(object, "model_id") catch return respondDownloadError(request, .bad_request, "model_id is required");
+    const revision = optionalDownloadString(object, "revision") catch return respondDownloadError(request, .bad_request, "Invalid revision");
+    const destination = optionalDownloadString(object, "destination_dir") catch return respondDownloadError(request, .bad_request, "Invalid destination_dir");
+    const body_token = optionalDownloadString(object, "hf_token") catch return respondDownloadError(request, .bad_request, "Invalid hf_token");
+    const allow_patterns = downloadPatterns(allocator, object, "allow_patterns") catch return respondDownloadError(request, .bad_request, "Invalid allow_patterns");
+    defer allocator.free(allow_patterns);
+    const ignore_patterns = downloadPatterns(allocator, object, "ignore_patterns") catch return respondDownloadError(request, .bad_request, "Invalid ignore_patterns");
+    defer allocator.free(ignore_patterns);
+    const token = downloadToken(configuration.environment, body_token, header_token);
+    const models_dir = try studio.modelsDirectory(allocator, io);
+    defer allocator.free(models_dir);
+    var result = state.startPayload(configuration, client, database, models_dir, .{
+        .model_id = model_id,
+        .revision = revision,
+        .destination_dir = destination,
+        .allow_patterns = allow_patterns,
+        .ignore_patterns = ignore_patterns,
+        .token = token,
+    }) catch |failure| return respondDownloadFailure(request, failure);
+    defer result.deinit(allocator);
+    return respondDownloadAction(request, result);
+}
+
+fn serveDownloadControl(allocator: std.mem.Allocator, configuration: *const Config, state: *download_manager.State, client: *http.Client, database: *sqlite.Database, request: *http.Server.Request, control: DownloadControl) !bool {
+    const suffix = switch (control) {
+        .pause => "/pause",
+        .@"resume" => "/resume",
+        .cancel => "/cancel",
+    };
+    const id = try pathParameterBetween(allocator, request.head.target, "/studio/downloads/", suffix);
+    defer allocator.free(id);
+    if (control == .@"resume") {
+        const header_token = try capturedDownloadTokenHeader(allocator, request);
+        defer if (header_token) |value| allocator.free(value);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, if (document.len > 0) document else "{}", .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        defer parsed.deinit();
+        if (parsed.value != .object) return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        const body_token = optionalDownloadString(parsed.value.object, "hf_token") catch return respondDownloadError(request, .bad_request, "Invalid hf_token");
+        const token = downloadToken(configuration.environment, body_token, header_token);
+        var result = (state.resumePayload(configuration, client, database, id, token) catch |failure| return respondDownloadFailure(request, failure)) orelse return respondDownloadError(request, .not_found, "Download not found");
+        defer result.deinit(allocator);
+        return respondDownloadAction(request, result);
+    }
+    const response = switch (control) {
+        .pause => try state.pausePayload(database, id),
+        .cancel => try state.cancelPayload(database, id),
+        .@"resume" => unreachable,
+    } orelse return respondDownloadError(request, .not_found, "Download not found");
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn readBoundedJsonBody(allocator: std.mem.Allocator, request: *http.Server.Request) !?[]u8 {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{ .status = .payload_too_large, .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return null;
+    };
+    return try allocator.dupe(u8, body_writer.buffered());
+}
+
+fn requiredDownloadString(object: std.json.ObjectMap, name: []const u8) ![]const u8 {
+    const value = object.get(name) orelse return error.MissingDownloadField;
+    if (value != .string or std.mem.trim(u8, value.string, " \t\r\n").len == 0) return error.InvalidDownloadField;
+    return value.string;
+}
+
+fn optionalDownloadString(object: std.json.ObjectMap, name: []const u8) !?[]const u8 {
+    const value = object.get(name) orelse return null;
+    return switch (value) {
+        .null => null,
+        .string => |text| text,
+        else => error.InvalidDownloadField,
+    };
+}
+
+fn downloadPatterns(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8) ![]const []const u8 {
+    const value = object.get(name) orelse return allocator.alloc([]const u8, 0);
+    if (value == .null) return allocator.alloc([]const u8, 0);
+    if (value != .array or value.array.items.len > 10_000) return error.InvalidDownloadField;
+    var count: usize = 0;
+    for (value.array.items) |entry| {
+        if (entry != .string) return error.InvalidDownloadField;
+        if (entry.string.len > 4096) return error.InvalidDownloadField;
+        if (entry.string.len > 0) count += 1;
+    }
+    const patterns = try allocator.alloc([]const u8, count);
+    var index: usize = 0;
+    for (value.array.items) |entry| {
+        if (entry.string.len == 0) continue;
+        patterns[index] = entry.string;
+        index += 1;
+    }
+    return patterns;
+}
+
+fn capturedDownloadTokenHeader(allocator: std.mem.Allocator, request: *const http.Server.Request) !?[]u8 {
+    if (requestHeader(request, "x-hf-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
+    if (requestHeader(request, "x-huggingface-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
+    return null;
+}
+
+fn downloadToken(environment: *const std.process.Environ.Map, body_token: ?[]const u8, header_token: ?[]const u8) ?[]const u8 {
+    if (body_token) |value| if (value.len > 0) return value;
+    if (header_token) |value| return value;
+    for ([_][]const u8{ "LOCAL_STUDIO_HF_TOKEN", "HF_TOKEN", "HUGGINGFACE_TOKEN" }) |name| if (environment.get(name)) |value| if (value.len > 0) return value;
+    return null;
+}
+
+fn respondDownloadAction(request: *http.Server.Request, result: download_manager.Action) !bool {
+    switch (result) {
+        .payload => |payload| try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} }),
+        .conflict => |detail| return respondDownloadError(request, .conflict, detail),
+    }
+    return request.head.keep_alive;
+}
+
+fn respondDownloadFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.ModelIdRequired, error.InvalidDownloadField, error.InvalidDestinationPath, error.NoDownloadableFiles, error.MultipleGgufVariants, error.InvalidHuggingFaceModelInfo => .bad_request,
+        error.TooManyActiveDownloads => .service_unavailable,
+        error.DownloadRecordTooLarge => .payload_too_large,
+        error.HuggingFaceApiError, error.HuggingFaceMetadataTimeout => .bad_gateway,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.ModelIdRequired => "Model id is required",
+        error.InvalidDownloadField => "Invalid download request",
+        error.InvalidDestinationPath => "Invalid destination path",
+        error.NoDownloadableFiles => "No downloadable files found for this model",
+        error.MultipleGgufVariants => "Multiple GGUF weight variants found. Choose one file before downloading",
+        error.TooManyActiveDownloads => "Too many active downloads",
+        error.DownloadRecordTooLarge => "Download metadata is too large",
+        error.HuggingFaceApiError => "Hugging Face API error",
+        error.HuggingFaceMetadataTimeout => "Hugging Face API request timed out",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondDownloadError(request: *http.Server.Request, status: http.Status, detail: []const u8) !bool {
+    var buffer: [8192]u8 = undefined;
+    var output: Io.Writer = .fixed(&buffer);
+    try output.writeAll("{\"detail\":");
+    try std.json.Stringify.value(detail, .{}, &output);
+    try output.writeByte('}');
+    try request.respond(output.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
 }
 
