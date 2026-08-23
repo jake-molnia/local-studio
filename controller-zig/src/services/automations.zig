@@ -3,6 +3,7 @@ const config = @import("../config.zig");
 const repository = @import("../repository/agent_automations.zig");
 const sqlite = @import("../repository/sqlite.zig");
 const agent_coordinator = @import("agent_coordinator.zig");
+const agent_run_completion = @import("agent_run_completion.zig");
 const harness_runtime = @import("harness_runtime.zig");
 
 const Io = std.Io;
@@ -134,9 +135,9 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
         break :failed null;
     };
     defer if (response) |value| allocator.free(value);
-    var result: ?RunResult = null;
+    var result: ?agent_run_completion.Result = null;
     defer if (result) |*value| value.deinit();
-    if (response != null) result = waitForRun(allocator, io, mode, client, database, harness, session_id) catch |failure| failed: {
+    if (response != null) result = agent_run_completion.wait(allocator, io, mode, client, database, harness, session_id, 2000) catch |failure| failed: {
         run_error = @errorName(failure);
         break :failed null;
     };
@@ -187,110 +188,6 @@ fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http
         };
         allocator.free(response);
     }
-}
-
-const RunResult = struct {
-    allocator: std.mem.Allocator,
-    native_session: ?[]u8,
-    summary: []u8,
-    failure: ?[]u8,
-
-    fn deinit(result: *RunResult) void {
-        if (result.native_session) |value| result.allocator.free(value);
-        result.allocator.free(result.summary);
-        if (result.failure) |value| result.allocator.free(value);
-        result.* = undefined;
-    }
-};
-
-fn waitForRun(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8) !RunResult {
-    var cursor: u64 = 0;
-    var native_session: ?[]u8 = null;
-    errdefer if (native_session) |value| allocator.free(value);
-    var attempts: usize = 0;
-    while (attempts < 14_400) : (attempts += 1) {
-        try io.sleep(.fromMilliseconds(250), .awake);
-        const payload = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, cursor);
-        defer allocator.free(payload);
-        var status = std.json.parseFromSlice(std.json.Value, allocator, payload, .{}) catch return error.InvalidHarnessResponse;
-        defer status.deinit();
-        if (status.value != .object) return error.InvalidHarnessResponse;
-        const state = status.value.object.get("status") orelse return error.InvalidHarnessResponse;
-        if (state != .object) return error.InvalidHarnessResponse;
-        if (native_session == null) {
-            if (optionalString(state.object, "nativeSessionId") orelse optionalString(state.object, "piSessionId")) |value| native_session = try allocator.dupe(u8, value);
-        }
-        if (optionalString(state.object, "lastError")) |failure| return .{
-            .allocator = allocator,
-            .native_session = native_session,
-            .summary = try allocator.dupe(u8, ""),
-            .failure = try allocator.dupe(u8, failure),
-        };
-        var settled = false;
-        if (status.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
-            if (event != .object) continue;
-            cursor = @max(cursor, unsignedField(event.object, "seq") orelse 0);
-            const native = event.object.get("event") orelse continue;
-            if (native == .object and std.mem.eql(u8, optionalString(native.object, "type") orelse "", "agent_settled")) settled = true;
-        };
-        if (!settled) continue;
-        const transcript = try agent_coordinator.transcriptPayload(allocator, io, mode, client, database, harness, session_id, null);
-        defer allocator.free(transcript);
-        var assistant = try lastAssistantResult(allocator, transcript);
-        errdefer assistant.deinit();
-        if (native_session) |value| {
-            if (assistant.native_session) |previous| allocator.free(previous);
-            assistant.native_session = value;
-            native_session = null;
-        }
-        return assistant;
-    }
-    return error.AutomationRunTimeout;
-}
-
-fn lastAssistantResult(allocator: std.mem.Allocator, document: []const u8) !RunResult {
-    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHarnessResponse;
-    defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidHarnessResponse;
-    const entries = parsed.value.object.get("entries") orelse return error.InvalidHarnessResponse;
-    if (entries != .array) return error.InvalidHarnessResponse;
-    var summary = try allocator.dupe(u8, "");
-    errdefer allocator.free(summary);
-    var failure: ?[]u8 = null;
-    errdefer if (failure) |value| allocator.free(value);
-    for (entries.array.items) |entry| {
-        if (entry != .object or !std.mem.eql(u8, optionalString(entry.object, "type") orelse "", "message")) continue;
-        const message = entry.object.get("message") orelse continue;
-        if (message != .object or !std.mem.eql(u8, optionalString(message.object, "role") orelse "", "assistant")) continue;
-        const text = try messageText(allocator, message.object.get("content"));
-        defer allocator.free(text);
-        const trimmed = std.mem.trim(u8, text, " \t\r\n");
-        if (trimmed.len > 0) {
-            allocator.free(summary);
-            summary = try allocator.dupe(u8, trimmed[0..@min(trimmed.len, 2000)]);
-            if (failure) |value| allocator.free(value);
-            failure = null;
-        } else if (optionalString(message.object, "errorMessage")) |value| {
-            if (failure) |previous| allocator.free(previous);
-            failure = try allocator.dupe(u8, value);
-        }
-    }
-    if (summary.len == 0 and failure == null) failure = try allocator.dupe(u8, "Automation completed without an assistant response.");
-    const native = if (optionalString(parsed.value.object, "nativeSessionId")) |value| try allocator.dupe(u8, value) else null;
-    return .{ .allocator = allocator, .native_session = native, .summary = summary, .failure = failure };
-}
-
-fn messageText(allocator: std.mem.Allocator, content: ?std.json.Value) ![]u8 {
-    const value = content orelse return allocator.dupe(u8, "");
-    if (value == .string) return allocator.dupe(u8, value.string);
-    if (value != .array) return allocator.dupe(u8, "");
-    var output: Io.Writer.Allocating = .init(allocator);
-    errdefer output.deinit();
-    for (value.array.items) |block| {
-        if (block != .object or !std.mem.eql(u8, optionalString(block.object, "type") orelse "", "text")) continue;
-        if (optionalString(block.object, "text")) |text| try output.writer.writeAll(text);
-    }
-    return output.toOwnedSlice();
 }
 
 fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, cwd: []const u8, native_session: ?[]const u8, project_id: ?[]const u8, summary: []const u8, failure: ?[]const u8) ![]u8 {
