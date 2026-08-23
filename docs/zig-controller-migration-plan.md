@@ -41,6 +41,7 @@ Completed foundation evidence:
 - Disconnecting an SSE client does not terminate the server.
 - SIGTERM while an SSE stream is active cancels the connection task and exits the controller with status zero.
 - Invalid and oversized request heads have explicit 400 and 431 response paths.
+- Connection tasks are capped at 256; a live 257th concurrent connection received 503 and capacity recovered after the held connections closed.
 - The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
 - A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
 - The SQLite wrapper owns prepared statements, typed bindings and columns, reset/finalize, multi-statement scripts, change counts, extended errors, and rollback-safe migration transactions.

@@ -10,12 +10,29 @@ const Ownership = route_registry.Ownership;
 const Io = std.Io;
 const net = Io.net;
 const http = std.http;
+const max_connection_tasks = 256;
+
+const ConnectionLimiter = struct {
+    active: std.atomic.Value(usize) = .init(0),
+
+    fn acquire(limiter: *ConnectionLimiter) bool {
+        const previous = limiter.active.fetchAdd(1, .acq_rel);
+        if (previous < max_connection_tasks) return true;
+        _ = limiter.active.fetchSub(1, .acq_rel);
+        return false;
+    }
+
+    fn release(limiter: *ConnectionLimiter) void {
+        _ = limiter.active.fetchSub(1, .acq_rel);
+    }
+};
 
 pub const HttpServer = struct {
     io: Io,
     config: Config,
     listener: net.Server,
     client: http.Client,
+    connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
         const address = try net.IpAddress.parse(config.host, config.port);
@@ -40,15 +57,21 @@ pub const HttpServer = struct {
                 if (shutdown.isRequested()) return;
                 return failure;
             };
-            group.concurrent(server.io, serveConnection, .{ server.io, server.config.mode, &server.client, server.config.spike_upstream, server.config.spike_fallback_upstream, stream }) catch {
+            if (!server.connection_limiter.acquire()) {
+                rejectOverloadedConnection(server.io, &stream);
+                continue;
+            }
+            group.concurrent(server.io, serveConnection, .{ server.io, server.config.mode, &server.client, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+                server.connection_limiter.release();
                 stream.close(server.io);
             };
         }
     }
 };
 
-fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, stream: net.Stream) void {
+fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
+        connection_limiter.release();
         var connection = stream;
         connection.close(io);
     }
@@ -76,6 +99,13 @@ fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]
 fn writeProtocolError(writer: *Io.Writer, status: []const u8) void {
     writer.print("HTTP/1.1 {s}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", .{status}) catch return;
     writer.flush() catch return;
+}
+
+fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
+    defer stream.close(io);
+    var buffer: [256]u8 = undefined;
+    var writer = stream.writer(io, &buffer);
+    writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
 fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
