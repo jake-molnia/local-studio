@@ -19,6 +19,7 @@ pub const Config = struct {
     inference_port: u16,
     data_dir: []const u8,
     db_path: []const u8,
+    llm_instance_path: []const u8,
     models_dir: []const u8,
     api_key: ?[]const u8,
     spike_upstream: ?[]const u8,
@@ -56,6 +57,7 @@ pub const Config = struct {
             if (std.mem.eql(u8, configured, ":memory:")) configured else try absolutePath(allocator, cwd, configured)
         else
             try std.fs.path.join(allocator, &.{ data_dir, "controller.db" });
+        const llm_instance_path = try std.fs.path.join(allocator, &.{ data_dir, "instances", "llm.json" });
         const models_value = init.environ_map.get("LOCAL_STUDIO_MODELS_DIR") orelse "/models";
         const host = try allocator.dupe(u8, std.mem.trim(u8, host_value, " \t\r\n"));
         const inference_host = try allocator.dupe(u8, init.environ_map.get("LOCAL_STUDIO_INFERENCE_HOST") orelse "localhost");
@@ -73,6 +75,7 @@ pub const Config = struct {
             .inference_port = try parsePort(init.environ_map.get("LOCAL_STUDIO_INFERENCE_PORT") orelse "8000"),
             .data_dir = data_dir,
             .db_path = db_path,
+            .llm_instance_path = llm_instance_path,
             .models_dir = models_dir,
             .api_key = api_key,
             .spike_upstream = spike_upstream,

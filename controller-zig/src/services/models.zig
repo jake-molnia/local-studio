@@ -1,23 +1,28 @@
 const std = @import("std");
+const instances = @import("../repository/instances.zig");
 const recipes = @import("../repository/recipes.zig");
 const sqlite = @import("../repository/sqlite.zig");
+const processes = @import("processes.zig");
 
 const vision_patterns = [_][]const u8{
     "mimo-v2.5", "mimo-v2-5", "step-3.7", "step-3_7", "step-3-7", "nex-n2", "gemma-4", "gemma4", "llava", "internvl", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "qwen-omni", "pixtral", "minicpm-v", "molmo", "phi-3.5-v", "phi-3-vision", "phi-4-mm", "phi-4-multimodal", "llama-3.2-vision", "llama-4", "deepseek-vl", "idefics", "ovis", "moondream", "fuyu", "kosmos", "-vl-", "-vlm", "vision", "multimodal", "-mm-",
 };
 
-pub fn localCatalogPayload(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn) ![]u8 {
-    try database.lock(io);
-    defer database.unlock(io);
-    var documents = try recipes.list(allocator, database, column);
+pub fn localCatalogPayload(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn, llm_instance_path: []const u8) ![]u8 {
+    var documents = documents: {
+        try database.lock(io);
+        defer database.unlock(io);
+        break :documents try recipes.list(allocator, database, column);
+    };
     defer documents.deinit();
+    const active_index = activeRecipeIndex(allocator, io, documents.items(), llm_instance_path);
 
     const created = @max(std.Io.Clock.real.now(io).toSeconds(), 0);
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"object\":\"list\",\"data\":[");
     var count: usize = 0;
-    for (documents.items()) |document| {
+    for (documents.items(), 0..) |document, index| {
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
         defer parsed.deinit();
         if (parsed.value != .object) continue;
@@ -31,12 +36,62 @@ pub fn localCatalogPayload(allocator: std.mem.Allocator, io: std.Io, database: *
         count += 1;
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(model_id, .{}, &output.writer);
-        try output.writer.print(",\"object\":\"model\",\"created\":{d},\"owned_by\":\"local-studio\",\"active\":false,\"max_model_len\":{d},\"metadata\":", .{ created, maxModelLength(parsed.value.object) });
+        try output.writer.print(",\"object\":\"model\",\"created\":{d},\"owned_by\":\"local-studio\",\"active\":{},\"max_model_len\":{d},\"metadata\":", .{ created, active_index != null and active_index.? == index, maxModelLength(parsed.value.object) });
         try writeMetadata(&output.writer, parsed.value.object, model_id, id_value.string, name_value.string, path_value.string);
         try output.writer.writeByte('}');
     }
     try output.writer.writeAll("]}");
     return try output.toOwnedSlice();
+}
+
+fn activeRecipeIndex(allocator: std.mem.Allocator, io: std.Io, documents: []const []const u8, llm_instance_path: []const u8) ?usize {
+    var record = (instances.readLlm(allocator, io, llm_instance_path) catch return null) orelse return null;
+    defer record.deinit();
+    if (!processes.owns(allocator, io, &record)) return null;
+
+    for (documents) |current_document| {
+        var current = std.json.parseFromSlice(std.json.Value, allocator, current_document, .{}) catch continue;
+        defer current.deinit();
+        if (current.value != .object) continue;
+        const current_id = current.value.object.get("id") orelse continue;
+        if (current_id != .string or !std.mem.eql(u8, current_id.string, record.recipe_id)) continue;
+        const current_path = current.value.object.get("model_path") orelse return null;
+        if (current_path != .string) return null;
+        const current_served_name = servedModelName(current.value.object);
+        var best_index: ?usize = null;
+        var best_rank: u8 = 0;
+        for (documents, 0..) |candidate_document, index| {
+            var candidate = std.json.parseFromSlice(std.json.Value, allocator, candidate_document, .{}) catch continue;
+            defer candidate.deinit();
+            if (candidate.value != .object) continue;
+            const candidate_path = candidate.value.object.get("model_path") orelse continue;
+            if (candidate_path != .string) continue;
+            const rank = recipeMatchRank(servedModelName(candidate.value.object), candidate_path.string, current_served_name, current_path.string);
+            if (rank > best_rank) {
+                best_index = index;
+                best_rank = rank;
+            }
+        }
+        return best_index;
+    }
+    return null;
+}
+
+fn recipeMatchRank(candidate_name: ?[]const u8, candidate_path_value: []const u8, current_name: ?[]const u8, current_path_value: []const u8) u8 {
+    if (candidate_name != null and current_name != null and std.ascii.eqlIgnoreCase(candidate_name.?, current_name.?)) return 4;
+    const candidate_path = std.mem.trimEnd(u8, candidate_path_value, "/");
+    const current_path = std.mem.trimEnd(u8, current_path_value, "/");
+    if (std.mem.eql(u8, candidate_path, current_path)) return 3;
+    if (pathPrefix(candidate_path, current_path) or pathPrefix(current_path, candidate_path)) return 2;
+    if (std.mem.indexOfScalar(u8, candidate_path, '/') == null or std.mem.indexOfScalar(u8, current_path, '/') == null) {
+        if (std.mem.eql(u8, std.fs.path.basename(candidate_path), std.fs.path.basename(current_path))) return 1;
+    }
+    return 0;
+}
+
+fn pathPrefix(ancestor: []const u8, descendant: []const u8) bool {
+    if (std.mem.eql(u8, ancestor, descendant)) return true;
+    return descendant.len > ancestor.len and std.mem.startsWith(u8, descendant, ancestor) and descendant[ancestor.len] == '/';
 }
 
 fn servedModelName(object: std.json.ObjectMap) ?[]const u8 {
