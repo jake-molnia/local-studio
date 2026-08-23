@@ -44,6 +44,7 @@ Completed foundation evidence:
 - Connection tasks are capped at 256; a live 257th concurrent connection received 503 and capacity recovered after the held connections closed.
 - Route disposition is explicit for every mode: Head handles shared and Head routes locally, proxies proxied routes, and rejects Worker routes; Worker handles shared, Worker, and proxied routes locally while rejecting Head routes; Standalone handles every route locally.
 - Head proxy disposition rejects federation loops, requires a selected Worker, and returns the existing not-found response until the production Worker registry is connected.
+- Application-owned platform discovery captures hostname, operating system, CPU topology, total memory, and Apple Silicon identity behind a Zig boundary shared by Worker and Standalone modes.
 - The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
 - A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
 - The SQLite wrapper owns prepared statements, typed bindings and columns, reset/finalize, multi-statement scripts, change counts, extended errors, and rollback-safe migration transactions.
