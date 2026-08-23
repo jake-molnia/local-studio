@@ -6,6 +6,7 @@ const rig_node_credentials = @import("repository/rig_node_credentials.zig");
 const rigs = @import("repository/rigs.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
+const workers = @import("services/workers.zig");
 
 const Io = std.Io;
 
@@ -14,6 +15,7 @@ pub const App = struct {
     config: config_module.Config,
     database: sqlite.Database,
     system: system_info.Snapshot,
+    worker_pool: workers.Pool,
     shutdown: shutdown_module.Shutdown,
     server: http_server.HttpServer,
 
@@ -31,12 +33,15 @@ pub const App = struct {
 
         var shutdown = try shutdown_module.Shutdown.init();
         errdefer shutdown.deinit();
+        var worker_pool = workers.Pool.init(allocator);
+        errdefer worker_pool.deinit();
         const server = try http_server.HttpServer.init(allocator, io, config);
         return .{
             .io = io,
             .config = config,
             .database = database,
             .system = system,
+            .worker_pool = worker_pool,
             .shutdown = shutdown,
             .server = server,
         };
@@ -46,13 +51,14 @@ pub const App = struct {
         app.server.deinit();
         app.shutdown.deinit();
         app.system.deinit();
+        app.worker_pool.deinit();
         app.database.deinit();
         app.config.deinit();
         app.* = undefined;
     }
 
     pub fn run(app: *App) !void {
-        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, &app.system, &app.shutdown });
+        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, &app.system, &app.worker_pool, &app.shutdown });
         defer server_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
@@ -62,8 +68,8 @@ pub const App = struct {
     }
 };
 
-fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
-    server.run(database, system) catch |failure| switch (failure) {
+fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *workers.Pool, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
+    server.run(database, system, worker_pool) catch |failure| switch (failure) {
         error.Canceled => return error.Canceled,
         else => std.log.err("controller server stopped: {t}", .{failure}),
     };

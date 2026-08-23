@@ -9,6 +9,66 @@ const Io = std.Io;
 const probe_timeout = Io.Duration.fromSeconds(3);
 const max_parallel_probes = 16;
 const max_probe_response_bytes = 4 * 1024 * 1024;
+const max_inference_requests = 16;
+
+pub const Pool = struct {
+    allocator: std.mem.Allocator,
+    mutex: Io.Mutex = .init,
+    active_streams: std.StringHashMap(usize),
+    inference_requests: std.atomic.Value(usize) = .init(0),
+
+    pub fn init(allocator: std.mem.Allocator) Pool {
+        return .{ .allocator = allocator, .active_streams = .init(allocator) };
+    }
+
+    pub fn deinit(pool: *Pool) void {
+        var iterator = pool.active_streams.keyIterator();
+        while (iterator.next()) |key| pool.allocator.free(key.*);
+        pool.active_streams.deinit();
+        pool.* = undefined;
+    }
+
+    pub fn acquire(pool: *Pool, io: Io, worker_id: []const u8) !void {
+        try pool.mutex.lock(io);
+        defer pool.mutex.unlock(io);
+        if (pool.active_streams.getPtr(worker_id)) |count_ptr| {
+            count_ptr.* += 1;
+            return;
+        }
+        const owned_id = try pool.allocator.dupe(u8, worker_id);
+        errdefer pool.allocator.free(owned_id);
+        try pool.active_streams.put(owned_id, 1);
+    }
+
+    pub fn release(pool: *Pool, io: Io, worker_id: []const u8) void {
+        pool.mutex.lockUncancelable(io);
+        defer pool.mutex.unlock(io);
+        const count_ptr = pool.active_streams.getPtr(worker_id) orelse return;
+        if (count_ptr.* > 1) {
+            count_ptr.* -= 1;
+            return;
+        }
+        const removed = pool.active_streams.fetchRemove(worker_id) orelse return;
+        pool.allocator.free(removed.key);
+    }
+
+    pub fn tryAcquireInference(pool: *Pool) bool {
+        const previous = pool.inference_requests.fetchAdd(1, .acq_rel);
+        if (previous < max_inference_requests) return true;
+        _ = pool.inference_requests.fetchSub(1, .acq_rel);
+        return false;
+    }
+
+    pub fn releaseInference(pool: *Pool) void {
+        _ = pool.inference_requests.fetchSub(1, .acq_rel);
+    }
+
+    fn activeCount(pool: *Pool, io: Io, worker_id: []const u8) !usize {
+        try pool.mutex.lock(io);
+        defer pool.mutex.unlock(io);
+        return pool.active_streams.get(worker_id) orelse 0;
+    }
+};
 
 pub const Target = struct {
     allocator: std.mem.Allocator,
@@ -33,13 +93,6 @@ const TargetList = struct {
 
     fn items(targets: *TargetList) []Target {
         return targets.storage[0..targets.len];
-    }
-
-    fn take(targets: *TargetList, index: usize) Target {
-        const target = targets.storage[index];
-        std.mem.copyForwards(Target, targets.storage[index .. targets.len - 1], targets.storage[index + 1 .. targets.len]);
-        targets.len -= 1;
-        return target;
     }
 
     fn deinit(targets: *TargetList) void {
@@ -99,7 +152,7 @@ const FetchResponse = struct {
     }
 };
 
-pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database) ![]u8 {
+pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, pool: *Pool) ![]u8 {
     var targets = loadTargets(allocator, io, database) catch |failure| {
         std.log.warn("could not load Worker configuration: {t}", .{failure});
         return try emptyPayload(allocator, mode);
@@ -120,7 +173,7 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
         try std.json.Stringify.value(target.name, .{}, &output.writer);
         try output.writer.writeAll(",\"address\":");
         try std.json.Stringify.value(target.address, .{}, &output.writer);
-        try output.writer.print(",\"healthy\":{},\"active_streams\":0,\"models\":", .{result.healthy});
+        try output.writer.print(",\"healthy\":{},\"active_streams\":{d},\"models\":", .{ result.healthy, try pool.activeCount(io, target.id) });
         try output.writer.writeAll(result.models orelse "[]");
         try output.writer.writeAll(",\"hardware\":");
         try output.writer.writeAll(result.hardware orelse "null");
@@ -171,10 +224,30 @@ pub fn modelCatalogPayload(allocator: std.mem.Allocator, io: Io, client: *http.C
 pub fn findTarget(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, worker_id: []const u8) !?Target {
     var targets = try loadTargets(allocator, io, database);
     defer targets.deinit();
-    for (targets.items(), 0..) |target, index| {
-        if (std.mem.eql(u8, target.id, worker_id)) return targets.take(index);
+    for (targets.items()) |target| {
+        if (std.mem.eql(u8, target.id, worker_id)) return try cloneTarget(allocator, target);
     }
     return null;
+}
+
+pub fn selectServing(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, pool: *Pool, model_id: []const u8, excluded_worker_id: ?[]const u8) !?Target {
+    var targets = try loadTargets(allocator, io, database);
+    defer targets.deinit();
+    var results = try probeTargets(allocator, io, client, targets.items(), false);
+    defer results.deinit();
+    var selected_index: ?usize = null;
+    var selected_count: usize = 0;
+    for (targets.items(), results.storage, 0..) |target, result, index| {
+        if (!result.healthy) continue;
+        if (excluded_worker_id) |excluded| if (std.mem.eql(u8, target.id, excluded)) continue;
+        if (!modelIsActive(allocator, result.models orelse continue, model_id)) continue;
+        const active_count = try pool.activeCount(io, target.id);
+        if (selected_index == null or active_count < selected_count or (active_count == selected_count and std.mem.lessThan(u8, target.name, targets.items()[selected_index.?].name))) {
+            selected_index = index;
+            selected_count = active_count;
+        }
+    }
+    return if (selected_index) |index| try cloneTarget(allocator, targets.items()[index]) else null;
 }
 
 fn emptyPayload(allocator: std.mem.Allocator, mode: config.Mode) ![]u8 {
@@ -257,6 +330,22 @@ fn makeTarget(allocator: std.mem.Allocator, database: *sqlite.Database, id: []co
         .name = owned_name,
         .address = normalized_address,
         .api_key = api_key,
+    };
+}
+
+fn cloneTarget(allocator: std.mem.Allocator, target: Target) !Target {
+    const id = try allocator.dupe(u8, target.id);
+    errdefer allocator.free(id);
+    const name = try allocator.dupe(u8, target.name);
+    errdefer allocator.free(name);
+    const address = try allocator.dupe(u8, target.address);
+    errdefer allocator.free(address);
+    return .{
+        .allocator = allocator,
+        .id = id,
+        .name = name,
+        .address = address,
+        .api_key = try allocator.dupe(u8, target.api_key),
     };
 }
 
@@ -388,6 +477,19 @@ fn modelArray(allocator: std.mem.Allocator, body: []const u8) ![]u8 {
     if (data != .array) return error.InvalidWorkerModelData;
     for (data.array.items) |model| try validateModel(model);
     return try serializeValue(allocator, data);
+}
+
+fn modelIsActive(allocator: std.mem.Allocator, document: []const u8, model_id: []const u8) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .array) return false;
+    for (parsed.value.array.items) |model| {
+        if (model != .object) continue;
+        const id = model.object.get("id") orelse continue;
+        const active = model.object.get("active") orelse continue;
+        if (id == .string and active == .bool and active.bool and std.mem.eql(u8, id.string, model_id)) return true;
+    }
+    return false;
 }
 
 fn addModels(allocator: std.mem.Allocator, models: *std.ArrayList(ModelEntry), indexes: *std.StringHashMap(usize), document: []const u8) !void {

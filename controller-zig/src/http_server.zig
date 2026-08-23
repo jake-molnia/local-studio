@@ -15,6 +15,7 @@ const Io = std.Io;
 const net = Io.net;
 const http = std.http;
 const max_connection_tasks = 256;
+const max_chat_request_bytes = 16 * 1024 * 1024;
 
 const ConnectionLimiter = struct {
     active: std.atomic.Value(usize) = .init(0),
@@ -55,7 +56,7 @@ pub const HttpServer = struct {
         server.client.deinit();
     }
 
-    pub fn run(server: *HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot) !void {
+    pub fn run(server: *HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool) !void {
         var group: Io.Group = .init;
         defer group.cancel(server.io);
         while (!shutdown.isRequested()) {
@@ -67,7 +68,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, system, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -75,7 +76,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -97,7 +98,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *ht
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, client, database, system, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, client, database, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -114,7 +115,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
@@ -152,7 +153,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/workers")) {
-        const response = try worker_service.payload(allocator, io, mode, client, database);
+        const response = try worker_service.payload(allocator, io, mode, client, database, worker_pool);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -166,6 +167,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
+    }
+    if (mode == .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
+        return try serveHeadChat(allocator, io, client, database, worker_pool, request);
     }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
@@ -186,6 +190,106 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
 
     try request.respond("{\"detail\":\"Route is not implemented by the Zig migration slice\"}", .{
         .status = .not_implemented,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+    return request.head.keep_alive;
+}
+
+fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, worker_pool: *worker_service.Pool, request: *http.Server.Request) !bool {
+    if (!worker_pool.tryAcquireInference()) {
+        try request.respond("{\"detail\":\"Inference request capacity is exhausted\"}", .{
+            .status = .service_unavailable,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    }
+    defer worker_pool.releaseInference();
+    var captured = try reverse_proxy.captureRequest(allocator, request);
+    defer captured.deinit();
+    const storage = try allocator.alloc(u8, max_chat_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const body = body_writer.buffered();
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch {
+        try request.respond("{\"detail\":\"Invalid JSON body\"}", .{
+            .status = .bad_request,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    };
+    defer parsed.deinit();
+    if (parsed.value != .object) return try respondModelRequired(request);
+    const model_value = parsed.value.object.get("model") orelse return try respondModelRequired(request);
+    if (model_value != .string) return try respondModelRequired(request);
+    const model_id = std.mem.trim(u8, model_value.string, " \t\r\n");
+    if (model_id.len == 0) return try respondModelRequired(request);
+
+    var worker = worker_service.selectServing(allocator, io, client, database, worker_pool, model_id, null) catch null orelse {
+        return try respondModelNotRunning(allocator, request, model_id);
+    };
+    defer worker.deinit();
+    try worker_pool.acquire(io, worker.id);
+    reverse_proxy.serveWorkerBuffered(allocator, client, worker.address, worker.api_key, worker.id, body, &captured, request) catch |failure| {
+        worker_pool.release(io, worker.id);
+        if (failure == error.WorkerStreamFailedAfterCommitment) return false;
+        var alternate = worker_service.selectServing(allocator, io, client, database, worker_pool, model_id, worker.id) catch null orelse {
+            try request.respond("{\"detail\":\"Worker is unavailable\"}", .{
+                .status = .bad_gateway,
+                .keep_alive = false,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return false;
+        };
+        defer alternate.deinit();
+        try worker_pool.acquire(io, alternate.id);
+        reverse_proxy.serveWorkerBuffered(allocator, client, alternate.address, alternate.api_key, alternate.id, body, &captured, request) catch |retry_failure| {
+            worker_pool.release(io, alternate.id);
+            if (retry_failure == error.WorkerStreamFailedAfterCommitment) return false;
+            try request.respond("{\"detail\":\"Worker is unavailable\"}", .{
+                .status = .bad_gateway,
+                .keep_alive = false,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return false;
+        };
+        worker_pool.release(io, alternate.id);
+        return false;
+    };
+    worker_pool.release(io, worker.id);
+    return false;
+}
+
+fn respondModelRequired(request: *http.Server.Request) !bool {
+    try request.respond("{\"detail\":\"model is required\"}", .{
+        .status = .bad_request,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+    return request.head.keep_alive;
+}
+
+fn respondModelNotRunning(allocator: std.mem.Allocator, request: *http.Server.Request, model_id: []const u8) !bool {
+    const message = try std.fmt.allocPrint(allocator, "No model is running. Launch {s} from the frontend before sending requests.", .{model_id});
+    defer allocator.free(message);
+    var output: Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    try output.writer.writeAll("{\"error\":{\"message\":");
+    try std.json.Stringify.value(message, .{}, &output.writer);
+    try output.writer.writeAll(",\"type\":\"model_not_running\",\"code\":\"model_not_running\"},\"detail\":");
+    try std.json.Stringify.value(message, .{}, &output.writer);
+    try output.writer.writeByte('}');
+    try request.respond(output.writer.buffered(), .{
+        .status = .service_unavailable,
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
     return request.head.keep_alive;

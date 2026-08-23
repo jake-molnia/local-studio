@@ -57,6 +57,8 @@ Completed foundation evidence:
 - Head `GET /studio/workers` probes model and hardware contracts in parallel with a 16-Worker concurrency ceiling, a three-second deadline per request, and a 4 MiB response limit. Live acceptance covered an authenticated healthy Worker, a hanging Worker, duplicate IDs, concurrent rig reads, secret non-disclosure, and clean shutdown.
 - Head forwards selected-Worker management requests with streaming bodies and responses, replaces client credentials with the stored Worker key, adds the federation-hop marker, and returns the selected Worker response header. Live acceptance covered exact query forwarding, a 2 MiB request body, SSE, spoofed-header replacement, credential isolation, and unavailable-Worker behavior.
 - Head `GET /v1/models` aggregates healthy Worker catalogs, sorts model IDs, preserves first-seen unknown fields, and merges duplicate availability and context length. Live two-Worker acceptance verified deterministic merging and immediate removal of an unavailable Worker's models.
+- Head Chat Completions validates and bounds retryable bodies, selects the least-active healthy Worker serving the requested model, tracks active streams, and retries one alternate only before response commitment. Live overlapping requests selected different Workers, released both counts, preserved request bodies, returned the selected-Worker header, and recovered from a primary connection closed before headers.
+- Head inference admission is capped at 16 concurrent requests with a 16 MiB buffered-body ceiling. Missing, invalid, and non-running model requests preserve the existing 400 and `model_not_running` 503 responses.
 - Shared SQLite web access is serialized with a cancellation-aware mutex, while statement and transaction lifetime counters are atomic.
 - The compatibility route registry is mechanically generated from all 94 unique manifest routes and matches exact paths and named path segments.
 - The reverse-proxy spike forwards methods, paths, queries, end-to-end headers, and request bodies while removing framing and hop-by-hop headers in both directions.
@@ -67,7 +69,7 @@ Completed foundation evidence:
 - An upstream that failed after response headers were flushed did not retry, returned a truncated response, and left the controller healthy.
 - SIGTERM during an active proxy stream canceled the work and exited the controller with status zero.
 
-The migration is not production-ready. Inference routing, full SQLite table parity, runtime process supervision, desktop cutover, and shutdown with child processes still require live proof.
+The migration is not production-ready. Responses and Messages routing, inference usage accounting, full SQLite table parity, runtime process supervision, desktop cutover, and shutdown with child processes still require live proof.
 
 ## Compatibility ledger
 

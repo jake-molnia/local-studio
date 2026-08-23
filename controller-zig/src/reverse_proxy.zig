@@ -8,6 +8,47 @@ const Forwarding = struct {
     worker_id: ?[]const u8 = null,
 };
 
+pub const CapturedRequest = struct {
+    allocator: std.mem.Allocator,
+    target: []u8,
+    headers: []http.Header,
+
+    pub fn deinit(captured: *CapturedRequest) void {
+        captured.allocator.free(captured.target);
+        for (captured.headers) |header| {
+            captured.allocator.free(header.name);
+            captured.allocator.free(header.value);
+        }
+        captured.allocator.free(captured.headers);
+        captured.* = undefined;
+    }
+};
+
+pub fn captureRequest(allocator: std.mem.Allocator, request: *const http.Server.Request) !CapturedRequest {
+    const target = try allocator.dupe(u8, request.head.target);
+    errdefer allocator.free(target);
+    var collected: [64]http.Header = undefined;
+    const count = try collectRequestHeaders(request, &collected, .{});
+    const headers = try allocator.alloc(http.Header, count);
+    errdefer allocator.free(headers);
+    var initialized: usize = 0;
+    errdefer for (headers[0..initialized]) |header| {
+        allocator.free(header.name);
+        allocator.free(header.value);
+    };
+    for (collected[0..count], headers) |header, *owned| {
+        owned.* = try cloneHeader(allocator, header);
+        initialized += 1;
+    }
+    return .{ .allocator = allocator, .target = target, .headers = headers };
+}
+
+fn cloneHeader(allocator: std.mem.Allocator, header: http.Header) !http.Header {
+    const name = try allocator.dupe(u8, header.name);
+    errdefer allocator.free(name);
+    return .{ .name = name, .value = try allocator.dupe(u8, header.value) };
+}
+
 pub const ResponseCommitment = enum {
     pending,
     committed,
@@ -30,10 +71,10 @@ const RequestBodyState = enum {
 pub fn serve(client: *http.Client, primary: []const u8, fallback: ?[]const u8, request: *http.Server.Request) !void {
     var commitment: ResponseCommitment = .pending;
     var request_body_state: RequestBodyState = .untouched;
-    proxyAttempt(client, primary, request, &commitment, &request_body_state, .{}) catch |primary_failure| {
+    proxyAttempt(client, primary, request, &commitment, &request_body_state, .{}, null, null) catch |primary_failure| {
         if (request_body_state == .streaming) return primary_failure;
         if (!request.head.method.requestHasBody() and fallback != null and commitment.canRetry()) {
-            proxyAttempt(client, fallback.?, request, &commitment, &request_body_state, .{}) catch |fallback_failure| {
+            proxyAttempt(client, fallback.?, request, &commitment, &request_body_state, .{}, null, null) catch |fallback_failure| {
                 if (!commitment.canRetry()) return fallback_failure;
                 try respondBadGateway(request);
             };
@@ -60,16 +101,40 @@ pub fn serveWorker(allocator: std.mem.Allocator, client: *http.Client, upstream:
         .extra_request_headers = headers[0..header_count],
         .strip_credentials = true,
         .worker_id = worker_id,
-    }) catch |failure| {
+    }, null, null) catch |failure| {
         if (!commitment.canRetry()) return failure;
         try respondBadGateway(request);
     };
 }
 
-fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding) !void {
-    const uri = try uriForTarget(upstream, request.head.target);
+pub fn serveWorkerBuffered(allocator: std.mem.Allocator, client: *http.Client, upstream: []const u8, api_key: []const u8, worker_id: []const u8, payload: []const u8, captured: *const CapturedRequest, request: *http.Server.Request) !void {
+    const authorization = if (api_key.len > 0) try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_key}) else null;
+    defer if (authorization) |value| allocator.free(value);
+    var headers: [2]http.Header = undefined;
+    headers[0] = .{ .name = "X-Local-Studio-Federation-Hop", .value = "head" };
+    var header_count: usize = 1;
+    if (authorization) |value| {
+        headers[1] = .{ .name = "Authorization", .value = value };
+        header_count += 1;
+    }
+    var commitment: ResponseCommitment = .pending;
+    var request_body_state: RequestBodyState = .untouched;
+    proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
+        .extra_request_headers = headers[0..header_count],
+        .strip_credentials = true,
+        .worker_id = worker_id,
+    }, payload, captured) catch {
+        return if (commitment.canRetry()) error.WorkerUnavailableBeforeCommitment else error.WorkerStreamFailedAfterCommitment;
+    };
+}
+
+fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding, buffered_body: ?[]const u8, captured: ?*const CapturedRequest) !void {
+    const uri = try uriForTarget(upstream, if (captured) |metadata| metadata.target else request.head.target);
     var request_headers: [64]http.Header = undefined;
-    const request_header_count = try collectRequestHeaders(request, &request_headers, forwarding);
+    const request_header_count = if (captured) |metadata|
+        try collectCapturedHeaders(metadata, &request_headers, forwarding)
+    else
+        try collectRequestHeaders(request, &request_headers, forwarding);
     var upstream_request = try client.request(request.head.method, uri, .{
         .redirect_behavior = .unhandled,
         .keep_alive = false,
@@ -85,13 +150,17 @@ fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Serve
     defer upstream_request.deinit();
 
     if (request.head.method.requestHasBody()) {
-        upstream_request.transfer_encoding = if (request.head.content_length) |length| .{ .content_length = length } else .chunked;
+        upstream_request.transfer_encoding = if (buffered_body) |body| .{ .content_length = body.len } else if (request.head.content_length) |length| .{ .content_length = length } else .chunked;
         var request_write_buffer: [16 * 1024]u8 = undefined;
         var upstream_body = try upstream_request.sendBody(&request_write_buffer);
-        var request_read_buffer: [16 * 1024]u8 = undefined;
-        request_body_state.* = .streaming;
-        const downstream_body = try request.readerExpectContinue(&request_read_buffer);
-        _ = try downstream_body.streamRemaining(&upstream_body.writer);
+        if (buffered_body) |body| {
+            try upstream_body.writer.writeAll(body);
+        } else {
+            var request_read_buffer: [16 * 1024]u8 = undefined;
+            request_body_state.* = .streaming;
+            const downstream_body = try request.readerExpectContinue(&request_read_buffer);
+            _ = try downstream_body.streamRemaining(&upstream_body.writer);
+        }
         try upstream_body.end();
         request_body_state.* = .complete;
     } else {
@@ -122,6 +191,23 @@ fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Serve
         if (bytes_forwarded != content_length) return error.UpstreamBodyTruncated;
     }
     try downstream_response.end();
+}
+
+fn collectCapturedHeaders(captured: *const CapturedRequest, output: *[64]http.Header, forwarding: Forwarding) !usize {
+    var count: usize = 0;
+    for (captured.headers) |header| {
+        if (forwarding.strip_credentials and (std.ascii.eqlIgnoreCase(header.name, "authorization") or std.ascii.eqlIgnoreCase(header.name, "x-api-key"))) continue;
+        if (replacedByExtraHeader(header.name, forwarding.extra_request_headers)) continue;
+        if (count == output.len) return error.TooManyForwardedHeaders;
+        output[count] = header;
+        count += 1;
+    }
+    for (forwarding.extra_request_headers) |header| {
+        if (count == output.len) return error.TooManyForwardedHeaders;
+        output[count] = header;
+        count += 1;
+    }
+    return count;
 }
 
 fn uriForTarget(upstream: []const u8, target: []const u8) !std.Uri {
