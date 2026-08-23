@@ -28,6 +28,8 @@ const huggingface_models = @import("services/huggingface_models.zig");
 const download_manager = @import("services/download_manager.zig");
 const provider_service = @import("services/providers.zig");
 const provider_catalog = @import("services/provider_catalog.zig");
+const compute_plan = @import("services/compute_plan.zig");
+const compute_lifecycle = @import("services/compute_lifecycle.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const downloads = @import("repository/downloads.zig");
@@ -69,12 +71,15 @@ pub const HttpServer = struct {
     model_index_cache: model_index.Cache,
     runtime_jobs: runtime_jobs_service.State,
     downloads: download_manager.State,
+    compute: compute_lifecycle.Manager,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
         const address = try net.IpAddress.parse(config.host, config.port);
         var studio = try studio_settings.State.init(allocator, config.models_dir);
         errdefer studio.deinit();
+        var compute = try compute_lifecycle.Manager.init(allocator, io, config.data_dir);
+        errdefer compute.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -85,11 +90,13 @@ pub const HttpServer = struct {
             .model_index_cache = model_index.Cache.init(allocator, io),
             .runtime_jobs = runtime_jobs_service.State.init(allocator, io),
             .downloads = download_manager.State.init(allocator, io),
+            .compute = compute,
         };
     }
 
     pub fn deinit(server: *HttpServer) void {
         server.listener.deinit(server.io);
+        server.compute.deinit();
         server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
@@ -100,6 +107,7 @@ pub const HttpServer = struct {
     pub fn run(server: *HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) !void {
         var group: Io.Group = .init;
         defer group.cancel(server.io);
+        if (server.config.mode != .head) try group.concurrent(server.io, runComputeSupervisor, .{&server.compute});
         while (!shutdown.isRequested()) {
             var stream = server.listener.accept(server.io) catch |failure| {
                 if (shutdown.isRequested()) return;
@@ -109,7 +117,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -117,7 +125,11 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void {
+    return manager.run();
+}
+
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -139,7 +151,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -156,7 +168,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -697,22 +709,28 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return false;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances") and request.head.method == .GET) {
-        const response = try supervisor.instancesPayload(client);
+        const response = try compute.instancesPayload(client);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
-    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/stop")) {
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/launch") and request.head.method == .POST) {
+        return serveComputeLaunch(allocator, configuration, system, compute, client, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/stop") and request.head.method == .POST) {
         const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/stop");
         defer allocator.free(name);
-        const stopped = supervisor.stopNamed(name) catch |failure| return try respondLifecycleFailure(request, failure);
+        const stopped = if (std.mem.eql(u8, name, "llm")) stopped: {
+            _ = try compute.cancelActive(name);
+            break :stopped supervisor.stopNamed(name) catch |failure| return try respondLifecycleFailure(request, failure);
+        } else try compute.stop(name);
         try request.respond(if (stopped) "{\"stopped\":true}" else "{\"stopped\":false}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
-    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/cancel")) {
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/cancel") and request.head.method == .POST) {
         const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/cancel");
         defer allocator.free(name);
-        const cancelled = try supervisor.cancelNamed(name);
+        const cancelled = if (try compute.cancelActive(name)) true else if (std.mem.eql(u8, name, "llm")) try supervisor.cancelNamed(name) else try compute.cancel(name);
         try request.respond(if (cancelled) "{\"cancelled\":true}" else "{\"cancelled\":false}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
@@ -782,6 +800,51 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
 }
 
 const DownloadControl = enum { pause, @"resume", cancel };
+
+fn serveComputeLaunch(allocator: std.mem.Allocator, configuration: *const Config, system: *const system_info.Snapshot, compute: *compute_lifecycle.Manager, client: *http.Client, request: *http.Server.Request) !bool {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_buffer: [16 * 1024]u8 = undefined;
+    const reader = try request.readerExpectContinue(&request_buffer);
+    _ = reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"unreadable launch request\"}", .{ .status = .bad_request, .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return false;
+    };
+    var parsed = compute_plan.parse(allocator, body_writer.buffered()) catch |failure| {
+        const detail: []const u8 = if (failure == error.ForbiddenEngineArgument) "invalid launch request: forbidden engine argument" else "invalid launch request";
+        return respondDownloadError(request, .bad_request, detail);
+    };
+    defer parsed.deinit();
+    const response = compute.launchPayload(client, configuration, system, &parsed) catch |failure| return respondComputeFailure(request, failure, &parsed);
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn respondComputeFailure(request: *http.Server.Request, failure: anyerror, launch: *const compute_plan.Request) !bool {
+    const status: http.Status = switch (failure) {
+        error.UnsupportedEngine, error.DockerRuntimeNotImplemented => .unprocessable_entity,
+        error.AlreadyRunning, error.NoCapacity => .conflict,
+        error.LaunchCancelled => .bad_request,
+        error.TooManyActiveLaunches => .service_unavailable,
+        else => .service_unavailable,
+    };
+    var buffer: [4096]u8 = undefined;
+    var output: Io.Writer = .fixed(&buffer);
+    switch (failure) {
+        error.UnsupportedEngine => try output.print("{s} cannot run here: unsupported on this host", .{launch.engine}),
+        error.DockerRuntimeNotImplemented => try output.print("{s} cannot run here: runtime \"docker\" not available", .{launch.engine}),
+        error.AlreadyRunning => if (launch.name.len <= 1024) try output.print("{s} is already running", .{launch.name}) else try output.writeAll("instance is already running"),
+        error.NoCapacity => try output.print("needs {d} device(s); not enough free", .{launch.device_count}),
+        error.LaunchCancelled => try output.writeAll("launch cancelled"),
+        error.ReadinessTimeout => try output.writeAll("not healthy before the readiness deadline"),
+        error.ProcessExitedEarly => try output.writeAll("process exited before becoming healthy"),
+        error.TooManyActiveLaunches => try output.writeAll("too many active launches"),
+        else => try output.writeAll(@errorName(failure)),
+    }
+    return respondDownloadError(request, status, output.buffered());
+}
 
 fn serveDownloadStart(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, state: *download_manager.State, client: *http.Client, database: *sqlite.Database, request: *http.Server.Request) !bool {
     const header_token = try capturedDownloadTokenHeader(allocator, request);

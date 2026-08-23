@@ -91,7 +91,10 @@ pub const App = struct {
         };
         std.log.info("controller mode={t} node={s} listening on {s}:{d}", .{ app.config.mode, app.system.hostname, app.config.host, app.config.port });
         try app.shutdown.wait();
-        if (app.config.mode != .head) _ = app.supervisor.evict() catch |failure| std.log.err("engine shutdown failed: {t}", .{failure});
+        if (app.config.mode != .head) {
+            app.server.compute.evictAll() catch |failure| std.log.err("compute shutdown failed: {t}", .{failure});
+            _ = app.supervisor.evict() catch |failure| std.log.err("engine shutdown failed: {t}", .{failure});
+        }
         std.log.info("controller shutdown complete", .{});
     }
 };
