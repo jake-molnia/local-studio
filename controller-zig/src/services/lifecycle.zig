@@ -1,4 +1,5 @@
 const std = @import("std");
+const config_module = @import("../config.zig");
 const instances = @import("../repository/instances.zig");
 const recipe_repository = @import("../repository/recipes.zig");
 const sqlite = @import("../repository/sqlite.zig");
@@ -32,10 +33,10 @@ pub const Supervisor = struct {
         supervisor.* = undefined;
     }
 
-    pub fn launch(supervisor: *Supervisor, client: *http.Client, database: *sqlite.Database, recipe_column: recipe_repository.PayloadColumn, recipe_id: []const u8, default_trust_remote_code: bool, base_environment: *const std.process.Environ.Map) !void {
-        const document = try recipes.detailPayload(supervisor.allocator, supervisor.io, database, recipe_column, recipe_id, default_trust_remote_code) orelse return error.RecipeNotFound;
+    pub fn launch(supervisor: *Supervisor, client: *http.Client, database: *sqlite.Database, recipe_column: recipe_repository.PayloadColumn, recipe_id: []const u8, configuration: *const config_module.Config) !void {
+        const document = try recipes.detailPayload(supervisor.allocator, supervisor.io, database, recipe_column, recipe_id, configuration.default_trust_remote_code) orelse return error.RecipeNotFound;
         defer supervisor.allocator.free(document);
-        var plan = try launch_plan.build(supervisor.allocator, document);
+        var plan = try launch_plan.build(supervisor.allocator, supervisor.io, document, configuration);
         defer plan.deinit();
 
         try supervisor.mutex.lock(supervisor.io);
@@ -67,7 +68,7 @@ pub const Supervisor = struct {
         var log_file = try std.Io.Dir.cwd().createFile(supervisor.io, log_path, .{ .permissions = @enumFromInt(0o600) });
         defer log_file.close(supervisor.io);
 
-        var environment = try base_environment.clone(supervisor.allocator);
+        var environment = try configuration.environment.clone(supervisor.allocator);
         defer environment.deinit();
         for (plan.environment) |entry| try environment.put(entry.key, entry.value);
         try environment.put("LOCAL_STUDIO_LAUNCH_NONCE", nonce);
@@ -94,6 +95,14 @@ pub const Supervisor = struct {
         defer if (reference.start_token) |token| supervisor.allocator.free(token);
         if (supervisor.cancel_requested.load(.acquire)) return error.LaunchCancelled;
         try instances.writeProcess(supervisor.io, supervisor.instance_path, plan.recipe_id, plan.backend, plan.port, nonce, reference, plan.ready_timeout_seconds);
+        var ownership_attempts: usize = 0;
+        while (ownership_attempts < 20) : (ownership_attempts += 1) {
+            const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return error.ProcessExitedEarly;
+            var record = record_value;
+            defer record.deinit();
+            if (processes.owns(supervisor.allocator, supervisor.io, &record)) break;
+            try supervisor.io.sleep(.fromMilliseconds(25), .awake);
+        } else return error.ProcessIdentityUnavailable;
 
         const reaper_nonce = try supervisor.allocator.dupe(u8, nonce);
         supervisor.children.concurrent(supervisor.io, reapChild, .{ supervisor, child, pid, reaper_nonce }) catch |failure| {

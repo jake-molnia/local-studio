@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const config_module = @import("../config.zig");
+const studio_settings = @import("../repository/studio_settings.zig");
 
 pub const EnvironmentEntry = struct {
     key: []const u8,
@@ -22,7 +24,7 @@ pub const Plan = struct {
     }
 };
 
-pub fn build(allocator: std.mem.Allocator, document: []const u8) !Plan {
+pub fn build(allocator: std.mem.Allocator, io: std.Io, document: []const u8, configuration: *const config_module.Config) !Plan {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
     const storage = try arena.allocator().dupe(u8, document);
@@ -41,10 +43,7 @@ pub fn build(allocator: std.mem.Allocator, document: []const u8) !Plan {
     if (std.mem.eql(u8, runtime_kind, "docker")) return error.DockerRuntimeNotImplemented;
     try validateHostSupport(backend);
 
-    const binary = if (std.mem.eql(u8, runtime_kind, "binary") or std.mem.eql(u8, runtime_kind, "system"))
-        runtime_ref
-    else
-        defaultBinary(backend) orelse return error.UnsupportedBackend;
+    const binary = try resolveEngineBinary(arena.allocator(), io, object, backend, runtime_kind, runtime_ref, configuration);
 
     var extra: std.ArrayList([]const u8) = .empty;
     var overridden: std.StringHashMapUnmanaged(void) = .empty;
@@ -239,6 +238,83 @@ fn defaultBinary(backend: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, backend, "llamacpp")) return "llama-server";
     if (std.mem.eql(u8, backend, "mlx")) return "mlx_lm.server";
     return null;
+}
+
+fn resolveEngineBinary(allocator: std.mem.Allocator, io: std.Io, recipe: std.json.ObjectMap, backend: []const u8, runtime_kind: []const u8, runtime_ref: []const u8, configuration: *const config_module.Config) ![]const u8 {
+    if (std.mem.eql(u8, runtime_kind, "binary")) return runtime_ref;
+    if (std.mem.eql(u8, runtime_kind, "system")) {
+        if (!std.mem.eql(u8, backend, "llamacpp")) {
+            const executable = defaultBinary(backend) orelse return error.UnsupportedBackend;
+            if (std.fs.path.dirname(runtime_ref)) |directory| {
+                const sibling = try std.fs.path.join(allocator, &.{ directory, executable });
+                if (pathExists(io, sibling)) return sibling;
+            }
+        }
+        return runtime_ref;
+    }
+    if (!std.mem.eql(u8, runtime_kind, "managed_venv")) return error.UnsupportedRuntime;
+    if (try selectedTargetBinary(allocator, io, backend, configuration)) |selected| return selected;
+    if (std.mem.eql(u8, backend, "llamacpp")) {
+        if (configuration.llama_bin) |configured| return configured;
+        const managed = try std.fs.path.join(allocator, &.{ configuration.data_dir, "runtime", "llamacpp", "src", "build", "bin", "llama-server" });
+        return if (pathExists(io, managed)) managed else "llama-server";
+    }
+    const executable = defaultBinary(backend) orelse return error.UnsupportedBackend;
+    const python = try resolvePython(allocator, io, recipe, backend, configuration);
+    if (python) |path| {
+        const directory = std.fs.path.dirname(path) orelse return executable;
+        const sibling = try std.fs.path.join(allocator, &.{ directory, executable });
+        if (pathExists(io, sibling)) return sibling;
+    }
+    return executable;
+}
+
+fn selectedTargetBinary(allocator: std.mem.Allocator, io: std.Io, backend: []const u8, configuration: *const config_module.Config) !?[]const u8 {
+    const selected_id = try studio_settings.selectedRuntimeTargetId(allocator, io, configuration.data_dir, backend) orelse return null;
+    const prefix = try std.fmt.allocPrint(allocator, "{s}:", .{backend});
+    if (!std.mem.startsWith(u8, selected_id, prefix)) return null;
+    const identity = selected_id[prefix.len..];
+    const separator = std.mem.indexOfScalar(u8, identity, ':') orelse return null;
+    const kind = identity[0..separator];
+    const encoded = identity[separator + 1 ..];
+    const size = std.base64.url_safe_no_pad.Decoder.calcSizeForSlice(encoded) catch return null;
+    if (size == 0) return null;
+    const decoded = try allocator.alloc(u8, size);
+    std.base64.url_safe_no_pad.Decoder.decode(decoded, encoded) catch return null;
+    if (std.mem.eql(u8, kind, "venv")) {
+        const executable = defaultBinary(backend) orelse return null;
+        const directory = std.fs.path.dirname(decoded) orelse return null;
+        const sibling = try std.fs.path.join(allocator, &.{ directory, executable });
+        return if (pathExists(io, sibling)) sibling else null;
+    }
+    if (std.mem.eql(u8, kind, "binary")) return if (pathExists(io, decoded)) decoded else null;
+    if (!std.mem.eql(u8, kind, "system")) return null;
+    const expected = defaultBinary(backend) orelse return null;
+    return if (std.mem.eql(u8, decoded, expected)) decoded else null;
+}
+
+fn resolvePython(allocator: std.mem.Allocator, io: std.Io, recipe: std.json.ObjectMap, backend: []const u8, configuration: *const config_module.Config) !?[]const u8 {
+    if (nullableStringField(recipe, "python_path")) |configured| if (pathExists(io, configured)) return configured;
+    if (std.mem.eql(u8, backend, "vllm")) {
+        if (configuration.environment.get("LOCAL_STUDIO_RUNTIME_PYTHON")) |configured| {
+            const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+            if (trimmed.len > 0 and pathExists(io, trimmed)) return trimmed;
+        }
+        if (pathExists(io, "/opt/venvs/active/vllm-latest/bin/python")) return "/opt/venvs/active/vllm-latest/bin/python";
+    }
+    const managed = try std.fs.path.join(allocator, &.{ configuration.data_dir, "runtime", "venvs", try std.fmt.allocPrint(allocator, "{s}-latest", .{backend}), "bin", "python" });
+    if (pathExists(io, managed)) return managed;
+    if (std.mem.eql(u8, backend, "sglang")) {
+        if (configuration.sglang_python) |configured| if (pathExists(io, configured)) return configured;
+    } else if (std.mem.eql(u8, backend, "mlx")) {
+        if (configuration.mlx_python) |configured| if (pathExists(io, configured)) return configured;
+    }
+    return null;
+}
+
+fn pathExists(io: std.Io, path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    return true;
 }
 
 fn validateHostSupport(backend: []const u8) !void {

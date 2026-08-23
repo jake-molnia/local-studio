@@ -39,6 +39,24 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8) !Sna
     return .{ .allocator = allocator, .models_dir = models_dir, .legacy_ui_preferences = legacy };
 }
 
+pub fn selectedRuntimeTargetId(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, backend: []const u8) !?[]u8 {
+    const settings_path = try path(allocator, data_dir);
+    defer allocator.free(settings_path);
+    const document = std.Io.Dir.cwd().readFileAlloc(io, settings_path, allocator, .limited(1024 * 1024)) catch |failure| switch (failure) {
+        error.FileNotFound => return null,
+        else => return failure,
+    };
+    defer allocator.free(document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const selected = parsed.value.object.get("selected_runtime_target_ids") orelse return null;
+    if (selected != .object) return null;
+    const value = selected.object.get(backend) orelse return null;
+    if (value != .string or value.string.len == 0) return null;
+    return @as(?[]u8, try allocator.dupe(u8, value.string));
+}
+
 pub fn updateModelsDirectory(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, models_dir: ?[]const u8) !Snapshot {
     const settings_path = try path(allocator, data_dir);
     defer allocator.free(settings_path);

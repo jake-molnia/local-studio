@@ -321,7 +321,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (mode != .head and std.mem.eql(u8, route.path, "/launch/:recipeId")) {
         const recipe_id = try pathParameter(allocator, request.head.target, "/launch/");
         defer allocator.free(recipe_id);
-        supervisor.launch(client, database, recipe_column, recipe_id, default_trust_remote_code, environment) catch |failure| {
+        supervisor.launch(client, database, recipe_column, recipe_id, configuration) catch |failure| {
             return try respondLifecycleFailure(request, failure);
         };
         try request.respond("{\"success\":true,\"message\":\"Launch started\"}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
