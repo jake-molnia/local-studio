@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Check, ChevronDown, Pin } from "@/ui/icon-registry";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Pin } from "@/ui/icon-registry";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { POPOVER_MENU_CLASS } from "@/ui/popover";
@@ -38,7 +38,7 @@ const PANEL_GAP_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
 
 type ModelGroup = { key: string; name: string; models: AgentModel[] };
-type PickerView = "models" | "reasoning";
+type PickerView = "inspector" | "models" | "reasoning";
 
 const REASONING_LABELS: Record<AgentThinkingLevel, string> = {
   off: "Off",
@@ -79,7 +79,7 @@ export function AgentModelPicker({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const [present, setPresent] = useState(open);
-  const [view, setView] = useState<PickerView>("models");
+  const [view, setView] = useState<PickerView>("inspector");
   const [showOtherModels, setShowOtherModels] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const active = models.find((model) => model.id === selectedModel) ?? null;
@@ -132,18 +132,20 @@ export function AgentModelPicker({
   );
   const close = useCallback(() => {
     updateOpen(false);
-    setView("models");
+    setView("inspector");
     setModelQuery("");
   }, [updateOpen]);
-  const closeAndFocus = useCallback(() => {
-    const trigger = view;
-    close();
-    requestAnimationFrame(() =>
-      anchorRef.current
-        ?.querySelector<HTMLButtonElement>(`[data-picker-view="${trigger}"]`)
-        ?.focus(),
-    );
-  }, [close, view]);
+  const closeAndFocus = useCallback(
+    (targetView: PickerView = "inspector") => {
+      close();
+      requestAnimationFrame(() =>
+        anchorRef.current
+          ?.querySelector<HTMLButtonElement>(`[data-picker-view="${targetView}"]`)
+          ?.focus(),
+      );
+    },
+    [close],
+  );
 
   useMountSubscription(() => {
     if (open) {
@@ -176,7 +178,12 @@ export function AgentModelPicker({
       const maxLeft = window.innerWidth - width - VIEWPORT_MARGIN_PX;
       const left = Math.min(Math.max(VIEWPORT_MARGIN_PX, anchor.right - width), maxLeft);
       const fitsAbove = anchor.top - height - PANEL_GAP_PX >= VIEWPORT_MARGIN_PX;
-      const top = fitsAbove ? anchor.top - height - PANEL_GAP_PX : anchor.bottom + PANEL_GAP_PX;
+      const desiredTop = fitsAbove
+        ? anchor.top - height - PANEL_GAP_PX
+        : anchor.bottom + PANEL_GAP_PX;
+      const maxTop = Math.max(VIEWPORT_MARGIN_PX, window.innerHeight - height - VIEWPORT_MARGIN_PX);
+      const top = Math.min(maxTop, Math.max(VIEWPORT_MARGIN_PX, desiredTop));
+      node.dataset.placement = fitsAbove ? "above" : "below";
       node.style.left = `${Math.round(Math.max(VIEWPORT_MARGIN_PX, left))}px`;
       node.style.top = `${Math.round(top)}px`;
     };
@@ -209,54 +216,46 @@ export function AgentModelPicker({
     >
       <div className="flex min-w-0 items-center gap-1">
         <ModelPickerTrigger
-          view="models"
-          kind="Model"
-          label={modelLabel}
-          title={active?.name || modelLabel}
+          view="inspector"
+          kind={supportsReasoning ? "Reasoning" : "Model"}
+          label={supportsReasoning ? reasoningLabel : modelLabel}
+          title={supportsReasoning ? `Reasoning: ${reasoningLabel}` : active?.name || modelLabel}
           disabled={disabled}
-          open={open && view === "models"}
+          open={open}
           notRunning={selectedModelNotRunning}
           onToggle={() => {
             if (disabled) return;
-            if (open && view === "models") close();
+            if (open && view === "inspector") close();
             else {
-              setView("models");
+              setView("inspector");
               updateOpen(true);
             }
           }}
         />
-        {supportsReasoning ? (
-          <ModelPickerTrigger
-            view="reasoning"
-            kind="Reasoning"
-            label={reasoningLabel}
-            title={`Reasoning: ${reasoningLabel}`}
-            disabled={disabled || reasoningDisabled}
-            open={open && view === "reasoning"}
-            notRunning={false}
-            onToggle={() => {
-              if (disabled || reasoningDisabled) return;
-              if (open && view === "reasoning") close();
-              else {
-                setView("reasoning");
-                updateOpen(true);
-              }
-            }}
-          />
-        ) : null}
       </div>
       {present && typeof document !== "undefined"
         ? createPortal(
             <div
               ref={placePanel}
-              className={`${open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"} fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[19rem]" : "w-[11rem]"} ${POPOVER_MENU_CLASS}`}
+              className={`composer-popover ${open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"} fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[18rem]" : "w-[10rem]"} ${POPOVER_MENU_CLASS}`}
               role="menu"
               aria-hidden={!open}
-              aria-label={view === "models" ? "Models" : "Reasoning"}
+              aria-label={
+                view === "inspector" ? "Model settings" : view === "models" ? "Models" : "Reasoning"
+              }
               onKeyDown={(event) => handleMenuKeyDown(event, closeAndFocus)}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >
+              {view === "inspector" ? (
+                <PickerInspector
+                  modelLabel={modelLabel}
+                  reasoningLabel={supportsReasoning ? reasoningLabel : null}
+                  reasoningDisabled={reasoningDisabled}
+                  onOpenModel={() => setView("models")}
+                  onOpenReasoning={() => setView("reasoning")}
+                />
+              ) : null}
               {view === "models" ? (
                 <ModelList
                   groups={filteredGroups}
@@ -273,6 +272,7 @@ export function AgentModelPicker({
                   onSetDefault={onSetDefault}
                   onToggleOtherModels={() => setShowOtherModels((current) => !current)}
                   onClose={close}
+                  onBack={() => setView("inspector")}
                 />
               ) : null}
               {view === "reasoning" && onSelectReasoning ? (
@@ -280,6 +280,7 @@ export function AgentModelPicker({
                   value={effectiveReasoning}
                   levels={reasoningLevels}
                   disabled={reasoningDisabled}
+                  onBack={() => setView("inspector")}
                   onSelect={(level) => {
                     onSelectReasoning(level);
                     closeAndFocus();
@@ -294,10 +295,66 @@ export function AgentModelPicker({
   );
 }
 
-function PickerHeader({ title }: { title: string }) {
+function PickerHeader({ title, onBack }: { title: string; onBack?: () => void }) {
   return (
-    <div className="flex h-7 items-center border-b border-(--border) px-1 pb-0.5">
+    <div className="flex h-7 items-center gap-0.5 border-b border-(--border) px-1 pb-0.5">
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-[4px] text-(--dim) transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) active:bg-(--active) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring)"
+          aria-label="Back to model settings"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
       <span className="px-1 text-[length:var(--fs-sm)] font-medium text-(--dim)">{title}</span>
+    </div>
+  );
+}
+
+function PickerInspector({
+  modelLabel,
+  reasoningLabel,
+  reasoningDisabled,
+  onOpenModel,
+  onOpenReasoning,
+}: {
+  modelLabel: string;
+  reasoningLabel: string | null;
+  reasoningDisabled: boolean;
+  onOpenModel: () => void;
+  onOpenReasoning: () => void;
+}) {
+  return (
+    <div className="grid gap-0.5 p-1">
+      {reasoningLabel ? (
+        <button
+          type="button"
+          role="menuitem"
+          disabled={reasoningDisabled}
+          onClick={onOpenReasoning}
+          className="flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) active:bg-(--active) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-45"
+        >
+          <span className="min-w-0 flex-1">Reasoning</span>
+          <span className="max-w-[5rem] truncate text-[length:var(--fs-xs)] text-(--dim)">
+            {reasoningLabel}
+          </span>
+          <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)" />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onOpenModel}
+        className="flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) active:bg-(--active) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring)"
+      >
+        <span className="min-w-0 flex-1">Model</span>
+        <span className="max-w-[5rem] truncate text-[length:var(--fs-xs)] text-(--dim)">
+          {modelLabel}
+        </span>
+        <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)" />
+      </button>
     </div>
   );
 }
@@ -314,6 +371,7 @@ function ModelList({
   onSetDefault,
   onToggleOtherModels,
   onClose,
+  onBack,
 }: {
   groups: ModelGroup[];
   query: string;
@@ -326,10 +384,11 @@ function ModelList({
   onSetDefault?: (modelId: string) => void;
   onToggleOtherModels: () => void;
   onClose: () => void;
+  onBack: () => void;
 }) {
   return (
     <div>
-      <PickerHeader title="Model" />
+      <PickerHeader title="Model" onBack={onBack} />
       <div className="px-1.5 pt-1">
         <input
           type="search"
@@ -419,16 +478,18 @@ function ReasoningList({
   value,
   levels,
   disabled,
+  onBack,
   onSelect,
 }: {
   value: AgentThinkingLevel;
   levels: readonly AgentThinkingLevel[];
   disabled: boolean;
+  onBack: () => void;
   onSelect: (level: AgentThinkingLevel) => void;
 }) {
   return (
     <div>
-      <PickerHeader title="Reasoning" />
+      <PickerHeader title="Reasoning" onBack={onBack} />
       <div className="grid gap-0.5 pt-1">
         {REASONING_MENU_LEVELS.filter((level) => levels.includes(level)).map((level) => (
           <button
@@ -480,7 +541,7 @@ function ModelPickerTrigger({
       onClick={onToggle}
       disabled={disabled}
       className={cx(
-        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-[11rem] items-center gap-1 rounded-[6px] bg-transparent px-2 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-60",
+        "group/model inline-flex !h-6 !min-h-6 !min-w-0 max-w-[10rem] items-center gap-1 rounded-[6px] bg-transparent px-1.5 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/78 transition-[background-color,color,transform] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) active:scale-[0.98] active:bg-(--active) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-60",
         open && "bg-(--active) text-(--fg)",
       )}
       title={notRunning ? `${title} is not running — launch it or pick a running model` : title}

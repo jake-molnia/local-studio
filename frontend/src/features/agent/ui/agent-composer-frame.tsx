@@ -153,7 +153,7 @@ export function AgentComposerFrame({
         onDragLeave={onComposerDragLeave}
         onDrop={onComposerDrop}
         className={cx(
-          "agent-composer-box relative z-10 flex min-h-[120px] w-full flex-col overflow-visible rounded-[12px] bg-(--composer)",
+          "agent-composer-box relative z-10 flex min-h-[64px] w-full flex-col overflow-visible rounded-[12px] bg-(--composer)",
           composerDragActive && "outline outline-1 outline-(--link)/50",
         )}
       >

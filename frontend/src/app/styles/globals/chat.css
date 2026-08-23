@@ -296,6 +296,16 @@
   background-clip: padding-box;
 }
 
+.agent-composer-form {
+  max-width: min(672px, 57%);
+}
+
+@media (max-width: 768px) {
+  .agent-composer-form {
+    max-width: 100%;
+  }
+}
+
 .agent-timeline-frame {
   container-type: inline-size;
 }
@@ -473,14 +483,26 @@
   transition: box-shadow 150ms var(--ease-standard);
 }
 
+.composer-popover {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.composer-popover[data-placement="below"] {
+  transform-origin: top center;
+}
+
+.composer-popover[data-placement="above"] {
+  transform-origin: bottom center;
+}
+
 .composer-popover-enter {
   animation: composer-popover-enter 120ms var(--ease-enter) both;
-  transform-origin: bottom center;
 }
 
 .composer-popover-exit {
   animation: composer-popover-exit 90ms var(--ease-exit) both;
-  transform-origin: bottom center;
 }
 
 @keyframes composer-popover-enter {

@@ -37,7 +37,7 @@ export function AgentComposerActions({
   const stopping = status === "stopping";
 
   return (
-    <div className="agent-composer-actions-row flex min-h-9 items-center gap-0.5 bg-transparent px-3 pb-3 pt-1 text-xs">
+    <div className="agent-composer-actions-row flex min-h-8 items-center gap-0.5 bg-transparent px-3 pb-2 pt-0 text-xs">
       <input
         ref={fileInputRef}
         type="file"
@@ -52,7 +52,7 @@ export function AgentComposerActions({
         disabled={readingAttachments}
         data-composer-context-trigger
         aria-expanded={contextOpen}
-        className={`inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) disabled:opacity-30 ${
+        className={`inline-flex !h-5 !min-h-5 !w-5 !min-w-5 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) active:scale-95 active:bg-(--active) disabled:opacity-30 ${
           contextOpen ? "bg-(--active) text-(--fg)" : "text-(--hl2)"
         }`}
         aria-label="Add context"
@@ -75,7 +75,7 @@ export function AgentComposerActions({
             ) : inputHasText ? (
               <button
                 type="submit"
-                className="inline-flex !h-[26px] !min-h-[26px] !w-[26px] !min-w-[26px] shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-opacity duration-[var(--motion-fast)] hover:opacity-85"
+                className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70"
                 aria-label="Steer current task now"
                 title="Steer current task now (Alt+Enter) · Enter queues it instead"
               >
@@ -86,7 +86,7 @@ export function AgentComposerActions({
               type="button"
               onClick={onAbortTurn}
               disabled={starting || stopping}
-              className="inline-flex !h-[26px] !min-h-[26px] !w-[26px] !min-w-[26px] shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-opacity duration-[var(--motion-fast)] hover:opacity-85 disabled:opacity-30"
+              className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:opacity-30"
               aria-label="Stop"
               title="Stop (Esc)"
             >
@@ -97,7 +97,7 @@ export function AgentComposerActions({
           <button
             type="submit"
             disabled={(!inputHasText && attachmentsCount === 0) || readingAttachments}
-            className="inline-flex !h-[26px] !min-h-[26px] !w-[26px] !min-w-[26px] shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[background-color,color,opacity] duration-[var(--motion-fast)] hover:opacity-85 disabled:bg-(--fg)/12 disabled:text-(--dim)/65 disabled:opacity-100"
+            className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[background-color,color,opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:bg-(--fg)/12 disabled:text-(--dim)/65 disabled:opacity-100"
             aria-label="Send"
             title="Send (Enter)"
           >
