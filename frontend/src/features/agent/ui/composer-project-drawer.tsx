@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import {
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  FileText,
   FolderOpen,
   GitBranch,
+  Globe2,
   ListChecks,
   Loader2,
+  Monitor,
   Plus,
   RefreshCw,
   Trash2,
@@ -35,6 +38,7 @@ import { ADD_PROJECT_EVENT } from "@/lib/workspace-events";
 import { cx } from "@/ui/utils";
 import { QueuedMessageStack } from "@/features/agent/ui/queued-message-stack";
 import type { QueuedMessage } from "@/features/agent/messages";
+import type { BrowserBackend } from "@/features/agent/tools/types";
 
 const iconButtonClass =
   "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--fg)/42 transition-colors hover:bg-(--hover) hover:text-(--fg)/82 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--fg)/25";
@@ -44,6 +48,8 @@ const listRowClass =
 
 const searchInputClass =
   "h-7 w-full min-w-0 rounded-md bg-(--fg)/[0.04] px-2 text-[length:var(--fs-xs)] text-(--fg) outline-none placeholder:text-(--fg)/30 focus:bg-(--fg)/[0.06]";
+
+type ComposerContextView = "root" | "goal" | "projects" | "git";
 
 export function ComposerProjectDrawer({
   piSessionId,
@@ -61,6 +67,13 @@ export function ComposerProjectDrawer({
   onEditQueued,
   onRemoveQueued,
   onSteerQueued,
+  open: controlledOpen,
+  onOpenChange,
+  onRequestAttach,
+  browserToolEnabled,
+  browserBackend,
+  onToggleBrowserBackend,
+  onToggleBrowserTool,
 }: {
   piSessionId: string | null;
   revision: number;
@@ -77,9 +90,30 @@ export function ComposerProjectDrawer({
   onEditQueued: (queueId: string, text: string) => void;
   onRemoveQueued: (queueId: string) => void;
   onSteerQueued: (queueId: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onRequestAttach?: () => void;
+  browserToolEnabled: boolean;
+  browserBackend: BrowserBackend;
+  onToggleBrowserBackend: () => void;
+  onToggleBrowserTool: () => void;
 }) {
   const projects = useProjects();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [view, setView] = useState<ComposerContextView>("root");
+  const [query, setQuery] = useState("");
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (next) setView("root");
+      else setQuery("");
+      if (controlledOpen === undefined) setInternalOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange],
+  );
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const {
     goal,
     error: goalError,
@@ -125,6 +159,45 @@ export function ComposerProjectDrawer({
     : "Choose project";
   const hasQueue = queueItems.length > 0;
 
+  useMountSubscription(() => {
+    if (!open) {
+      setView("root");
+      setQuery("");
+      return;
+    }
+    setView("root");
+    setQuery("");
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || sectionRef.current?.contains(event.target)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-composer-context-trigger]")
+      ) {
+        return;
+      }
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      requestAnimationFrame(() => {
+        const externalTrigger = document.querySelector<HTMLButtonElement>(
+          "[data-composer-context-trigger]",
+        );
+        externalTrigger?.focus();
+      });
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, setOpen]);
+
   const pickProject = (project: Project) => {
     projects.selectProject(project);
     onProjectPicked(project);
@@ -148,77 +221,121 @@ export function ComposerProjectDrawer({
           onOpen={() => setOpen(true)}
         />
       ) : null}
+      {hasQueue ? (
+        <div className="px-1.5 pb-1">
+          <QueuedMessageStack
+            items={queueItems}
+            running={running}
+            onEdit={onEditQueued}
+            onRemove={onRemoveQueued}
+            onSteer={onSteerQueued}
+          />
+        </div>
+      ) : null}
       <section
+        ref={sectionRef}
         data-testid="composer-drawer"
         data-open={open ? "true" : "false"}
-        className="agent-composer-project-drawer relative z-0 mx-auto w-full max-w-none overflow-hidden rounded-none border-0 bg-transparent pb-0 text-[length:var(--fs-xs)] shadow-none md:text-[length:var(--fs-sm)] sm:w-full"
+        className="agent-composer-project-drawer relative z-20 h-0 w-full overflow-visible text-[length:var(--fs-xs)] md:text-[length:var(--fs-sm)]"
       >
-        {/* Collapsed is a summary, not a void: the branch and its diffstat
-            are the thing you check between prompts, so they share the single
-            row with the project label instead of stacking under it. */}
-        <div className="flex items-center gap-1 px-1.5 pt-1">
-          <div className="min-w-0 flex-1">
-            <DrawerSummaryButton
-              open={open}
-              onToggle={() => setOpen((value) => !value)}
-              label={label}
-              queueCount={queueItems.length}
-              hasGoal={goal !== null}
-            />
-          </div>
-          {!open ? (
-            <GitRow
-              compact
-              gitSummary={gitSummary}
-              gitBranch={gitBranch}
-              onInitGit={onInitGit}
-              onOpenDiff={onOpenDiff}
-            />
-          ) : null}
-        </div>
-        {hasQueue ? (
-          <div className="px-1.5 pb-0.5">
-            <QueuedMessageStack
-              items={queueItems}
-              running={running}
-              onEdit={onEditQueued}
-              onRemove={onRemoveQueued}
-              onSteer={onSteerQueued}
-            />
-          </div>
-        ) : null}
         {open ? (
-          <div className="flex max-h-[62vh] flex-col gap-0.5 overflow-y-auto px-1.5 pt-1">
-            <GoalCard
-              goal={goal}
-              running={running}
-              error={goalError}
-              onSubmit={submitGoal}
-              onTogglePause={() =>
-                void patchGoal({ status: goal?.status === "paused" ? "active" : "paused" })
-              }
-              onRestart={() => void patchGoal({ status: "active", resetTurns: true })}
-              onClear={() => void clearGoal()}
-            />
-            <div className="my-1 h-px shrink-0 bg-(--separator)" />
-            <GitRow
-              gitSummary={gitSummary}
-              gitBranch={gitBranch}
-              onInitGit={onInitGit}
-              onOpenDiff={() => {
-                setOpen(false);
-                onOpenDiff();
-              }}
-            />
-            <ProjectList
-              canPickProject={canPickProject}
-              cwd={cwd}
-              projects={projects.projects}
-              activeProjectId={activeProject?.id ?? null}
-              onPick={pickProject}
-              onAdd={addProject}
-            />
-            {isRepo ? (
+          <div className="absolute bottom-2 left-0 right-0 max-h-[min(28rem,58vh)] overflow-y-auto rounded-[9px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_14px_34px_-16px_rgba(0,0,0,0.84)]">
+            {view === "root" || view === "projects" ? (
+              <div className="flex items-center gap-1 border-b border-(--border) px-0.5 pb-1.5">
+                {view === "projects" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setView("root");
+                      setQuery("");
+                    }}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+                    aria-label="Back to context menu"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={view === "projects" ? "Search projects…" : "Search context…"}
+                  className="h-7 min-w-0 flex-1 rounded-[5px] bg-(--fg)/[0.055] px-2 text-[length:var(--fs-sm)] text-(--fg) outline-none placeholder:text-(--fg)/35 focus:bg-(--fg)/[0.085]"
+                  aria-label={view === "projects" ? "Search projects" : "Search context"}
+                />
+              </div>
+            ) : (
+              <ContextViewHeader
+                label={view === "goal" ? "Goal" : "Branches and worktrees"}
+                onBack={() => {
+                  setView("root");
+                  setQuery("");
+                }}
+              />
+            )}
+            {view === "root" ? (
+              <ContextMenuRoot
+                query={query}
+                projectLabel={label}
+                gitBranch={gitBranch}
+                gitSummary={gitSummary}
+                canPickProject={canPickProject}
+                canAttach={Boolean(onRequestAttach)}
+                browserToolEnabled={browserToolEnabled}
+                browserBackend={browserBackend}
+                onAttach={() => {
+                  setOpen(false);
+                  onRequestAttach?.();
+                }}
+                onGoal={() => {
+                  setQuery("");
+                  setView("goal");
+                }}
+                onProjects={() => {
+                  setQuery("");
+                  setView("projects");
+                }}
+                onGit={() => {
+                  setQuery("");
+                  setView("git");
+                }}
+                onChanges={() => {
+                  setOpen(false);
+                  onOpenDiff();
+                }}
+                onInitGit={() => {
+                  setOpen(false);
+                  onInitGit?.();
+                }}
+                onToggleBrowserBackend={onToggleBrowserBackend}
+                onToggleBrowserTool={onToggleBrowserTool}
+              />
+            ) : null}
+            {view === "goal" ? (
+              <GoalCard
+                goal={goal}
+                running={running}
+                error={goalError}
+                onSubmit={submitGoal}
+                onTogglePause={() =>
+                  void patchGoal({ status: goal?.status === "paused" ? "active" : "paused" })
+                }
+                onRestart={() => void patchGoal({ status: "active", resetTurns: true })}
+                onClear={() => void clearGoal()}
+              />
+            ) : null}
+            {view === "projects" ? (
+              <ProjectList
+                canPickProject={canPickProject}
+                cwd={cwd}
+                projects={projects.projects}
+                activeProjectId={activeProject?.id ?? null}
+                query={query}
+                onPick={pickProject}
+                onAdd={addProject}
+              />
+            ) : null}
+            {view === "git" && isRepo ? (
               <GitResourceSections
                 key={cwd}
                 cwd={cwd}
@@ -240,6 +357,183 @@ export function ComposerProjectDrawer({
         ) : null}
       </section>
     </>
+  );
+}
+
+function ContextViewHeader({ label, onBack }: { label: string; onBack: () => void }) {
+  return (
+    <div className="flex h-8 items-center gap-1 border-b border-(--border) px-0.5 pb-1">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+        aria-label="Back to context menu"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </button>
+      <span className="truncate px-1 text-[length:var(--fs-sm)] font-medium text-(--fg)/85">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function ContextMenuRoot({
+  query,
+  projectLabel,
+  gitBranch,
+  gitSummary,
+  canPickProject,
+  canAttach,
+  browserToolEnabled,
+  browserBackend,
+  onAttach,
+  onGoal,
+  onProjects,
+  onGit,
+  onChanges,
+  onInitGit,
+  onToggleBrowserBackend,
+  onToggleBrowserTool,
+}: {
+  query: string;
+  projectLabel: string;
+  gitBranch?: string | null;
+  gitSummary?: GitSummary | null;
+  canPickProject: boolean;
+  canAttach: boolean;
+  browserToolEnabled: boolean;
+  browserBackend: BrowserBackend;
+  onAttach: () => void;
+  onGoal: () => void;
+  onProjects: () => void;
+  onGit: () => void;
+  onChanges: () => void;
+  onInitGit: () => void;
+  onToggleBrowserBackend: () => void;
+  onToggleBrowserTool: () => void;
+}) {
+  const actions = [
+    ...(canAttach
+      ? [
+          {
+            key: "files",
+            label: "Files",
+            detail: "Attach files to this prompt",
+            icon: <FileText className="h-3.5 w-3.5" />,
+            onClick: onAttach,
+            disabled: false,
+            drillIn: false,
+          },
+        ]
+      : []),
+    {
+      key: "goal",
+      label: "Goal",
+      detail: "Set or manage the session goal",
+      icon: <ListChecks className="h-3.5 w-3.5" />,
+      onClick: onGoal,
+      disabled: false,
+      drillIn: true,
+    },
+    {
+      key: "browser",
+      label: "Browser tools",
+      detail: browserToolEnabled ? "On" : "Off",
+      icon: <Globe2 className="h-3.5 w-3.5" />,
+      onClick: onToggleBrowserTool,
+      disabled: false,
+      drillIn: false,
+    },
+    ...(browserToolEnabled
+      ? [
+          {
+            key: "browser-access",
+            label: "Browser access",
+            detail: browserBackend === "chrome" ? "Personal browser" : "Sandbox only",
+            icon: <Monitor className="h-3.5 w-3.5" />,
+            onClick: onToggleBrowserBackend,
+            disabled: false,
+            drillIn: false,
+          },
+        ]
+      : []),
+    {
+      key: "project",
+      label: "Project",
+      detail: projectLabel,
+      icon: <FolderOpen className="h-3.5 w-3.5" />,
+      onClick: onProjects,
+      disabled: !canPickProject,
+      drillIn: true,
+    },
+    ...(gitSummary
+      ? [
+          gitSummary.isRepo
+            ? {
+                key: "git",
+                label: "Branch or worktree",
+                detail: gitBranch ?? "Choose a branch",
+                icon: <GitBranch className="h-3.5 w-3.5" />,
+                onClick: onGit,
+                disabled: false,
+                drillIn: true,
+              }
+            : {
+                key: "git",
+                label: "Initialize Git",
+                detail: "Create a repository for this project",
+                icon: <GitBranch className="h-3.5 w-3.5" />,
+                onClick: onInitGit,
+                disabled: false,
+                drillIn: false,
+              },
+        ]
+      : []),
+    ...(gitSummary?.isRepo
+      ? [
+          {
+            key: "changes",
+            label: "Changes",
+            detail: `${gitSummary.additions} added · ${gitSummary.deletions} removed · ${gitSummary.statusCount} files`,
+            icon: <ListChecks className="h-3.5 w-3.5" />,
+            onClick: onChanges,
+            disabled: false,
+            drillIn: false,
+          },
+        ]
+      : []),
+  ];
+  const text = query.trim().toLowerCase();
+  const visible = actions.filter(
+    (action) => !text || `${action.label} ${action.detail}`.toLowerCase().includes(text),
+  );
+
+  return (
+    <div className="flex flex-col gap-px pt-1">
+      {visible.length ? (
+        visible.map((action) => (
+          <button
+            key={action.key}
+            type="button"
+            onClick={action.onClick}
+            disabled={action.disabled}
+            className="group flex min-h-8 w-full items-center gap-2 rounded-[6px] px-2 py-1 text-left text-[length:var(--fs-xs)] transition-colors hover:bg-(--hover) disabled:opacity-35"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-(--dim) group-hover:text-(--fg)/80">
+              {action.icon}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-(--fg)/88">{action.label}</span>
+            <span className="max-w-[52%] truncate text-right text-(--dim)">{action.detail}</span>
+            {action.drillIn ? <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)/65" /> : null}
+          </button>
+        ))
+      ) : (
+        <div className="px-2 py-3 text-center text-[length:var(--fs-xs)] text-(--dim)">
+          No matching context
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -685,66 +979,12 @@ function defaultWorktreePath(cwd: string, branch: string): string {
   return `${parent}${cleaned}`;
 }
 
-function GitRow({
-  gitSummary,
-  gitBranch,
-  onInitGit,
-  onOpenDiff,
-  compact = false,
-}: {
-  gitSummary?: GitSummary | null;
-  gitBranch?: string | null;
-  onInitGit?: () => void;
-  onOpenDiff: () => void;
-  compact?: boolean;
-}) {
-  // Compact rows sit beside the summary button on one shared line, so they
-  // keep the row metrics but give up w-full and let the summary take the slack.
-  const rowClass = compact
-    ? "flex h-8 shrink-0 items-center gap-2 rounded-[10px] px-2 text-left transition-colors"
-    : listRowClass;
-  if (gitSummary?.isRepo) {
-    return (
-      <button
-        type="button"
-        onClick={onOpenDiff}
-        className={cx(rowClass, "hover:bg-(--hover)")}
-        title="View changes"
-      >
-        <GitBranchIcon className="h-3.5 w-3.5 shrink-0 text-(--fg)/56" />
-        <span className={cx("min-w-0 truncate text-(--fg)/72", compact ? "max-w-28" : "flex-1")}>
-          {gitBranch ?? gitSummary.branch ?? "git"}
-        </span>
-        <span className="flex shrink-0 items-center gap-1 font-mono text-[length:var(--fs-xs)] tabular-nums">
-          <span className="text-(--ok)">+{gitSummary.additions}</span>
-          <span className="text-(--err)">-{gitSummary.deletions}</span>
-          {gitSummary.statusCount > 0 ? (
-            <span className="text-(--dim)">· {gitSummary.statusCount} files</span>
-          ) : null}
-        </span>
-      </button>
-    );
-  }
-  if (gitSummary && !gitSummary.isRepo && onInitGit) {
-    return (
-      <button
-        type="button"
-        onClick={onInitGit}
-        className={cx(rowClass, "text-(--fg)/56 hover:bg-(--hover) hover:text-(--fg)/82")}
-      >
-        <GitBranchIcon className="h-3.5 w-3.5 shrink-0" />
-        Initialize git
-      </button>
-    );
-  }
-  return null;
-}
-
 function ProjectList({
   canPickProject,
   cwd,
   projects,
   activeProjectId,
+  query: externalQuery,
   onPick,
   onAdd,
 }: {
@@ -752,11 +992,13 @@ function ProjectList({
   cwd: string;
   projects: Project[];
   activeProjectId: string | null;
+  query?: string;
   onPick: (project: Project) => void;
   onAdd: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const text = query.trim().toLowerCase();
+  const effectiveQuery = externalQuery ?? query;
+  const text = effectiveQuery.trim().toLowerCase();
   const filtered = projects.filter(
     (project) =>
       !text ||
@@ -790,14 +1032,16 @@ function ProjectList({
           <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
         </button>
       </div>
-      <div className="px-2 pb-0.5">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search projects…"
-          className={searchInputClass}
-        />
-      </div>
+      {externalQuery === undefined ? (
+        <div className="px-2 pb-0.5">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search projects…"
+            className={searchInputClass}
+          />
+        </div>
+      ) : null}
       <div className="flex max-h-44 flex-col overflow-y-auto">
         {filtered.map((project) => {
           const active = project.id === activeProjectId;
@@ -831,53 +1075,5 @@ function ProjectList({
         </button>
       </div>
     </div>
-  );
-}
-
-function DrawerSummaryButton({
-  open,
-  onToggle,
-  label,
-  queueCount,
-  hasGoal,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  label: string;
-  queueCount: number;
-  hasGoal: boolean;
-}) {
-  const hasQueue = queueCount > 0;
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      // Same metrics as every list row below it — the collapsed summary and
-      // the expanded rows share one left edge and one height, so toggling
-      // the drawer doesn't make the text jump.
-      className={cx(listRowClass, "text-(--fg)/78 hover:bg-(--hover)")}
-    >
-      {hasQueue ? (
-        <ListChecks className="h-3.5 w-3.5 shrink-0 text-(--fg)/56" strokeWidth={1.7} />
-      ) : (
-        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-(--fg)/56" strokeWidth={1.7} />
-      )}
-      <span className="min-w-0 flex-1 truncate">
-        {hasQueue ? `${queueCount} queued message${queueCount === 1 ? "" : "s"}` : label}
-      </span>
-      {/* The objective is NOT repeated here. It lives one row up in the goal
-          strip, which is always mounted; printing it twice, a row apart, was
-          the same fact competing with itself. */}
-      {hasGoal || hasQueue ? (
-        <ChevronDown
-          className={cx(
-            "h-3.5 w-3.5 shrink-0 text-(--fg)/36 transition-transform",
-            open && "rotate-180",
-          )}
-          strokeWidth={1.75}
-        />
-      ) : null}
-    </button>
   );
 }
