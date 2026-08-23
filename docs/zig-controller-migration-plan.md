@@ -42,8 +42,16 @@ Completed foundation evidence:
 - Invalid and oversized request heads have explicit 400 and 431 response paths.
 - The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
 - A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
+- The compatibility route registry is mechanically generated from all 94 unique manifest routes and matches exact paths and named path segments.
+- The reverse-proxy spike forwards methods, paths, queries, end-to-end headers, and request bodies while removing framing and hop-by-hop headers in both directions.
+- An 8 MiB request body streamed through the proxy with the exact expected SHA-256 and without whole-body buffering.
+- A 64 MiB upstream response feeding a downstream limited to 128 KiB/s increased controller RSS by 464 KiB during the live sample.
+- Disconnecting the downstream response canceled the upstream connection while the controller remained healthy.
+- A failed primary upstream retried one fallback before response commitment.
+- An upstream that failed after response headers were flushed did not retry, returned a truncated response, and left the controller healthy.
+- SIGTERM during an active proxy stream canceled the work and exited the controller with status zero.
 
-The spike is not production-ready. Streaming request bodies, reverse-proxy backpressure, upstream cancellation, slow clients, task limits, timeouts, full SQLite statement and transaction parity, and shutdown with child processes still require live proof.
+The spike is not production-ready. Bounded task admission, timeouts, production Worker selection and authentication, full SQLite statement and transaction parity, and shutdown with child processes still require live proof.
 
 ## Compatibility ledger
 

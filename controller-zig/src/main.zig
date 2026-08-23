@@ -15,7 +15,7 @@ pub fn main(init: std.process.Init) !void {
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});
     }
 
-    var server = try http_server_module.HttpServer.init(init.io, config);
+    var server = try http_server_module.HttpServer.init(init.gpa, init.io, config);
     defer server.deinit();
     var shutdown = try shutdown_module.Shutdown.init();
     defer shutdown.deinit();

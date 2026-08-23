@@ -20,7 +20,7 @@
     "start": "npm --prefix frontend start",
     "check": "npm run check:automation && npm run check:contracts && npm run check:structure && npm run check:zig && npm run check:frontend && npm run check:controller && npm run check:agent-runtime",
     "check:automation": "node scripts/project.mjs audit-layout",
-    "check:contracts": "node scripts/project.mjs validate-contracts && node controller/contracts/validate-http-routes.mjs",
+    "check:contracts": "node scripts/project.mjs validate-contracts && node controller/contracts/validate-http-routes.mjs && node controller/contracts/generate-zig-http-routes.mjs --check",
     "check:structure": "node scripts/project.mjs validate-structure",
     "check:zig": "node controller-zig/toolchain.mjs build",
     "check:frontend": "npm --prefix frontend run check:quality",

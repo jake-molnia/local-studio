@@ -1,47 +1,35 @@
 const std = @import("std");
 const config_module = @import("config.zig");
 const shutdown = @import("shutdown.zig");
+const reverse_proxy = @import("reverse_proxy.zig");
+const route_registry = @import("route_registry.zig");
 
 const Config = config_module.Config;
 const Mode = config_module.Mode;
+const Ownership = route_registry.Ownership;
 const Io = std.Io;
 const net = Io.net;
 const http = std.http;
-
-const Ownership = enum {
-    head,
-    worker,
-    shared,
-    proxied,
-};
-
-const Route = struct {
-    method: http.Method,
-    path: []const u8,
-    ownership: Ownership,
-};
-
-const routes = [_]Route{
-    .{ .method = .GET, .path = "/health", .ownership = .shared },
-    .{ .method = .GET, .path = "/__zig-spike/sse", .ownership = .shared },
-};
 
 pub const HttpServer = struct {
     io: Io,
     config: Config,
     listener: net.Server,
+    client: http.Client,
 
-    pub fn init(io: Io, config: Config) !HttpServer {
+    pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
         const address = try net.IpAddress.parse(config.host, config.port);
         return .{
             .io = io,
             .config = config,
             .listener = try address.listen(io, .{ .reuse_address = true }),
+            .client = .{ .allocator = allocator, .io = io },
         };
     }
 
     pub fn deinit(server: *HttpServer) void {
         server.listener.deinit(server.io);
+        server.client.deinit();
     }
 
     pub fn run(server: *HttpServer) !void {
@@ -52,14 +40,14 @@ pub const HttpServer = struct {
                 if (shutdown.isRequested()) return;
                 return failure;
             };
-            group.concurrent(server.io, serveConnection, .{ server.io, server.config.mode, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.io, server.config.mode, &server.client, server.config.spike_upstream, server.config.spike_fallback_upstream, stream }) catch {
                 stream.close(server.io);
             };
         }
     }
 };
 
-fn serveConnection(io: Io, mode: Mode, stream: net.Stream) void {
+fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, stream: net.Stream) void {
     defer {
         var connection = stream;
         connection.close(io);
@@ -80,7 +68,7 @@ fn serveConnection(io: Io, mode: Mode, stream: net.Stream) void {
             }
             return;
         };
-        const keep_connection = serveRequest(io, mode, &request) catch return;
+        const keep_connection = serveRequest(io, mode, client, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -90,8 +78,8 @@ fn writeProtocolError(writer: *Io.Writer, status: []const u8) void {
     writer.flush() catch return;
 }
 
-fn serveRequest(io: Io, mode: Mode, request: *http.Server.Request) !bool {
-    const route = findRoute(request.head.method, request.head.target) orelse {
+fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+    const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -110,9 +98,28 @@ fn serveRequest(io: Io, mode: Mode, request: *http.Server.Request) !bool {
         });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
+        const upstream = spike_upstream orelse {
+            try request.respond("{\"detail\":\"Proxy spike upstream is not configured\"}", .{
+                .status = .service_unavailable,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return request.head.keep_alive;
+        };
+        try reverse_proxy.serve(client, upstream, spike_fallback_upstream, request);
+        return false;
+    }
 
-    try serveSse(io, request);
-    return false;
+    if (std.mem.eql(u8, route.path, "/__zig-spike/sse")) {
+        try serveSse(io, request);
+        return false;
+    }
+
+    try request.respond("{\"detail\":\"Route is not implemented by the Zig migration slice\"}", .{
+        .status = .not_implemented,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+    return request.head.keep_alive;
 }
 
 fn ownershipAllows(ownership: Ownership, mode: Mode) bool {
@@ -122,15 +129,6 @@ fn ownershipAllows(ownership: Ownership, mode: Mode) bool {
         .worker => mode != .head,
         .proxied => true,
     };
-}
-
-fn findRoute(method: http.Method, target: []const u8) ?Route {
-    const path_end = std.mem.findScalar(u8, target, '?') orelse target.len;
-    const path = target[0..path_end];
-    for (routes) |route| {
-        if (route.method == method and std.mem.eql(u8, route.path, path)) return route;
-    }
-    return null;
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {
