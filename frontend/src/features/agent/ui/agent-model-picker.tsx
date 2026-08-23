@@ -216,7 +216,10 @@ export function AgentModelPicker({
         setOpenSource("pointer");
         stopToolbarEvent(event);
       }}
-      onMouseDown={stopToolbarEvent}
+      onMouseDown={(event) => {
+        setOpenSource("pointer");
+        stopToolbarEvent(event);
+      }}
       onKeyDown={() => setOpenSource("keyboard")}
     >
       <div className="flex min-w-0 items-center gap-1">
