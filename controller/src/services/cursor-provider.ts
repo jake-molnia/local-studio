@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import {
   createModels,
   createProvider,
@@ -114,6 +115,9 @@ export class CursorProviderService implements HeadProviderAdapter {
 
   public static open(dataDirectory: string): Promise<CursorProviderService> {
     const service = new CursorProviderService(dataDirectory);
+    const runtimeDirectory = resolve(dataDirectory, "providers", "cursor");
+    process.env["PI_CODING_AGENT_DIR"] = runtimeDirectory;
+    process.env["PI_CURSOR_CACHE_DIR"] = resolve(runtimeDirectory, "cache");
     process.env["PI_CURSOR_SYSTEM_CREDENTIALS"] = "0";
     return import("@rahularya01/pi-cursor")
       .then(({ default: cursorExtension }) => cursorExtension(service.#extensionApi()))
