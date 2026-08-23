@@ -23,6 +23,7 @@ import { ControllerSettingsStore } from "./stores/controller-settings-store";
 import { InferenceRequestStore } from "./stores/inference-request-store";
 import { RigStore } from "./stores/rig-store";
 import { CodexProviderService } from "./services/codex-provider";
+import { CursorProviderService } from "./services/cursor-provider";
 import { HeadProviderService } from "./services/head-provider";
 import { RigNodeCredentialStore } from "./stores/rig-node-credential-store";
 import { WorkerPool } from "./modules/federation/worker-pool";
@@ -192,10 +193,21 @@ export const makeAppContext = Effect.gen(function* () {
     store: compute.store,
     getRecipe: (recipeId) => recipeStore.get(recipeId),
   });
+  const cursorProvider = yield* initialize(
+    "cursor-provider.open",
+    Effect.tryPromise({
+      try: () => CursorProviderService.open(config.data_dir),
+      catch: (source) => source,
+    }),
+  );
   const headProviders = yield* Effect.acquireRelease(
     initializeSync(
       "head-providers.open",
-      () => new HeadProviderService([new CodexProviderService(config.data_dir)]),
+      () =>
+        new HeadProviderService([
+          new CodexProviderService(config.data_dir),
+          cursorProvider,
+        ]),
     ),
     (resource) => Effect.sync(() => resource.shutdown()),
   );
