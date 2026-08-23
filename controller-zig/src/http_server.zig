@@ -584,7 +584,7 @@ fn respondInvalidPayload(request: *http.Server.Request) !bool {
 fn respondLifecycleFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
         error.RecipeNotFound => .not_found,
-        error.AlreadyRunning => .conflict,
+        error.AlreadyRunning, error.PortInUse => .conflict,
         error.UnsupportedBackend, error.UnsupportedPlatform, error.DockerRuntimeNotImplemented => .unprocessable_entity,
         error.LaunchCancelled => .bad_request,
         else => .service_unavailable,
@@ -592,6 +592,7 @@ fn respondLifecycleFailure(request: *http.Server.Request, failure: anyerror) !bo
     const detail = switch (failure) {
         error.RecipeNotFound => "Recipe not found",
         error.AlreadyRunning => "llm is already running",
+        error.PortInUse => "inference port is already in use",
         error.UnsupportedBackend => "Engine backend is not supported",
         error.UnsupportedPlatform => "Engine cannot run on this host",
         error.DockerRuntimeNotImplemented => "Docker runtime is not available",

@@ -53,6 +53,11 @@ pub const Supervisor = struct {
         const nonce_buffer = std.fmt.bytesToHex(nonce_bytes, .lower);
         const nonce = nonce_buffer[0..];
         supervisor.cancel_requested.store(false, .release);
+        if (!portBindable(supervisor.io, plan.port)) return error.PortInUse;
+        try instances.writeReservation(supervisor.io, supervisor.instance_path, plan.recipe_id, plan.backend, plan.port, nonce, plan.ready_timeout_seconds);
+        var record_requires_cleanup = true;
+        errdefer if (record_requires_cleanup) instances.dropLlm(supervisor.io, supervisor.instance_path) catch {};
+        if (supervisor.cancel_requested.load(.acquire)) return error.LaunchCancelled;
 
         const logs_dir = try std.fs.path.join(supervisor.allocator, &.{ supervisor.data_dir, "instances", "logs" });
         defer supervisor.allocator.free(logs_dir);
@@ -87,6 +92,7 @@ pub const Supervisor = struct {
             return error.ProcessIdentityUnavailable;
         };
         defer if (reference.start_token) |token| supervisor.allocator.free(token);
+        if (supervisor.cancel_requested.load(.acquire)) return error.LaunchCancelled;
         try instances.writeProcess(supervisor.io, supervisor.instance_path, plan.recipe_id, plan.backend, plan.port, nonce, reference, plan.ready_timeout_seconds);
 
         const reaper_nonce = try supervisor.allocator.dupe(u8, nonce);
@@ -108,7 +114,10 @@ pub const Supervisor = struct {
             var record = record_value;
             defer record.deinit();
             if (!processes.owns(supervisor.allocator, supervisor.io, &record)) return error.ProcessExitedEarly;
-            if (try healthy(supervisor.allocator, supervisor.io, client, record.port, plan.health_path)) return;
+            if (try healthy(supervisor.allocator, supervisor.io, client, record.port, plan.health_path)) {
+                record_requires_cleanup = false;
+                return;
+            }
             try supervisor.io.sleep(.fromSeconds(2), .awake);
         }
         _ = try supervisor.evict();
@@ -257,4 +266,13 @@ fn fetchHealth(allocator: std.mem.Allocator, client: *http.Client, port: u16, pa
     }) catch return false;
     const status = @intFromEnum(response.status);
     return status >= 200 and status < 300;
+}
+
+fn portBindable(io: Io, port: u16) bool {
+    for ([_][]const u8{ "127.0.0.1", "0.0.0.0" }) |host| {
+        const address = std.Io.net.IpAddress.parse(host, port) catch return false;
+        var listener = address.listen(io, .{}) catch return false;
+        listener.deinit(io);
+    }
+    return true;
 }

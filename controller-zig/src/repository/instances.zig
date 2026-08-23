@@ -102,15 +102,38 @@ pub fn writeProcess(io: std.Io, path: []const u8, recipe_id: []const u8, engine:
         .startedAt = started_at,
         .readyDeadlineAt = ready_deadline_at,
     }, .{ .whitespace = .indent_2 }, &output.writer);
-    var atomic_file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{
-        .permissions = @enumFromInt(0o600),
-        .make_path = true,
-        .replace = true,
-    });
-    defer atomic_file.deinit(io);
-    try atomic_file.file.writeStreamingAll(io, output.writer.buffered());
-    try atomic_file.file.sync(io);
-    try atomic_file.replace(io);
+    try writeAtomic(io, path, output.writer.buffered());
+}
+
+pub fn writeReservation(io: std.Io, path: []const u8, recipe_id: []const u8, engine: []const u8, port: u16, nonce: []const u8, ready_timeout_seconds: u64) !void {
+    var timestamp_buffer: [24]u8 = undefined;
+    const started_at = formatTimestamp(io, &timestamp_buffer);
+    var deadline_buffer: [24]u8 = undefined;
+    const ready_deadline_at = formatTimestampAt(io, ready_timeout_seconds, &deadline_buffer);
+    const Document = struct {
+        name: []const u8 = "llm",
+        nodeId: []const u8 = "self",
+        engine: []const u8,
+        recipeId: []const u8,
+        runtime: []const u8 = "process",
+        ref: ?u8 = null,
+        port: u16,
+        devices: []const []const u8 = &.{},
+        nonce: []const u8,
+        startedAt: []const u8,
+        readyDeadlineAt: []const u8,
+    };
+    var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
+    defer output.deinit();
+    try std.json.Stringify.value(Document{
+        .engine = engine,
+        .recipeId = recipe_id,
+        .port = port,
+        .nonce = nonce,
+        .startedAt = started_at,
+        .readyDeadlineAt = ready_deadline_at,
+    }, .{ .whitespace = .indent_2 }, &output.writer);
+    try writeAtomic(io, path, output.writer.buffered());
 }
 
 pub fn dropLlm(io: std.Io, path: []const u8) !void {
@@ -189,4 +212,16 @@ fn formatTimestampAt(io: std.Io, offset_seconds: u64, buffer: *[24]u8) []const u
         day_seconds.getMinutesIntoHour(),
         day_seconds.getSecondsIntoMinute(),
     }) catch unreachable;
+}
+
+fn writeAtomic(io: std.Io, path: []const u8, document: []const u8) !void {
+    var atomic_file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{
+        .permissions = @enumFromInt(0o600),
+        .make_path = true,
+        .replace = true,
+    });
+    defer atomic_file.deinit(io);
+    try atomic_file.file.writeStreamingAll(io, document);
+    try atomic_file.file.sync(io);
+    try atomic_file.replace(io);
 }
