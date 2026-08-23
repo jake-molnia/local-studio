@@ -31,6 +31,8 @@ const provider_catalog = @import("services/provider_catalog.zig");
 const provider_routing = @import("services/provider_routing.zig");
 const provider_gateway = @import("services/provider_gateway.zig");
 const openai_protocol = @import("services/openai_protocol.zig");
+const head_providers = @import("services/head_providers.zig");
+const codex_gateway = @import("services/codex_gateway.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -76,6 +78,7 @@ pub const HttpServer = struct {
     runtime_jobs: runtime_jobs_service.State,
     downloads: download_manager.State,
     compute: compute_lifecycle.Manager,
+    head_provider_state: head_providers.State,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -84,6 +87,8 @@ pub const HttpServer = struct {
         errdefer studio.deinit();
         var compute = try compute_lifecycle.Manager.init(allocator, io, config.data_dir);
         errdefer compute.deinit();
+        var head_provider_state = try head_providers.State.init(allocator, io, config.data_dir);
+        errdefer head_provider_state.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -95,12 +100,14 @@ pub const HttpServer = struct {
             .runtime_jobs = runtime_jobs_service.State.init(allocator, io),
             .downloads = download_manager.State.init(allocator, io),
             .compute = compute,
+            .head_provider_state = head_provider_state,
         };
     }
 
     pub fn deinit(server: *HttpServer) void {
         server.listener.deinit(server.io);
         server.compute.deinit();
+        server.head_provider_state.deinit();
         server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
@@ -121,7 +128,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -133,7 +140,7 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -155,7 +162,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -172,7 +179,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -395,9 +402,59 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/provider-models") and request.head.method == .GET) {
         var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
         defer snapshot.deinit();
-        const response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+        const configured_catalog = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+        defer allocator.free(configured_catalog);
+        const subscription_catalog = try head_provider_state.catalogPayload();
+        defer allocator.free(subscription_catalog);
+        const response = try provider_routing.mergeProviderCatalogs(allocator, configured_catalog, subscription_catalog);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers") and request.head.method == .GET) {
+        const response = try head_provider_state.listPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login") and request.head.method == .POST) {
+        const provider_id = try pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/login");
+        defer allocator.free(provider_id);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        defer parsed.deinit();
+        const auth_type = if (parsed.value == .object) if (parsed.value.object.get("type")) |value| if (value == .string) value.string else "" else "" else "";
+        const response = head_provider_state.startLogin(client, provider_id, auth_type) catch |failure| return respondHeadProviderFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId") and request.head.method == .GET) {
+        const parameters = try modelProviderJobParameters(allocator, request.head.target, "");
+        defer parameters.deinit(allocator);
+        const response = try head_provider_state.jobPayload(parameters.provider_id, parameters.job_id, queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId/cancel") and request.head.method == .POST) {
+        const parameters = try modelProviderJobParameters(allocator, request.head.target, "/cancel");
+        defer parameters.deinit(allocator);
+        if (!(try head_provider_state.cancel(parameters.provider_id, parameters.job_id))) return respondDownloadError(request, .not_found, "Model provider login job not found");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId/respond") and request.head.method == .POST) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        return respondDownloadError(request, .bad_request, "No matching model provider login prompt");
+    }
+    if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/logout") and request.head.method == .POST) {
+        const provider_id = try pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/logout");
+        defer allocator.free(provider_id);
+        if (!(try head_provider_state.logout(provider_id))) return respondDownloadError(request, .not_found, "Head model provider not found");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/providers") and request.head.method == .GET) {
@@ -522,7 +579,11 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer snapshot.deinit();
         const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
         defer allocator.free(provider_response);
-        const response = try provider_routing.mergedModelCatalog(allocator, worker_response, provider_response);
+        const subscription_response = try head_provider_state.catalogPayload();
+        defer allocator.free(subscription_response);
+        const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
+        defer allocator.free(all_providers);
+        const response = try provider_routing.mergedModelCatalog(allocator, worker_response, all_providers);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -530,7 +591,19 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/models")) {
-        const response = try model_service.localCatalogPayload(allocator, io, database, recipe_column, llm_instance_path);
+        const local_response = try model_service.localCatalogPayload(allocator, io, database, recipe_column, llm_instance_path);
+        defer allocator.free(local_response);
+        const response = if (mode == .standalone) response: {
+            var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+            defer snapshot.deinit();
+            const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+            defer allocator.free(provider_response);
+            const subscription_response = try head_provider_state.catalogPayload();
+            defer allocator.free(subscription_response);
+            const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
+            defer allocator.free(all_providers);
+            break :response try provider_routing.mergedModelCatalog(allocator, local_response, all_providers);
+        } else try allocator.dupe(u8, local_response);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -538,19 +611,19 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
-        return try serveHeadInference(allocator, io, configuration, studio, client, database, worker_pool, request);
+        return try serveHeadInference(allocator, io, configuration, studio, head_provider_state, client, database, worker_pool, request);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/responses")) {
-        return try serveHeadInference(allocator, io, configuration, studio, client, database, worker_pool, request);
+        return try serveHeadInference(allocator, io, configuration, studio, head_provider_state, client, database, worker_pool, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
-        return try serveLocalChat(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin);
+        return try serveLocalChat(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path, request, inference_origin);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/responses")) {
-        return try serveLocalPassthrough(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin, .responses);
+        return try serveLocalPassthrough(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path, request, inference_origin, .responses);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/messages")) {
-        return try serveLocalPassthrough(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
+        return try serveLocalPassthrough(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/count-tokens")) {
         return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .count);
@@ -1063,6 +1136,14 @@ fn respondProviderFailure(request: *http.Server.Request, failure: anyerror, prov
     return respondDownloadError(request, status, output.buffered());
 }
 
+fn respondHeadProviderFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    return switch (failure) {
+        error.ProviderNotFound => respondDownloadError(request, .not_found, "Head model provider not found"),
+        error.InvalidAuthType => respondDownloadError(request, .bad_request, "Provider requires OAuth"),
+        else => respondDownloadError(request, .service_unavailable, "Head model provider is unavailable"),
+    };
+}
+
 fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {
     const storage = try allocator.alloc(u8, max_settings_request_bytes);
     defer allocator.free(storage);
@@ -1287,7 +1368,7 @@ fn serveRuntimeConfigHelp(allocator: std.mem.Allocator, io: Io, configuration: *
     return request.head.keep_alive;
 }
 
-fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, worker_pool: *worker_service.Pool, request: *http.Server.Request) !bool {
+fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, worker_pool: *worker_service.Pool, request: *http.Server.Request) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1317,6 +1398,18 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     if (model_value != .string) return try respondModelRequired(request);
     const model_id = std.mem.trim(u8, model_value.string, " \t\r\n");
     if (model_id.len == 0) return try respondModelRequired(request);
+
+    const codex_prefix = "openai-codex/";
+    if (std.mem.startsWith(u8, model_id, codex_prefix)) {
+        const upstream_model = model_id[codex_prefix.len..];
+        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
+        var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Head");
+        defer credential.deinit();
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, body, requested_stream, request) catch return false;
+        return false;
+    }
 
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
     defer snapshot.deinit();
@@ -1383,7 +1476,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     return false;
 }
 
-fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8) !bool {
+fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1417,6 +1510,16 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
     }
 
     const requested_provider_model = if (parsed.value.object.get("model")) |value| if (value == .string) std.mem.trim(u8, value.string, " \t\r\n") else "" else "";
+    const codex_prefix = "openai-codex/";
+    if (std.mem.startsWith(u8, requested_provider_model, codex_prefix)) {
+        const upstream_model = requested_provider_model[codex_prefix.len..];
+        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
+        var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
+        defer credential.deinit();
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, body, requested_stream, request) catch return false;
+        return false;
+    }
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
     defer snapshot.deinit();
     if (provider_routing.resolve(snapshot.providers, requested_provider_model)) |provider_route| {
@@ -1461,7 +1564,7 @@ const LocalProtocol = enum {
     messages,
 };
 
-fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: LocalProtocol) !bool {
+fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: LocalProtocol) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1493,6 +1596,17 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
+    }
+
+    const codex_prefix = "openai-codex/";
+    if (protocol == .responses and std.mem.startsWith(u8, requested_model, codex_prefix)) {
+        const upstream_model = requested_model[codex_prefix.len..];
+        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
+        var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
+        defer credential.deinit();
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, body, requested_stream, request) catch return false;
+        return false;
     }
 
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
@@ -1758,6 +1872,34 @@ fn pathParameterBetween(allocator: std.mem.Allocator, target: []const u8, prefix
     const storage = try allocator.dupe(u8, encoded);
     defer allocator.free(storage);
     return try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage));
+}
+
+const ModelProviderJobParameters = struct {
+    provider_id: []u8,
+    job_id: []u8,
+
+    fn deinit(parameters: ModelProviderJobParameters, allocator: std.mem.Allocator) void {
+        allocator.free(parameters.provider_id);
+        allocator.free(parameters.job_id);
+    }
+};
+
+fn modelProviderJobParameters(allocator: std.mem.Allocator, target: []const u8, suffix: []const u8) !ModelProviderJobParameters {
+    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
+    const path = target[0..query_start];
+    const prefix = "/studio/model-providers/";
+    if (!std.mem.startsWith(u8, path, prefix) or !std.mem.endsWith(u8, path, suffix)) return error.InvalidPathParameter;
+    const end = path.len - suffix.len;
+    const middle = path[prefix.len..end];
+    const separator = std.mem.indexOf(u8, middle, "/login/") orelse return error.InvalidPathParameter;
+    if (separator == 0 or separator + 7 >= middle.len) return error.InvalidPathParameter;
+    const provider_storage = try allocator.dupe(u8, middle[0..separator]);
+    defer allocator.free(provider_storage);
+    const job_storage = try allocator.dupe(u8, middle[separator + 7 ..]);
+    defer allocator.free(job_storage);
+    const provider_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(provider_storage));
+    errdefer allocator.free(provider_id);
+    return .{ .provider_id = provider_id, .job_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(job_storage)) };
 }
 
 fn queryUnsigned(target: []const u8, expected_name: []const u8) ?u64 {

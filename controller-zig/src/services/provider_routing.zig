@@ -75,3 +75,30 @@ pub fn mergedModelCatalog(allocator: std.mem.Allocator, worker_document: []const
     try output.writer.writeAll("]}");
     return output.toOwnedSlice();
 }
+
+pub fn mergeProviderCatalogs(allocator: std.mem.Allocator, first_document: []const u8, second_document: []const u8) ![]u8 {
+    var first = std.json.parseFromSlice(std.json.Value, allocator, first_document, .{}) catch return error.InvalidProviderCatalog;
+    defer first.deinit();
+    var second = std.json.parseFromSlice(std.json.Value, allocator, second_document, .{}) catch return error.InvalidProviderCatalog;
+    defer second.deinit();
+    if (first.value != .object or second.value != .object) return error.InvalidProviderCatalog;
+    const first_providers = first.value.object.get("providers") orelse return error.InvalidProviderCatalog;
+    const second_providers = second.value.object.get("providers") orelse return error.InvalidProviderCatalog;
+    if (first_providers != .array or second_providers != .array) return error.InvalidProviderCatalog;
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"providers\":[");
+    var count: usize = 0;
+    for (first_providers.array.items) |provider| {
+        if (count > 0) try output.writer.writeByte(',');
+        try std.json.Stringify.value(provider, .{}, &output.writer);
+        count += 1;
+    }
+    for (second_providers.array.items) |provider| {
+        if (count > 0) try output.writer.writeByte(',');
+        try std.json.Stringify.value(provider, .{}, &output.writer);
+        count += 1;
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
