@@ -159,6 +159,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
         });
         return request.head.keep_alive;
     }
+    if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
+        const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
+        defer allocator.free(response);
+        try request.respond(response, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
             try request.respond("{\"detail\":\"Proxy spike upstream is not configured\"}", .{

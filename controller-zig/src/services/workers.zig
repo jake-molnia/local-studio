@@ -64,6 +64,29 @@ const ProbeResult = struct {
     }
 };
 
+const ProbeList = struct {
+    allocator: std.mem.Allocator,
+    storage: []ProbeResult,
+
+    fn deinit(results: *ProbeList) void {
+        for (results.storage) |*result| result.deinit();
+        results.allocator.free(results.storage);
+        results.* = undefined;
+    }
+};
+
+const ModelEntry = struct {
+    allocator: std.mem.Allocator,
+    id: []u8,
+    document: []u8,
+
+    fn deinit(model: *ModelEntry) void {
+        model.allocator.free(model.id);
+        model.allocator.free(model.document);
+        model.* = undefined;
+    }
+};
+
 const FetchResponse = struct {
     allocator: std.mem.Allocator,
     status: http.Status,
@@ -83,27 +106,13 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
     };
     defer targets.deinit();
 
-    const results = try allocator.alloc(ProbeResult, targets.len);
-    defer allocator.free(results);
-    for (results) |*result| result.* = .{ .allocator = allocator };
-    defer for (results) |*result| result.deinit();
-
-    var group: Io.Group = .init;
-    defer group.cancel(io);
-    var start: usize = 0;
-    while (start < targets.len) {
-        const end = @min(start + max_parallel_probes, targets.len);
-        for (targets.items()[start..end], results[start..end]) |*target, *result| {
-            group.concurrent(io, probeInto, .{ allocator, io, client, target, result }) catch probeInto(allocator, io, client, target, result);
-        }
-        try group.await(io);
-        start = end;
-    }
+    var results = try probeTargets(allocator, io, client, targets.items(), true);
+    defer results.deinit();
 
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.print("{{\"mode\":\"{t}\",\"workers\":[", .{mode});
-    for (targets.items(), results, 0..) |target, result, index| {
+    for (targets.items(), results.storage, 0..) |target, result, index| {
         if (index > 0) try output.writer.writeByte(',');
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(target.id, .{}, &output.writer);
@@ -120,6 +129,40 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
         try output.writer.writeAll(",\"error\":");
         if (result.error_name) |error_name| try std.json.Stringify.value(error_name, .{}, &output.writer) else try output.writer.writeAll("null");
         try output.writer.writeByte('}');
+    }
+    try output.writer.writeAll("]}");
+    return try output.toOwnedSlice();
+}
+
+pub fn modelCatalogPayload(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database) ![]u8 {
+    var targets = loadTargets(allocator, io, database) catch return try allocator.dupe(u8, "{\"object\":\"list\",\"data\":[]}");
+    defer targets.deinit();
+    var results = try probeTargets(allocator, io, client, targets.items(), false);
+    defer results.deinit();
+
+    var models: std.ArrayList(ModelEntry) = .empty;
+    defer {
+        for (models.items) |*model| model.deinit();
+        models.deinit(allocator);
+    }
+    var model_indexes = std.StringHashMap(usize).init(allocator);
+    defer model_indexes.deinit();
+    for (results.storage) |result| {
+        if (!result.healthy) continue;
+        try addModels(allocator, &models, &model_indexes, result.models orelse continue);
+    }
+    std.mem.sort(ModelEntry, models.items, {}, struct {
+        fn lessThan(_: void, left: ModelEntry, right: ModelEntry) bool {
+            return std.mem.lessThan(u8, left.id, right.id);
+        }
+    }.lessThan);
+
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"object\":\"list\",\"data\":[");
+    for (models.items, 0..) |model, index| {
+        if (index > 0) try output.writer.writeByte(',');
+        try output.writer.writeAll(model.document);
     }
     try output.writer.writeAll("]}");
     return try output.toOwnedSlice();
@@ -142,6 +185,25 @@ fn loadTargets(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database)
     try database.lock(io);
     defer database.unlock(io);
     return try targetsFromRigs(allocator, database);
+}
+
+fn probeTargets(allocator: std.mem.Allocator, io: Io, client: *http.Client, targets: []Target, include_hardware: bool) !ProbeList {
+    const results = try allocator.alloc(ProbeResult, targets.len);
+    errdefer allocator.free(results);
+    for (results) |*result| result.* = .{ .allocator = allocator };
+    errdefer for (results) |*result| result.deinit();
+    var group: Io.Group = .init;
+    defer group.cancel(io);
+    var start: usize = 0;
+    while (start < targets.len) {
+        const end = @min(start + max_parallel_probes, targets.len);
+        for (targets[start..end], results[start..end]) |*target, *result| {
+            group.concurrent(io, probeInto, .{ allocator, io, client, target, result, include_hardware }) catch probeInto(allocator, io, client, target, result, include_hardware);
+        }
+        try group.await(io);
+        start = end;
+    }
+    return .{ .allocator = allocator, .storage = results };
 }
 
 fn targetsFromRigs(allocator: std.mem.Allocator, database: *sqlite.Database) !TargetList {
@@ -222,7 +284,7 @@ fn normalizeAddress(allocator: std.mem.Allocator, address: []const u8) ![]u8 {
     return try output.toOwnedSlice();
 }
 
-fn probeInto(allocator: std.mem.Allocator, io: Io, client: *http.Client, target: *const Target, result: *ProbeResult) void {
+fn probeInto(allocator: std.mem.Allocator, io: Io, client: *http.Client, target: *const Target, result: *ProbeResult, include_hardware: bool) void {
     formatTimestamp(io, &result.checked_at);
     var models_response = fetchWithTimeout(allocator, io, client, target, "/v1/models") catch |failure| {
         result.error_name = @errorName(failure);
@@ -238,6 +300,8 @@ fn probeInto(allocator: std.mem.Allocator, io: Io, client: *http.Client, target:
         return;
     };
     result.healthy = true;
+
+    if (!include_hardware) return;
 
     var hardware_response = fetchWithTimeout(allocator, io, client, target, "/studio/rigs") catch return;
     defer hardware_response.deinit();
@@ -324,6 +388,68 @@ fn modelArray(allocator: std.mem.Allocator, body: []const u8) ![]u8 {
     if (data != .array) return error.InvalidWorkerModelData;
     for (data.array.items) |model| try validateModel(model);
     return try serializeValue(allocator, data);
+}
+
+fn addModels(allocator: std.mem.Allocator, models: *std.ArrayList(ModelEntry), indexes: *std.StringHashMap(usize), document: []const u8) !void {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, document, .{});
+    defer parsed.deinit();
+    if (parsed.value != .array) return error.InvalidWorkerModelData;
+    for (parsed.value.array.items) |model| {
+        if (model != .object) return error.InvalidWorkerModelData;
+        const id = model.object.get("id") orelse return error.InvalidWorkerModelData;
+        if (id != .string) return error.InvalidWorkerModelData;
+        if (indexes.get(id.string)) |index| {
+            try mergeModel(allocator, &models.items[index], model);
+            continue;
+        }
+        try models.ensureUnusedCapacity(allocator, 1);
+        try indexes.ensureUnusedCapacity(1);
+        const entry = try makeModelEntry(allocator, id.string, model);
+        models.appendAssumeCapacity(entry);
+        indexes.putAssumeCapacityNoClobber(entry.id, models.items.len - 1);
+    }
+}
+
+fn makeModelEntry(allocator: std.mem.Allocator, id: []const u8, value: std.json.Value) !ModelEntry {
+    const owned_id = try allocator.dupe(u8, id);
+    errdefer allocator.free(owned_id);
+    return .{ .allocator = allocator, .id = owned_id, .document = try serializeValue(allocator, value) };
+}
+
+fn mergeModel(allocator: std.mem.Allocator, existing: *ModelEntry, candidate: std.json.Value) !void {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, existing.document, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidWorkerModelData;
+    const arena = parsed.arena.allocator();
+    const active = modelActive(parsed.value) or modelActive(candidate);
+    try parsed.value.object.put(arena, "active", .{ .bool = active });
+    const max_length = @max(modelMaxLength(parsed.value), modelMaxLength(candidate));
+    try parsed.value.object.put(arena, "max_model_len", if (max_length > 0) numberValue(max_length) else .null);
+    const updated = try serializeValue(allocator, parsed.value);
+    allocator.free(existing.document);
+    existing.document = updated;
+}
+
+fn modelActive(model: std.json.Value) bool {
+    const value = model.object.get("active") orelse return false;
+    return value == .bool and value.bool;
+}
+
+fn modelMaxLength(model: std.json.Value) f64 {
+    const value = model.object.get("max_model_len") orelse return 0;
+    return switch (value) {
+        .integer => |integer| @floatFromInt(integer),
+        .float => |float| float,
+        .number_string => |number| std.fmt.parseFloat(f64, number) catch 0,
+        else => 0,
+    };
+}
+
+fn numberValue(value: f64) std.json.Value {
+    if (@floor(value) == value and value >= @as(f64, @floatFromInt(std.math.minInt(i64))) and value <= @as(f64, @floatFromInt(std.math.maxInt(i64)))) {
+        return .{ .integer = @intFromFloat(value) };
+    }
+    return .{ .float = value };
 }
 
 fn validateModel(model: std.json.Value) !void {
