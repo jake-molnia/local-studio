@@ -37,6 +37,8 @@ import { GoalStrip } from "@/features/agent/ui/goal-strip";
 import { useSessionGoal } from "@/features/agent/ui/use-session-goal";
 import { ADD_PROJECT_EVENT } from "@/lib/workspace-events";
 import { cx } from "@/ui/utils";
+import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
+import { handleMenuKeyboard } from "@/ui/menu";
 import { QueuedMessageStack } from "@/features/agent/ui/queued-message-stack";
 import type { QueuedMessage } from "@/features/agent/messages";
 import type { BrowserBackend } from "@/features/agent/tools/types";
@@ -129,15 +131,14 @@ export function ComposerProjectDrawer({
   const [panelMaxHeight, setPanelMaxHeight] = useState(448);
   const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0, width: 320 });
   const positionPanel = useCallback(() => {
-    const anchor = contextTriggerRef.current;
+    const anchor = contextTriggerRef.current?.closest<HTMLElement>(".agent-composer-box");
     const panel = panelRef.current;
     if (!anchor || !panel) return;
     const anchorRect = anchor.getBoundingClientRect();
-    const width = Math.min(320, Math.max(0, window.innerWidth - 16));
+    const width = Math.min(anchorRect.width, Math.max(0, window.innerWidth - 16));
     const availableAbove = Math.max(0, anchorRect.top - 8);
     const availableBelow = Math.max(0, window.innerHeight - anchorRect.bottom - 8);
-    const placement =
-      panel.scrollHeight <= availableBelow || availableBelow >= availableAbove ? "below" : "above";
+    const placement = panel.scrollHeight <= availableBelow ? "below" : "above";
     const left = Math.min(Math.max(8, anchorRect.left), Math.max(8, window.innerWidth - width - 8));
     const top =
       placement === "above"
@@ -312,11 +313,20 @@ export function ComposerProjectDrawer({
                 data-placement={panelPlacement}
                 data-state={open ? "open" : "closed"}
                 className={cx(
-                  "composer-context-popover fixed z-[300] overflow-y-auto rounded-[10px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]",
+                  `composer-context-popover fixed z-[300] overflow-y-auto p-1 text-(--fg) ${POPOVER_SURFACE_CLASS}`,
                   panelReady &&
                     (open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"),
                 )}
                 aria-hidden={!open}
+                onKeyDown={
+                  view === "root"
+                    ? (event) =>
+                        handleMenuKeyboard(event, () => {
+                          setOpen(false);
+                          requestAnimationFrame(() => contextTriggerRef.current?.focus());
+                        })
+                    : undefined
+                }
               >
                 {view === "root" || view === "projects" ? (
                   <div className="flex items-center gap-1 border-b border-(--border) px-0.5 pb-1.5">
@@ -505,6 +515,7 @@ function ContextMenuRoot({
             onClick: onAttach,
             disabled: false,
             drillIn: false,
+            group: "session",
           },
         ]
       : []),
@@ -516,6 +527,7 @@ function ContextMenuRoot({
       onClick: onGoal,
       disabled: false,
       drillIn: true,
+      group: "session",
     },
     {
       key: "browser",
@@ -525,6 +537,7 @@ function ContextMenuRoot({
       onClick: onToggleBrowserTool,
       disabled: false,
       drillIn: false,
+      group: "tools",
     },
     ...(browserToolEnabled
       ? [
@@ -536,6 +549,7 @@ function ContextMenuRoot({
             onClick: onToggleBrowserBackend,
             disabled: false,
             drillIn: false,
+            group: "tools",
           },
         ]
       : []),
@@ -547,6 +561,7 @@ function ContextMenuRoot({
       onClick: onProjects,
       disabled: !canPickProject,
       drillIn: true,
+      group: "workspace",
     },
     ...(gitSummary
       ? [
@@ -559,6 +574,7 @@ function ContextMenuRoot({
                 onClick: onGit,
                 disabled: false,
                 drillIn: true,
+                group: "workspace",
               }
             : {
                 key: "git",
@@ -568,6 +584,7 @@ function ContextMenuRoot({
                 onClick: onInitGit,
                 disabled: false,
                 drillIn: false,
+                group: "workspace",
               },
         ]
       : []),
@@ -581,6 +598,7 @@ function ContextMenuRoot({
             onClick: onChanges,
             disabled: false,
             drillIn: false,
+            group: "workspace",
           },
         ]
       : []),
@@ -591,23 +609,30 @@ function ContextMenuRoot({
   );
 
   return (
-    <div className="flex flex-col gap-px pt-1">
+    <div role="menu" aria-label="Add context" className="flex flex-col gap-px pt-1">
       {visible.length ? (
-        visible.map((action) => (
-          <button
-            key={action.key}
-            type="button"
-            onClick={action.onClick}
-            disabled={action.disabled}
-            className="group flex min-h-8 w-full items-center gap-2 rounded-[6px] px-2 py-1 text-left text-[length:var(--fs-xs)] transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-35"
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-(--dim) group-hover:text-(--fg)/80">
-              {action.icon}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-(--fg)/88">{action.label}</span>
-            <span className="max-w-[52%] truncate text-right text-(--dim)">{action.detail}</span>
-            {action.drillIn ? <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)/65" /> : null}
-          </button>
+        visible.map((action, index) => (
+          <div key={action.key} role="none">
+            {index > 0 && visible[index - 1]?.group !== action.group ? (
+              <div className="my-1 h-px bg-(--border)" aria-hidden />
+            ) : null}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={action.onClick}
+              disabled={action.disabled}
+              className="group flex h-6 min-h-6 w-full items-center gap-2 rounded-[5px] px-2 py-0 text-left text-[length:var(--fs-xs)] transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:opacity-35"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center text-(--dim) group-hover:text-(--fg)/80">
+                {action.icon}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-(--fg)/88">{action.label}</span>
+              <span className="max-w-[52%] truncate text-right text-(--dim)">{action.detail}</span>
+              {action.drillIn ? (
+                <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)/65" />
+              ) : null}
+            </button>
+          </div>
         ))
       ) : (
         <div className="px-2 py-3 text-center text-[length:var(--fs-xs)] text-(--dim)">
