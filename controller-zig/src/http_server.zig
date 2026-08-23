@@ -45,6 +45,7 @@ const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
 const agent_pty = @import("services/agent_pty.zig");
+const agent_browser = @import("services/agent_browser.zig");
 const agent_goals = @import("services/agent_goals.zig");
 const agent_subagents = @import("services/agent_subagents.zig");
 const request_auth = @import("services/request_auth.zig");
@@ -96,6 +97,7 @@ pub const HttpServer = struct {
     head_provider_state: head_providers.State,
     harness: harness_runtime.Manager,
     pty: agent_pty.Manager,
+    browser: agent_browser.Manager,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -110,6 +112,8 @@ pub const HttpServer = struct {
         errdefer harness.deinit();
         var pty = agent_pty.Manager.init(allocator, io, &config);
         errdefer pty.deinit();
+        var browser = agent_browser.Manager.init(allocator, io, config.environment);
+        errdefer browser.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -124,6 +128,7 @@ pub const HttpServer = struct {
             .head_provider_state = head_provider_state,
             .harness = harness,
             .pty = pty,
+            .browser = browser,
         };
     }
 
@@ -133,6 +138,7 @@ pub const HttpServer = struct {
         server.head_provider_state.deinit();
         server.harness.deinit();
         server.pty.deinit();
+        server.browser.deinit();
         server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
@@ -155,7 +161,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.harness, &server.pty, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.harness, &server.pty, &server.browser, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -167,7 +173,7 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -189,7 +195,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, harness, pty, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, harness, pty, browser, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -206,7 +212,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -427,6 +433,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = agent_connectors.sshPathPayload(allocator, io, mode, client, database, node_id) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.startsWith(u8, route.path, "/api/agent/browser/")) {
+        const target = try allocator.dupe(u8, request.head.target);
+        defer allocator.free(target);
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (mode == .standalone)
+            localBrowserPayload(allocator, browser, client, route.path, target, request.head.method, document)
+        else
+            agent_browser.remotePayload(allocator, io, client, database, target, request.head.method, document, node_id);
+        const payload = response catch |failure| return respondBrowserFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal/pty/stream")) {
@@ -719,6 +741,16 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else
             pty.closePayload(document);
         const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.startsWith(u8, route.path, "/internal/node/v1/browser/")) {
+        const target = try allocator.dupe(u8, request.head.target);
+        defer allocator.free(target);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const payload = localBrowserPayload(allocator, browser, client, route.path, target, request.head.method, document) catch |failure| return respondBrowserFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1903,6 +1935,57 @@ fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !boo
         error.TerminalNodeUnavailable => "The terminal node is unavailable",
         else => @errorName(failure),
     };
+    return respondDownloadError(request, status, detail);
+}
+
+fn localBrowserPayload(allocator: std.mem.Allocator, browser: *agent_browser.Manager, client: *http.Client, route_path: []const u8, target: []const u8, method: http.Method, document: ?[]const u8) ![]u8 {
+    if (std.mem.endsWith(u8, route_path, "/fetch")) {
+        const url = try queryParameter(allocator, target, "url");
+        defer if (url) |value| allocator.free(value);
+        return browser.fetchPayload(client, url orelse return error.BrowserUrlRequired);
+    }
+    if (std.mem.endsWith(u8, route_path, "/state")) return browser.statePayload();
+    if (std.mem.endsWith(u8, route_path, "/history")) return browser.historyPayload(queryUnsigned(target, "visited") == 1);
+    if (std.mem.endsWith(u8, route_path, "/engines")) return browser.enginesPayload();
+    if (std.mem.endsWith(u8, route_path, "/localhosts")) return allocator.dupe(u8, "{\"sites\":[]}");
+    if (std.mem.endsWith(u8, route_path, "/frame") or std.mem.endsWith(u8, route_path, "/input") or std.mem.endsWith(u8, route_path, "/viewport") or std.mem.endsWith(u8, route_path, "/engine")) return error.BrowserInteractiveUnavailable;
+    if (method != .POST) return error.InvalidBrowserPath;
+    const prefix = if (std.mem.startsWith(u8, route_path, "/internal/node/v1/browser/")) "/internal/node/v1/browser/" else "/api/agent/browser/";
+    const verb = try pathParameter(allocator, target, prefix);
+    defer allocator.free(verb);
+    return browser.verbPayload(client, verb, document orelse "");
+}
+
+fn respondBrowserFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.BrowserUrlRequired, error.InvalidBrowserUrl, error.BrowserAddressRejected, error.InvalidBrowserPayload, error.InvalidBrowserPath => .bad_request,
+        error.BrowserNodeRequired => .conflict,
+        error.BrowserNodeUnavailable, error.BrowserInteractiveUnavailable => .service_unavailable,
+        error.BrowserUpstreamRejected, error.BrowserRedirectUnsupported => .bad_gateway,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.BrowserUrlRequired => "url is required",
+        error.InvalidBrowserUrl => "valid public or localhost http(s) url required",
+        error.BrowserAddressRejected => "browser target address is not allowed",
+        error.InvalidBrowserPayload => "invalid browser payload",
+        error.InvalidBrowserPath => "invalid browser operation",
+        error.BrowserNodeRequired => "No enrolled node offers browser execution",
+        error.BrowserNodeUnavailable => "The browser node is unavailable",
+        error.BrowserInteractiveUnavailable => "Interactive browser engine unavailable",
+        error.BrowserUpstreamRejected => "Browser target rejected the request",
+        error.BrowserRedirectUnsupported => "Browser target redirected the request",
+        else => @errorName(failure),
+    };
+    if (status == .service_unavailable and failure == error.BrowserInteractiveUnavailable) {
+        var buffer: [256]u8 = undefined;
+        var output: Io.Writer = .fixed(&buffer);
+        try output.writeAll("{\"ok\":false,\"error\":");
+        try std.json.Stringify.value(detail, .{}, &output);
+        try output.writeByte('}');
+        try request.respond(output.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     return respondDownloadError(request, status, detail);
 }
 

@@ -85,7 +85,7 @@ fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: 
     try std.json.Stringify.value(api_key, .{}, &output.writer);
     try output.writer.writeAll(",\"role\":");
     try std.json.Stringify.value(if (mode == .worker) "worker" else "standalone", .{}, &output.writer);
-    try output.writer.print(",\"capabilities\":{{\"compute\":true,\"harnesses\":[{s}],\"mcp\":{},\"terminal\":{},\"browser\":false,\"harnessDetails\":[", .{
+    try output.writer.print(",\"capabilities\":{{\"compute\":true,\"harnesses\":[{s}],\"mcp\":{},\"terminal\":{},\"browser\":true,\"harnessDetails\":[", .{
         if (pi_available) "\"pi\"" else "", true, true,
     });
     if (pi_available) {
