@@ -1,6 +1,7 @@
 const std = @import("std");
 const config_module = @import("../config.zig");
 const pi_model_route = @import("pi_model_route.zig");
+const harness_session_id = @import("harness_session_id.zig");
 
 const Io = std.Io;
 const max_event_bytes = 16 * 1024 * 1024;
@@ -19,6 +20,7 @@ const LoggedEvent = struct {
 const Session = struct {
     allocator: std.mem.Allocator,
     id: []u8,
+    native_id: []u8,
     model_id: []u8,
     cwd: []u8,
     session_dir: []u8,
@@ -33,6 +35,7 @@ const Session = struct {
     fn deinit(session: *Session, io: Io) void {
         if (session.child.id != null) session.child.kill(io);
         session.allocator.free(session.id);
+        session.allocator.free(session.native_id);
         session.allocator.free(session.model_id);
         session.allocator.free(session.cwd);
         session.allocator.free(session.session_dir);
@@ -142,7 +145,7 @@ pub const Manager = struct {
         const session_id = optionalString(object, "sessionId") orelse "default";
         const model_id = requiredString(object, "modelId") orelse return error.ModelIdRequired;
         const message = requiredString(object, "message") orelse return error.MessageRequired;
-        if (!validSessionId(session_id)) return error.InvalidSessionId;
+        if (!harness_session_id.validRuntime(session_id)) return error.InvalidSessionId;
         const mode = optionalString(object, "mode") orelse "prompt";
         if (!std.mem.eql(u8, mode, "prompt") and !std.mem.eql(u8, mode, "steer") and !std.mem.eql(u8, mode, "follow_up")) return error.InvalidTurnMode;
         if (object.get("queueAction") != null) return error.QueueMutationNotSupported;
@@ -150,7 +153,7 @@ pub const Manager = struct {
         const thinking = optionalString(object, "thinkingLevel");
         const tool_access = optionalString(object, "toolAccess") orelse "read_only";
         const session = if (std.mem.eql(u8, mode, "prompt"))
-            try manager.ensureSession(session_id, model_id, cwd, thinking, tool_access)
+            try manager.ensureSession(session_id, optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
         else
             try manager.existingActiveSession(session_id);
         const was_active = session.active;
@@ -184,7 +187,7 @@ pub const Manager = struct {
         try output.writer.writeAll(",\"runtimeSessionId\":");
         try std.json.Stringify.value(session.id, .{}, &output.writer);
         try output.writer.writeAll(",\"piSessionId\":");
-        try std.json.Stringify.value(session.id, .{}, &output.writer);
+        try std.json.Stringify.value(session.native_id, .{}, &output.writer);
         try output.writer.print(",\"active\":{},\"status\":", .{session.active});
         try writeStatus(&output.writer, session);
         try output.writer.writeByte('}');
@@ -304,7 +307,7 @@ pub const Manager = struct {
         }
     }
 
-    fn ensureSession(manager: *Manager, session_id: []const u8, model_id: []const u8, cwd_value: ?[]const u8, thinking: ?[]const u8, tool_access: []const u8) !*Session {
+    fn ensureSession(manager: *Manager, session_id: []const u8, native_value: ?[]const u8, model_id: []const u8, cwd_value: ?[]const u8, thinking: ?[]const u8, tool_access: []const u8) !*Session {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
         if (manager.sessions.get(session_id)) |session| {
@@ -330,7 +333,9 @@ pub const Manager = struct {
         defer argv.deinit(manager.allocator);
         var model_route = try manager.model_route.prepare(model_id);
         defer model_route.deinit();
-        try argv.appendSlice(manager.allocator, &.{ manager.pi_binary, "--mode", "rpc", "--session-dir", session_dir, "--session-id", session_id, "--model", model_route.model_name });
+        const native_id = try harness_session_id.resolve(manager.allocator, session_id, native_value);
+        errdefer manager.allocator.free(native_id);
+        try argv.appendSlice(manager.allocator, &.{ manager.pi_binary, "--mode", "rpc", "--session-dir", session_dir, "--session-id", native_id, "--model", model_route.model_name });
         if (thinking) |level| if (!std.mem.eql(u8, level, "auto")) try argv.appendSlice(manager.allocator, &.{ "--thinking", level });
         if (!std.mem.eql(u8, tool_access, "full")) try argv.appendSlice(manager.allocator, &.{ "--tools", "read,grep,find,ls" });
         var child = try std.process.spawn(manager.io, .{
@@ -348,6 +353,7 @@ pub const Manager = struct {
         session.* = .{
             .allocator = manager.allocator,
             .id = try manager.allocator.dupe(u8, session_id),
+            .native_id = native_id,
             .model_id = try manager.allocator.dupe(u8, model_id),
             .cwd = try manager.allocator.dupe(u8, cwd),
             .session_dir = session_dir,
@@ -522,7 +528,7 @@ fn writeStatus(writer: *Io.Writer, session: *const Session) !void {
     try writer.writeAll(",\"cwd\":");
     try std.json.Stringify.value(session.cwd, .{}, writer);
     try writer.writeAll(",\"piSessionId\":");
-    try std.json.Stringify.value(session.id, .{}, writer);
+    try std.json.Stringify.value(session.native_id, .{}, writer);
     try writer.writeAll(",\"agentDir\":");
     try std.json.Stringify.value(session.session_dir, .{}, writer);
     try writer.print(",\"eventSeq\":{d},\"lastError\":", .{session.event_seq});
@@ -553,7 +559,7 @@ fn sessionIdFromDocument(allocator: std.mem.Allocator, document: []const u8) ![]
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidSessionPayload;
     const id = optionalString(parsed.value.object, "sessionId") orelse "default";
-    if (!validSessionId(id)) return error.InvalidSessionId;
+    if (!harness_session_id.validRuntime(id)) return error.InvalidSessionId;
     return allocator.dupe(u8, id);
 }
 
@@ -575,12 +581,6 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     return optionalString(object, name);
-}
-
-fn validSessionId(value: []const u8) bool {
-    if (value.len == 0 or value.len > 128) return false;
-    for (value) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-' and byte != '.' and byte != ':') return false;
-    return true;
 }
 
 fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {
