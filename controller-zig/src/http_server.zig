@@ -16,6 +16,7 @@ const metrics = @import("services/metrics.zig");
 const logs = @import("services/logs.zig");
 const studio_settings = @import("services/studio_settings.zig");
 const storage_service = @import("services/storage.zig");
+const studio_operations = @import("services/studio_operations.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -192,6 +193,20 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const models_dir = try studio.modelsDirectory(allocator, io);
         defer allocator.free(models_dir);
         const response = try storage_service.payload(allocator, io, models_dir);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/diagnostics")) {
+        const models_dir = try studio.modelsDirectory(allocator, io);
+        defer allocator.free(models_dir);
+        const response = try studio_operations.diagnosticsPayload(allocator, io, configuration, models_dir, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/presets")) {
+        const response = try studio_operations.presetsPayload(allocator, io, system);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;

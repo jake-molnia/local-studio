@@ -40,6 +40,19 @@ pub fn gpuPayload(allocator: std.mem.Allocator, io: Io, system: *const system_in
     return stringifyPayload(allocator, collection.gpus);
 }
 
+pub fn gpuArrayPayload(allocator: std.mem.Allocator, io: Io, system: *const system_info.Snapshot) ![]u8 {
+    var collection = try collect(allocator, io, system);
+    defer collection.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try std.json.Stringify.value(collection.gpus, .{}, &output.writer);
+    return output.toOwnedSlice();
+}
+
+pub fn availableMemoryBytes(allocator: std.mem.Allocator, io: Io, fallback: u64) u64 {
+    return availableMemory(allocator, io, fallback);
+}
+
 pub fn devicePayload(allocator: std.mem.Allocator, io: Io, system: *const system_info.Snapshot) ![]u8 {
     var collection = try collect(allocator, io, system);
     defer collection.deinit();

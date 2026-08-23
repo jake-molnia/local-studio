@@ -14,7 +14,7 @@ const QueueEntry = struct {
     depth: u8,
 };
 
-const Disk = struct {
+pub const Disk = struct {
     path: []const u8,
     total_bytes: ?u64,
     free_bytes: ?u64,
@@ -29,7 +29,7 @@ pub fn payload(allocator: std.mem.Allocator, io: std.Io, models_dir: []const u8)
     }
     var model_bytes: u64 = 0;
     for (directories.items) |directory| model_bytes +|= directWeightBytes(io, directory);
-    const disk = diskInfo(allocator, models_dir);
+    const disk = inspectDisk(allocator, models_dir);
     const Payload = struct {
         models_dir: []const u8,
         model_count: usize,
@@ -126,7 +126,7 @@ fn endsWithIgnoreCase(value: []const u8, suffix: []const u8) bool {
     return std.ascii.eqlIgnoreCase(value[value.len - suffix.len ..], suffix);
 }
 
-fn diskInfo(allocator: std.mem.Allocator, path: []const u8) Disk {
+pub fn inspectDisk(allocator: std.mem.Allocator, path: []const u8) Disk {
     const path_z = allocator.dupeZ(u8, path) catch return unavailableDisk(path);
     defer allocator.free(path_z);
     var result: c.struct_statvfs = undefined;
