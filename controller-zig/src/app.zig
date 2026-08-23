@@ -50,7 +50,7 @@ pub const App = struct {
     }
 
     pub fn run(app: *App) !void {
-        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.shutdown });
+        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, &app.system, &app.shutdown });
         defer server_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
@@ -60,8 +60,8 @@ pub const App = struct {
     }
 };
 
-fn runServer(server: *http_server.HttpServer, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
-    server.run() catch |failure| switch (failure) {
+fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
+    server.run(database, system) catch |failure| switch (failure) {
         error.Canceled => return error.Canceled,
         else => std.log.err("controller server stopped: {t}", .{failure}),
     };

@@ -79,7 +79,7 @@ pub const routes = [_]Route{
     .{ .method = .POST, .path = "/studio/providers", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/studio/providers/:id", .ownership = .head, .streaming = .never },
     .{ .method = .PUT, .path = "/studio/providers/:id", .ownership = .head, .streaming = .never },
-    .{ .method = .GET, .path = "/studio/rigs", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/studio/rigs", .ownership = .shared, .streaming = .never },
     .{ .method = .POST, .path = "/studio/rigs", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/studio/rigs/:rigId", .ownership = .head, .streaming = .never },
     .{ .method = .PUT, .path = "/studio/rigs/:rigId", .ownership = .head, .streaming = .never },

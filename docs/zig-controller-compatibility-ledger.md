@@ -263,3 +263,7 @@ Handle references may be `process`, `docker`, `docker-pending`, `remote`, or `pi
 8. The federation document says Worker keys are database-protected while the current table stores plaintext.
 
 Each correction needs an explicit compatibility ledger update and live frontend acceptance evidence.
+
+## Approved Zig ownership decisions
+
+- `GET /studio/rigs` is `shared`. Head and Standalone use it for the local rig view, and Worker must serve it so Head hardware probes can resolve the Worker's detected local node. Rig mutations remain Head-owned and locally available in Standalone.

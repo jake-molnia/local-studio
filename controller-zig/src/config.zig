@@ -57,20 +57,26 @@ pub const Config = struct {
         else
             try std.fs.path.join(allocator, &.{ data_dir, "controller.db" });
         const models_value = init.environ_map.get("LOCAL_STUDIO_MODELS_DIR") orelse "/models";
+        const host = try allocator.dupe(u8, std.mem.trim(u8, host_value, " \t\r\n"));
+        const inference_host = try allocator.dupe(u8, init.environ_map.get("LOCAL_STUDIO_INFERENCE_HOST") orelse "localhost");
+        const models_dir = try absolutePath(allocator, cwd, models_value);
+        const api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY"));
+        const spike_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_UPSTREAM"));
+        const spike_fallback_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_FALLBACK_UPSTREAM"));
 
         return .{
             .arena = arena,
             .mode = try Mode.parse(mode_value),
-            .host = try allocator.dupe(u8, std.mem.trim(u8, host_value, " \t\r\n")),
+            .host = host,
             .port = try parsePort(port_value),
-            .inference_host = try allocator.dupe(u8, init.environ_map.get("LOCAL_STUDIO_INFERENCE_HOST") orelse "localhost"),
+            .inference_host = inference_host,
             .inference_port = try parsePort(init.environ_map.get("LOCAL_STUDIO_INFERENCE_PORT") orelse "8000"),
             .data_dir = data_dir,
             .db_path = db_path,
-            .models_dir = try absolutePath(allocator, cwd, models_value),
-            .api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY")),
-            .spike_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_UPSTREAM")),
-            .spike_fallback_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_FALLBACK_UPSTREAM")),
+            .models_dir = models_dir,
+            .api_key = api_key,
+            .spike_upstream = spike_upstream,
+            .spike_fallback_upstream = spike_fallback_upstream,
         };
     }
 

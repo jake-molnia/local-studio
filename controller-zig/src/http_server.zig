@@ -3,6 +3,9 @@ const config_module = @import("config.zig");
 const shutdown = @import("shutdown.zig");
 const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
+const rig_service = @import("services/rigs.zig");
+const sqlite = @import("repository/sqlite.zig");
+const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
 
 const Config = config_module.Config;
@@ -28,6 +31,7 @@ const ConnectionLimiter = struct {
 };
 
 pub const HttpServer = struct {
+    allocator: std.mem.Allocator,
     io: Io,
     config: Config,
     listener: net.Server,
@@ -37,6 +41,7 @@ pub const HttpServer = struct {
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
         const address = try net.IpAddress.parse(config.host, config.port);
         return .{
+            .allocator = allocator,
             .io = io,
             .config = config,
             .listener = try address.listen(io, .{ .reuse_address = true }),
@@ -49,7 +54,7 @@ pub const HttpServer = struct {
         server.client.deinit();
     }
 
-    pub fn run(server: *HttpServer) !void {
+    pub fn run(server: *HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot) !void {
         var group: Io.Group = .init;
         defer group.cancel(server.io);
         while (!shutdown.isRequested()) {
@@ -61,7 +66,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.io, server.config.mode, &server.client, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, system, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -69,7 +74,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -91,7 +96,7 @@ fn serveConnection(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]
             }
             return;
         };
-        const keep_connection = serveRequest(io, mode, client, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, client, database, system, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -108,7 +113,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
@@ -134,6 +139,14 @@ fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]con
 
     if (std.mem.eql(u8, route.path, "/health")) {
         try request.respond("{\"status\":\"ok\"}", .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/rigs")) {
+        const response = try rig_service.payload(allocator, io, mode, system, database);
+        defer allocator.free(response);
+        try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
