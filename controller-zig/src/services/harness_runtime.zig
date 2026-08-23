@@ -1,10 +1,10 @@
 const std = @import("std");
 const config_module = @import("../config.zig");
+const pi_model_route = @import("pi_model_route.zig");
 
 const Io = std.Io;
 const max_event_bytes = 16 * 1024 * 1024;
 const max_events = 4000;
-
 const LoggedEvent = struct {
     allocator: std.mem.Allocator,
     seq: u64,
@@ -16,7 +16,6 @@ const LoggedEvent = struct {
         event.* = undefined;
     }
 };
-
 const Session = struct {
     allocator: std.mem.Allocator,
     id: []u8,
@@ -49,7 +48,6 @@ const Session = struct {
         session.allocator.destroy(session);
     }
 };
-
 pub const Manager = struct {
     allocator: std.mem.Allocator,
     io: Io,
@@ -57,12 +55,14 @@ pub const Manager = struct {
     environment: *const std.process.Environ.Map,
     data_dir: []u8,
     pi_binary: []u8,
+    model_route: pi_model_route.Config,
     mutex: Io.Mutex = .init,
     tasks: Io.Group = .init,
     sessions: std.StringHashMapUnmanaged(*Session) = .empty,
-
     pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config_module.Config) !Manager {
         const configured = configuration.environment.get("LOCAL_STUDIO_PI_BIN") orelse "pi";
+        var model_route = try pi_model_route.Config.init(allocator, io, configuration);
+        errdefer model_route.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -70,9 +70,9 @@ pub const Manager = struct {
             .environment = configuration.environment,
             .data_dir = try allocator.dupe(u8, configuration.data_dir),
             .pi_binary = try allocator.dupe(u8, std.mem.trim(u8, configured, " \t\r\n")),
+            .model_route = model_route,
         };
     }
-
     pub fn deinit(manager: *Manager) void {
         manager.tasks.cancel(manager.io);
         var iterator = manager.sessions.valueIterator();
@@ -80,24 +80,22 @@ pub const Manager = struct {
         manager.sessions.deinit(manager.allocator);
         manager.allocator.free(manager.data_dir);
         manager.allocator.free(manager.pi_binary);
+        manager.model_route.deinit();
         manager.* = undefined;
     }
-
     pub fn setupPayload(manager: *Manager) ![]u8 {
-        const available = manager.piIsAvailable();
+        const available = manager.piIsAvailable() and manager.model_route.available();
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"checks\":[{\"id\":\"pi-rpc\",\"label\":\"Pi RPC harness\",\"ok\":");
         try output.writer.print("{},\"value\":", .{available});
         try std.json.Stringify.value(manager.pi_binary, .{}, &output.writer);
-        try output.writer.writeAll(",\"guidance\":\"Install Pi or set LOCAL_STUDIO_PI_BIN to a Pi executable with RPC mode.\"}],\"diagnostics\":[]}");
+        try output.writer.writeAll(",\"guidance\":\"Install Pi and configure LOCAL_STUDIO_HEAD_URL plus LOCAL_STUDIO_HEAD_API_KEY on an enrolled harness node.\"}],\"diagnostics\":[]}");
         return output.toOwnedSlice();
     }
-
     pub fn piIsAvailable(manager: *Manager) bool {
         return manager.piAvailable();
     }
-
     pub fn sessionsPayload(manager: *Manager) ![]u8 {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
@@ -155,6 +153,7 @@ pub const Manager = struct {
             try manager.ensureSession(session_id, model_id, cwd, thinking, tool_access)
         else
             try manager.existingActiveSession(session_id);
+        const was_active = session.active;
         var command: Io.Writer.Allocating = .init(manager.allocator);
         defer command.deinit();
         const command_id = manager.commandId();
@@ -181,7 +180,7 @@ pub const Manager = struct {
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"type\":\"command\",\"outcome\":");
-        try std.json.Stringify.value(if (session.active) "queued" else "accepted", .{}, &output.writer);
+        try std.json.Stringify.value(if (was_active) "queued" else "accepted", .{}, &output.writer);
         try output.writer.writeAll(",\"runtimeSessionId\":");
         try std.json.Stringify.value(session.id, .{}, &output.writer);
         try output.writer.writeAll(",\"piSessionId\":");
@@ -329,12 +328,14 @@ pub const Manager = struct {
         defer log_file.close(manager.io);
         var argv: std.ArrayList([]const u8) = .empty;
         defer argv.deinit(manager.allocator);
-        try argv.appendSlice(manager.allocator, &.{ manager.pi_binary, "--mode", "rpc", "--session-dir", session_dir, "--session-id", session_id, "--model", model_id });
+        var model_route = try manager.model_route.prepare(model_id);
+        defer model_route.deinit();
+        try argv.appendSlice(manager.allocator, &.{ manager.pi_binary, "--mode", "rpc", "--session-dir", session_dir, "--session-id", session_id, "--model", model_route.model_name });
         if (thinking) |level| if (!std.mem.eql(u8, level, "auto")) try argv.appendSlice(manager.allocator, &.{ "--thinking", level });
         if (!std.mem.eql(u8, tool_access, "full")) try argv.appendSlice(manager.allocator, &.{ "--tools", "read,grep,find,ls" });
         var child = try std.process.spawn(manager.io, .{
             .argv = argv.items,
-            .environ_map = manager.environment,
+            .environ_map = &model_route.environment,
             .cwd = .{ .path = cwd },
             .stdin = .pipe,
             .stdout = .pipe,
@@ -364,7 +365,6 @@ pub const Manager = struct {
         };
         return session;
     }
-
     fn existingSession(manager: *Manager, session_id: []const u8) !*Session {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
