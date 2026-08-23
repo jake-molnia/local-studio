@@ -13,6 +13,7 @@ const agent_automations = @import("repository/agent_automations.zig");
 const agent_projects = @import("repository/agent_projects.zig");
 const agent_connectors = @import("repository/agent_connectors.zig");
 const agent_goals = @import("repository/agent_goals.zig");
+const agent_subagents = @import("repository/agent_subagents.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
@@ -48,6 +49,7 @@ pub const App = struct {
         try agent_projects.initialize(&database);
         try agent_connectors.initialize(&database);
         try agent_goals.initialize(&database);
+        try agent_subagents.initialize(&database);
         try downloads.rehydrate(allocator, &database);
         const recipe_column = try recipes.initialize(&database);
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});

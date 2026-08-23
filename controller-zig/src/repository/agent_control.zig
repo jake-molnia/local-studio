@@ -147,6 +147,16 @@ pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id:
     return try readSession(allocator, &statement);
 }
 
+pub fn getByNative(allocator: std.mem.Allocator, database: *sqlite.Database, native_session_id: []const u8) !?Session {
+    var statement = try database.prepare(
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE native_session_id = ? ORDER BY updated_at DESC LIMIT 1",
+    );
+    defer statement.deinit();
+    try statement.bindText(1, native_session_id);
+    if (try statement.step() != .row) return null;
+    return try readSession(allocator, &statement);
+}
+
 pub fn list(allocator: std.mem.Allocator, database: *sqlite.Database) !SessionList {
     return querySessions(
         allocator,
