@@ -384,6 +384,32 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/connectors/call")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        defer if (model_id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_connectors.inventoryPayload(allocator, io, mode, configuration, client, database, node_id, model_id orelse "")
+        else
+            agent_connectors.callPayload(allocator, io, mode, configuration, client, database, node_id, document orelse return false);
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/connectors/test")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_connectors.testPayload(allocator, io, mode, configuration, client, database, node_id, document) catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
         const response = try agent_coordinator.sessionsPayload(allocator, io, database);
         defer allocator.free(response);
@@ -505,6 +531,28 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-call")) {
+        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        defer if (model_id) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_connectors.inventoryLocal(allocator, io, configuration, database, model_id orelse "")
+        else
+            agent_connectors.callLocal(allocator, io, configuration, database, document orelse return false);
+        const payload = response catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-test")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_connectors.testLocal(allocator, io, configuration, database, document) catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/catalog")) {
@@ -1619,7 +1667,10 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
 
 fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.ConnectorIdRequired, error.InvalidConnectorId, error.ConnectorTransportRequired, error.InvalidConnectorTransport, error.ConnectorCommandRequired, error.ConnectorUrlRequired, error.InvalidConnectorUrl, error.InvalidConnectorPayload, error.InvalidConnectorGrantPayload, error.ConnectorGrantFieldsRequired => .bad_request,
+        error.ConnectorIdRequired, error.InvalidConnectorId, error.ConnectorTransportRequired, error.InvalidConnectorTransport, error.ConnectorCommandRequired, error.ConnectorUrlRequired, error.InvalidConnectorUrl, error.InvalidConnectorPayload, error.InvalidConnectorGrantPayload, error.ConnectorGrantFieldsRequired, error.InvalidConnectorCallPayload, error.ConnectorCallFieldsRequired, error.ConnectorCwdMustBeAbsolute => .bad_request,
+        error.ConnectorNotFound => .not_found,
+        error.ConnectorToolDenied => .forbidden,
+        error.ConnectorDisabled => .conflict,
         error.ConnectorNamespaceCollision, error.ConnectorNodeRequired, error.ConnectorNodeRejected => .conflict,
         error.ConnectorNodeUnavailable => .service_unavailable,
         else => .internal_server_error,
@@ -1635,6 +1686,12 @@ fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.InvalidConnectorPayload => "invalid connector payload",
         error.InvalidConnectorGrantPayload => "invalid connector grant payload",
         error.ConnectorGrantFieldsRequired => "modelId, connectorId and tools are required",
+        error.InvalidConnectorCallPayload => "invalid connector call payload",
+        error.ConnectorCallFieldsRequired => "connector_id and tool are required",
+        error.ConnectorCwdMustBeAbsolute => "connector cwd must be absolute",
+        error.ConnectorNotFound => "unknown connector",
+        error.ConnectorToolDenied => "connector tool is not granted",
+        error.ConnectorDisabled => "connector is disabled",
         error.ConnectorNamespaceCollision => "Connector tool namespace collides with an existing connector",
         error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
         error.ConnectorNodeRejected => "The connector node rejected the request",

@@ -158,8 +158,8 @@ fn seedDocument(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, sys
         .capabilities = .{
             .compute = mode != .head,
             .harnesses = if (mode != .head and pi_available) &.{"pi"} else &.{},
-            .mcp = mode != .head and pi_available,
-            .terminal = mode != .head and pi_available,
+            .mcp = mode != .head,
+            .terminal = mode != .head,
             .browser = false,
         },
     };
@@ -186,8 +186,8 @@ fn capabilitiesValue(allocator: std.mem.Allocator, mode: config.Mode, pi_availab
     var capabilities: std.json.ObjectMap = .empty;
     try capabilities.put(allocator, "compute", .{ .bool = mode != .head });
     try capabilities.put(allocator, "harnesses", .{ .array = harnesses });
-    try capabilities.put(allocator, "mcp", .{ .bool = enabled });
-    try capabilities.put(allocator, "terminal", .{ .bool = enabled });
+    try capabilities.put(allocator, "mcp", .{ .bool = mode != .head });
+    try capabilities.put(allocator, "terminal", .{ .bool = mode != .head });
     try capabilities.put(allocator, "browser", .{ .bool = false });
     return .{ .object = capabilities };
 }
