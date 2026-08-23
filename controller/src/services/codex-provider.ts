@@ -20,8 +20,8 @@ import type {
 } from "@local-studio/contracts/provider-auth";
 import { Effect } from "effect";
 import { redactLogLine } from "../core/log-redaction";
-import { CodexCredentialStore } from "./codex-credential-store";
 import type { HeadProviderAdapter } from "./head-provider";
+import { OAuthCredentialStore } from "./oauth-credential-store";
 
 export const CODEX_PROVIDER_ID = "openai-codex";
 
@@ -245,7 +245,9 @@ export class CodexProviderService implements HeadProviderAdapter {
   readonly #jobs = new Map<string, LoginJob>();
 
   public constructor(dataDirectory: string) {
-    this.#models = createModels({ credentials: new CodexCredentialStore(dataDirectory) });
+    this.#models = createModels({
+      credentials: new OAuthCredentialStore(dataDirectory, "openai-codex.json", "OpenAI Codex"),
+    });
     this.#models.setProvider(openaiCodexProvider());
   }
 
