@@ -255,7 +255,7 @@ export function ComposerProjectDrawer({
     const timeout = window.setTimeout(() => {
       setPanelPresent(false);
       setPanelReady(false);
-    }, 90);
+    }, 120);
     return () => window.clearTimeout(timeout);
   }, [open]);
 
@@ -309,11 +309,12 @@ export function ComposerProjectDrawer({
                   maxHeight: panelMaxHeight,
                   visibility: panelReady ? "visible" : "hidden",
                 }}
+                data-placement={panelPlacement}
+                data-state={open ? "open" : "closed"}
                 className={cx(
-                  "fixed z-[300] overflow-y-auto rounded-[10px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]",
+                  "composer-context-popover fixed z-[300] overflow-y-auto rounded-[10px] border border-(--color-popover-border) bg-(--color-popover) p-1.5 text-(--fg) shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]",
                   panelReady &&
                     (open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"),
-                  panelPlacement === "above" && "[transform-origin:bottom_left]",
                 )}
                 aria-hidden={!open}
               >

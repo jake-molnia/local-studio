@@ -82,6 +82,7 @@ export function AgentModelPicker({
   const [view, setView] = useState<PickerView>("inspector");
   const [showOtherModels, setShowOtherModels] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [openSource, setOpenSource] = useState<"pointer" | "keyboard">("keyboard");
   const active = models.find((model) => model.id === selectedModel) ?? null;
   const visible = useMemo(
     () => splitVisibleAgentModels(models, showOtherModels),
@@ -211,8 +212,12 @@ export function AgentModelPicker({
         }
         close();
       }}
-      onPointerDown={stopToolbarEvent}
+      onPointerDown={(event) => {
+        setOpenSource("pointer");
+        stopToolbarEvent(event);
+      }}
       onMouseDown={stopToolbarEvent}
+      onKeyDown={() => setOpenSource("keyboard")}
     >
       <div className="flex min-w-0 items-center gap-1">
         <ModelPickerTrigger
@@ -240,10 +245,14 @@ export function AgentModelPicker({
               className={`composer-popover ${open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none"} fixed z-[300] max-w-[calc(100vw-1rem)] ${view === "models" && filteredGroups.length > 0 ? "w-[18rem]" : "w-[10rem]"} ${POPOVER_MENU_CLASS}`}
               role="menu"
               aria-hidden={!open}
+              data-open-source={openSource}
               aria-label={
                 view === "inspector" ? "Model settings" : view === "models" ? "Models" : "Reasoning"
               }
-              onKeyDown={(event) => handleMenuKeyDown(event, closeAndFocus)}
+              onKeyDown={(event) => {
+                setOpenSource("keyboard");
+                handleMenuKeyDown(event, closeAndFocus);
+              }}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >

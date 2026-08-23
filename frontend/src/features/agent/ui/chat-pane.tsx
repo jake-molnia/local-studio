@@ -91,6 +91,8 @@ import { cx } from "@/ui/utils";
 import { ExtensionUiDialog } from "@/features/agent/ui/extension-ui-dialog";
 export type { ChatPaneHandle };
 
+type ComposerPopover = "context" | "model";
+
 const Timeline = dynamic(
   () => import("@/features/agent/ui/timeline/timeline").then((mod) => mod.Timeline),
   { ssr: false, loading: () => <TimelineFallback /> },
@@ -376,8 +378,9 @@ export function ChatPane({
     },
     [activeTab, running, updateTab],
   );
-  const [contextOpen, setContextOpen] = useState(false);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [activeComposerPopover, setActiveComposerPopover] = useState<ComposerPopover | null>(null);
+  const contextOpen = activeComposerPopover === "context";
+  const modelPickerOpen = activeComposerPopover === "model";
   const composerModelSelector = renderComposerModelSelector(modelSelector, {
     reasoningLevel: thinkingLevel,
     reasoningLevels: modelThinkingLevels,
@@ -385,8 +388,10 @@ export function ChatPane({
     onSelectReasoning: selectThinkingLevel,
     open: modelPickerOpen,
     onOpenChange: (next) => {
-      if (next) setContextOpen(false);
-      setModelPickerOpen(next);
+      setActiveComposerPopover((current) => {
+        if (next) return "model";
+        return current === "model" ? null : current;
+      });
     },
   });
 
@@ -435,8 +440,7 @@ export function ChatPane({
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
   const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
   useMountSubscription(() => {
-    setContextOpen(false);
-    setModelPickerOpen(false);
+    setActiveComposerPopover(null);
   }, [activeTabId]);
   const openDiffDrawer = useCallback(() => setDiffDrawerOpen(true), []);
   const closeDiffDrawer = useCallback(() => setDiffDrawerOpen(false), []);
@@ -707,8 +711,7 @@ export function ChatPane({
           contextOpen={contextOpen}
           contextTriggerRef={contextTriggerRef}
           onOpenContext={() => {
-            setModelPickerOpen(false);
-            setContextOpen((value) => !value);
+            setActiveComposerPopover((current) => (current === "context" ? null : "context"));
           }}
           onAbortTurn={() => void abortTurn()}
           onAttachFiles={(files) => void attachFiles(files)}
@@ -742,7 +745,12 @@ export function ChatPane({
               onOpenDiff={openDiffDrawer}
               showProjectRow={composerVisual.showProjectRow}
               open={contextOpen}
-              onOpenChange={setContextOpen}
+              onOpenChange={(next) => {
+                setActiveComposerPopover((current) => {
+                  if (next) return "context";
+                  return current === "context" ? null : current;
+                });
+              }}
               contextTriggerRef={contextTriggerRef}
               onRequestAttach={() => fileInputRef.current?.click()}
               browserToolEnabled={browserToolEnabled}

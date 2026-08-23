@@ -497,6 +497,19 @@
   transform-origin: bottom center;
 }
 
+.composer-context-popover[data-placement="below"] {
+  transform-origin: top left;
+}
+
+.composer-context-popover[data-placement="above"] {
+  transform-origin: bottom left;
+}
+
+.composer-popover[data-open-source="pointer"] [role^="menuitem"]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .composer-popover-enter {
   animation: composer-popover-enter 120ms var(--ease-enter) both;
 }
