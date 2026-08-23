@@ -131,6 +131,7 @@ pub const HttpServer = struct {
         defer group.cancel(server.io);
         if (server.config.mode != .head) try group.concurrent(server.io, runComputeSupervisor, .{&server.compute});
         if (server.config.mode != .worker) try group.concurrent(server.io, automations.runScheduler, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness });
+        if (server.config.mode != .worker) try group.concurrent(server.io, agent_coordinator.runEventPump, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness });
         while (!shutdown.isRequested()) {
             var stream = server.listener.accept(server.io) catch |failure| {
                 if (shutdown.isRequested()) return;

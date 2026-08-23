@@ -140,14 +140,24 @@ pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id:
 }
 
 pub fn list(allocator: std.mem.Allocator, database: *sqlite.Database) !SessionList {
+    return querySessions(allocator, database,
+        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC LIMIT 10000",
+    );
+}
+
+pub fn listActive(allocator: std.mem.Allocator, database: *sqlite.Database) !SessionList {
+    return querySessions(allocator, database,
+        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE status IN ('queued', 'running') ORDER BY updated_at LIMIT 10000",
+    );
+}
+
+fn querySessions(allocator: std.mem.Allocator, database: *sqlite.Database, query: []const u8) !SessionList {
     var records: std.ArrayList(Session) = .empty;
     errdefer {
         for (records.items) |*record| record.deinit();
         records.deinit(allocator);
     }
-    var statement = try database.prepare(
-        "SELECT session_id, harness, node_id, native_session_id, project_id, project_path, model_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC LIMIT 10000",
-    );
+    var statement = try database.prepare(query);
     defer statement.deinit();
     while (try statement.step() == .row) {
         if (records.items.len == max_records) return error.TooManyAgentSessions;

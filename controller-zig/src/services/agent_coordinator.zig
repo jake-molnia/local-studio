@@ -4,7 +4,6 @@ const records = @import("../repository/agent_control.zig");
 const sqlite = @import("../repository/sqlite.zig");
 const harness_nodes = @import("harness_nodes.zig");
 const harness_runtime = @import("harness_runtime.zig");
-const reverse_proxy = @import("../reverse_proxy.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -19,6 +18,17 @@ const Response = struct {
     fn deinit(response: *Response) void {
         response.allocator.free(response.storage);
         response.* = undefined;
+    }
+};
+
+const EventSnapshot = struct {
+    session: records.Session,
+    events: records.EventList,
+
+    fn deinit(snapshot: *EventSnapshot) void {
+        snapshot.session.deinit();
+        snapshot.events.deinit();
+        snapshot.* = undefined;
     }
 };
 
@@ -165,17 +175,104 @@ pub fn controlPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, c
     return remotePost(allocator, client, &target, path, document);
 }
 
-pub fn serveEvents(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, after: u64, request: *http.Server.Request) !void {
-    if (mode == .standalone) return harness.serveEvents(session_id, after, request);
-    var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
-    defer session.deinit();
-    var target = (try harness_nodes.select(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
-    defer target.deinit();
-    var captured = try reverse_proxy.captureRequest(allocator, request);
-    defer captured.deinit();
-    allocator.free(captured.target);
-    captured.target = try std.fmt.allocPrint(allocator, "/internal/harness/v1/events?sessionId={s}&after={d}", .{ session_id, after });
-    try reverse_proxy.serveWorkerBuffered(allocator, client, target.address, target.api_key, target.id, "", &captured, request);
+pub fn runEventPump(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) Io.Cancelable!void {
+    while (true) {
+        reconcileEvents(allocator, io, mode, client, database, harness) catch |failure| std.log.err("agent event reconciliation failed: {t}", .{failure});
+        try io.sleep(.fromMilliseconds(250), .awake);
+    }
+}
+
+pub fn serveEvents(allocator: std.mem.Allocator, io: Io, _: config.Mode, _: *http.Client, database: *sqlite.Database, _: *harness_runtime.Manager, session_id: []const u8, after_value: u64, request: *http.Server.Request) !void {
+    var write_buffer: [16 * 1024]u8 = undefined;
+    var body = try request.respondStreaming(&write_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream; charset=utf-8" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var after = after_value;
+    var idle_rounds: usize = 0;
+    while (true) {
+        var snapshot = try readSnapshot(allocator, io, database, session_id, after);
+        defer snapshot.deinit();
+        var sent = false;
+        for (snapshot.events.records) |event| {
+            const payload = try storedEventPayload(allocator, event.document);
+            defer allocator.free(payload);
+            try body.writer.print("id: {d}\ndata: {{\"type\":\"pi\",\"seq\":{d},\"event\":{s}}}\n\n", .{ event.sequence, event.sequence, payload });
+            after = event.sequence;
+            sent = true;
+        }
+        if (sent) {
+            try body.writer.flush();
+            try body.flush();
+            idle_rounds = 0;
+        } else idle_rounds += 1;
+        const active = std.mem.eql(u8, snapshot.session.status, "queued") or std.mem.eql(u8, snapshot.session.status, "running");
+        if (!active and idle_rounds >= 2) {
+            try writeStatusEvent(&body.writer, &snapshot.session, if (std.mem.eql(u8, snapshot.session.status, "unavailable")) "unavailable" else "idle");
+            try body.end();
+            return;
+        }
+        if (active and idle_rounds > 0 and idle_rounds % 80 == 0) {
+            try writeStatusEvent(&body.writer, &snapshot.session, "running");
+            try body.writer.flush();
+            try body.flush();
+        }
+        try io.sleep(.fromMilliseconds(250), .awake);
+    }
+}
+
+fn reconcileEvents(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) !void {
+    try database.lock(io);
+    var sessions = records.listActive(allocator, database) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
+    database.unlock(io);
+    defer sessions.deinit();
+    for (sessions.records) |session| {
+        const payload = statusPayload(allocator, io, mode, client, database, harness, session.id, session.event_cursor) catch |failure| {
+            std.log.err("agent session {s} reconciliation failed: {t}", .{ session.id, failure });
+            continue;
+        };
+        allocator.free(payload);
+    }
+}
+
+fn readSnapshot(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session_id: []const u8, after: u64) !EventSnapshot {
+    try database.lock(io);
+    defer database.unlock(io);
+    var session = (try records.get(allocator, database, session_id)) orelse return error.SessionNotFound;
+    errdefer session.deinit();
+    return .{ .session = session, .events = try records.eventsAfter(allocator, database, session_id, after) };
+}
+
+fn storedEventPayload(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidStoredAgentEvent;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidStoredAgentEvent;
+    const event = parsed.value.object.get("event") orelse return error.InvalidStoredAgentEvent;
+    if (event != .object) return error.InvalidStoredAgentEvent;
+    return serialize(allocator, event);
+}
+
+fn writeStatusEvent(writer: *Io.Writer, session: *const records.Session, phase: []const u8) !void {
+    try writer.writeAll("data: {\"type\":\"status\",\"phase\":");
+    try std.json.Stringify.value(phase, .{}, writer);
+    try writer.writeAll(",\"session\":{\"running\":");
+    try writer.writeAll(if (std.mem.eql(u8, phase, "running")) "true" else "false");
+    try writer.writeAll(",\"active\":");
+    try writer.writeAll(if (std.mem.eql(u8, phase, "running")) "true" else "false");
+    try writer.writeAll(",\"piSessionId\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"modelId\":");
+    if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.print(",\"eventSeq\":{d}}}}}\n\n", .{session.event_cursor});
 }
 
 fn remotePost(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8, payload: []const u8) ![]u8 {
@@ -231,19 +328,25 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     const running = booleanField(status.object, "running") orelse active;
     const phase = if (active) "running" else if (running) "idle" else "stopped";
     const native_session_id = optionalString(status.object, "piSessionId");
-    const cursor = unsignedField(status.object, "eventSeq");
-    try lockedRuntime(io, database, session_id, phase, native_session_id, cursor);
-    const events = parsed.value.object.get("events") orelse return;
-    if (events != .array) return;
-    try database.lock(io);
-    defer database.unlock(io);
-    for (events.array.items) |event| {
+    var committed_cursor: ?u64 = null;
+    if (parsed.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
         if (event != .object) continue;
         const sequence = unsignedField(event.object, "seq") orelse continue;
-        const serialized = try serialize(allocator, event);
-        defer allocator.free(serialized);
-        try records.appendEvent(database, session_id, sequence, "pi", serialized);
-    }
+        committed_cursor = @max(committed_cursor orelse 0, sequence);
+    };
+    try database.lock(io);
+    defer database.unlock(io);
+    var transaction = try database.begin();
+    defer transaction.deinit();
+    if (parsed.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
+            if (event != .object) continue;
+            const sequence = unsignedField(event.object, "seq") orelse continue;
+            const serialized = try serialize(allocator, event);
+            defer allocator.free(serialized);
+            try records.appendEvent(database, session_id, sequence, "pi", serialized);
+        };
+    try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
+    try transaction.commit();
 }
 
 fn storedStatus(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session: *const records.Session, after: u64) ![]u8 {
