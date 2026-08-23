@@ -288,6 +288,10 @@ fn runJobInner(state: *State, configuration: *const config_module.Config, cache:
         const managed = try runManagedPythonInstall(state, configuration, id, backend) orelse return;
         operation_version = managed.version;
         operation_output = managed.output;
+    } else if (std.mem.eql(u8, backend, "llamacpp")) {
+        const managed = try runManagedLlamacppInstall(state, configuration, id) orelse return;
+        operation_version = managed.version;
+        operation_output = managed.output;
     } else {
         const environment_name = upgradeEnvironment(backend);
         const message = if (environment_name) |name|
@@ -392,6 +396,130 @@ fn runManagedPythonInstall(state: *State, configuration: *const config_module.Co
     const version = if (firstLine(probe.stdout)) |value| try state.allocator.dupe(u8, value) else null;
     const output = if (install_output.len > 0) try state.allocator.dupe(u8, install_output) else null;
     return .{ .version = version, .output = output };
+}
+
+fn runManagedLlamacppInstall(state: *State, configuration: *const config_module.Config, id: []const u8) !?ManagedResult {
+    for ([_][]const u8{ "git", "cmake" }) |tool| {
+        const probe = runCommand(state, configuration, id, &.{ tool, "--version" }, 10) catch |failure| {
+            if (failure == error.Canceled) return error.Canceled;
+            const message = try std.fmt.allocPrint(state.allocator, "llama.cpp source build needs \"{s}\" on PATH. Install it or configure LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD.", .{tool});
+            defer state.allocator.free(message);
+            markFailed(state, id, message);
+            return null;
+        };
+        defer state.allocator.free(probe.stdout);
+        defer state.allocator.free(probe.stderr);
+        if (!termSuccessful(probe.term)) {
+            const message = try std.fmt.allocPrint(state.allocator, "llama.cpp source build needs \"{s}\" on PATH. Install it or configure LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD.", .{tool});
+            defer state.allocator.free(message);
+            markFailed(state, id, message);
+            return null;
+        }
+    }
+    const root = try std.fs.path.join(state.allocator, &.{ configuration.data_dir, "runtime", "llamacpp" });
+    defer state.allocator.free(root);
+    const source = try std.fs.path.join(state.allocator, &.{ root, "src" });
+    defer state.allocator.free(source);
+    _ = try std.Io.Dir.cwd().createDirPathStatus(state.io, root, @enumFromInt(0o700));
+    if (!pathExists(state.io, source)) {
+        const clone_argv = &.{ "git", "clone", "--depth", "1", "https://github.com/ggml-org/llama.cpp", source };
+        const display = try renderCommand(state.allocator, clone_argv);
+        defer state.allocator.free(display);
+        try updateJobStage(state, id, 0.1, try state.allocator.dupe(u8, "Cloning llama.cpp source..."), display, null);
+        const clone = runCommandIn(state, configuration.environment, id, clone_argv, 2700, null) catch |failure| {
+            commandFailure(state, id, failure, 45);
+            return null;
+        };
+        defer state.allocator.free(clone.stdout);
+        defer state.allocator.free(clone.stderr);
+        if (!termSuccessful(clone.term)) {
+            const message = if (clone.stderr.len > 0) clone.stderr else "git clone failed";
+            markFailedWithOutput(state, id, message, if (clone.stdout.len > 0) clone.stdout else message);
+            return null;
+        }
+    } else {
+        const pull: ?CommandResult = runCommandIn(state, configuration.environment, id, &.{ "git", "-C", source, "pull", "--ff-only" }, 2700, null) catch |failure| pull: {
+            if (failure == error.Canceled) return error.Canceled;
+            break :pull null;
+        };
+        if (pull) |result| {
+            state.allocator.free(result.stdout);
+            state.allocator.free(result.stderr);
+        }
+    }
+    var build_environment = try configuration.environment.clone(state.allocator);
+    defer build_environment.deinit();
+    const nvcc = try resolveNvcc(state, configuration, id);
+    defer if (nvcc) |value| state.allocator.free(value);
+    if (nvcc) |value| try build_environment.put("CUDACXX", value);
+    var configure_argv: std.ArrayList([]const u8) = .empty;
+    defer configure_argv.deinit(state.allocator);
+    try configure_argv.appendSlice(state.allocator, &.{ "cmake", "-B", "build", "-DCMAKE_BUILD_TYPE=Release", "-DLLAMA_CURL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF" });
+    if (nvcc != null) try configure_argv.append(state.allocator, "-DGGML_CUDA=ON");
+    const configure_display = try renderCommand(state.allocator, configure_argv.items);
+    defer state.allocator.free(configure_display);
+    try updateJobStage(state, id, 0.35, try state.allocator.dupe(u8, "Configuring llama.cpp..."), configure_display, null);
+    const configure = runCommandIn(state, &build_environment, id, configure_argv.items, 2700, source) catch |failure| {
+        commandFailure(state, id, failure, 45);
+        return null;
+    };
+    defer state.allocator.free(configure.stdout);
+    defer state.allocator.free(configure.stderr);
+    if (!termSuccessful(configure.term)) {
+        const message = if (configure.stderr.len > 0) configure.stderr else "cmake configure failed";
+        markFailedWithOutput(state, id, message, if (configure.stdout.len > 0) configure.stdout else message);
+        return null;
+    }
+    const cpu_count = std.Thread.getCpuCount() catch 1;
+    const jobs = try std.fmt.allocPrint(state.allocator, "{d}", .{@max(cpu_count -| 1, 1)});
+    defer state.allocator.free(jobs);
+    const build_argv = &.{ "cmake", "--build", "build", "--target", "llama-server", "-j", jobs };
+    const build_display = try renderCommand(state.allocator, build_argv);
+    defer state.allocator.free(build_display);
+    try updateJobStage(state, id, 0.65, try state.allocator.dupe(u8, "Building llama-server..."), build_display, null);
+    const build = runCommandIn(state, &build_environment, id, build_argv, 2700, source) catch |failure| {
+        commandFailure(state, id, failure, 45);
+        return null;
+    };
+    defer state.allocator.free(build.stdout);
+    defer state.allocator.free(build.stderr);
+    const build_output = if (build.stdout.len > 0) build.stdout else build.stderr;
+    if (!termSuccessful(build.term)) {
+        const message = if (build.stderr.len > 0) build.stderr else "cmake build failed";
+        markFailedWithOutput(state, id, message, build_output);
+        return null;
+    }
+    const binary = try std.fs.path.join(state.allocator, &.{ source, "build", "bin", "llama-server" });
+    defer state.allocator.free(binary);
+    if (!pathExists(state.io, binary)) {
+        const message = try std.fmt.allocPrint(state.allocator, "Build finished but {s} was not produced", .{binary});
+        defer state.allocator.free(message);
+        markFailedWithOutput(state, id, message, build_output);
+        return null;
+    }
+    const version_probe = runCommand(state, configuration, id, &.{ binary, "--version" }, 30) catch null;
+    var version: ?[]u8 = null;
+    if (version_probe) |probe| {
+        defer state.allocator.free(probe.stdout);
+        defer state.allocator.free(probe.stderr);
+        const text = firstLine(probe.stdout) orelse firstLine(probe.stderr);
+        if (termSuccessful(probe.term) and text != null) version = try state.allocator.dupe(u8, text.?);
+    }
+    const output = try std.fmt.allocPrint(state.allocator, "Built llama-server at {s}", .{binary});
+    return .{ .version = version, .output = output };
+}
+
+fn resolveNvcc(state: *State, configuration: *const config_module.Config, id: []const u8) !?[]u8 {
+    for ([_][]const u8{ "nvcc", "/usr/local/cuda/bin/nvcc" }) |candidate| {
+        const probe = runCommand(state, configuration, id, &.{ candidate, "--version" }, 10) catch |failure| switch (failure) {
+            error.Canceled => return error.Canceled,
+            else => continue,
+        };
+        defer state.allocator.free(probe.stdout);
+        defer state.allocator.free(probe.stderr);
+        if (termSuccessful(probe.term)) return @as(?[]u8, try state.allocator.dupe(u8, candidate));
+    }
+    return null;
 }
 
 const PythonTarget = struct { path: []u8, create_venv: bool };
@@ -655,9 +783,14 @@ const CommandResult = struct {
 };
 
 fn runCommand(state: *State, configuration: *const config_module.Config, id: []const u8, argv: []const []const u8, timeout_seconds: i64) !CommandResult {
+    return runCommandIn(state, configuration.environment, id, argv, timeout_seconds, null);
+}
+
+fn runCommandIn(state: *State, environment: *const std.process.Environ.Map, id: []const u8, argv: []const []const u8, timeout_seconds: i64, cwd: ?[]const u8) !CommandResult {
     var child = try std.process.spawn(state.io, .{
         .argv = argv,
-        .environ_map = configuration.environment,
+        .environ_map = environment,
+        .cwd = if (cwd) |path| .{ .path = path } else .inherit,
         .stdin = .ignore,
         .stdout = .pipe,
         .stderr = .pipe,

@@ -114,8 +114,10 @@ pub fn detect(allocator: std.mem.Allocator, io: Io, config: *const config_module
     const mlx_managed = try managedPython(storage, config.data_dir, "mlx");
     const vllm = try detectPythonBackend(storage, allocator, io, &.{ config.environment.get("LOCAL_STUDIO_RUNTIME_PYTHON"), vllm_managed, "/opt/venvs/active/vllm-latest/bin/python" }, "vllm", "vllm", &.{ "vllm", "--version" }, "vllm");
     const sglang = try detectPythonBackend(storage, allocator, io, &.{ config.sglang_python, sglang_managed, "/opt/venvs/active/sglang-latest/bin/python", "/opt/venvs/sglang-latest/bin/python" }, "sglang", "sglang", &.{ "sglang", "--version" }, "sglang");
-    const llama_binary = config.llama_bin orelse "llama-server";
-    const llamacpp = try commandBackend(storage, allocator, io, &.{ llama_binary, "--version" }, null, llama_binary);
+    const managed_llama = try std.fs.path.join(storage, &.{ config.data_dir, "runtime", "llamacpp", "src", "build", "bin", "llama-server" });
+    const llama_binary = config.llama_bin orelse if (pathExists(io, managed_llama)) managed_llama else "llama-server";
+    var llamacpp = try commandBackend(storage, allocator, io, &.{ llama_binary, "--version" }, null, llama_binary);
+    llamacpp.upgrade_command_available = llamacpp.installed and (std.mem.eql(u8, llama_binary, managed_llama) or config.environment.get("LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD") != null);
     const mlx = try detectPythonBackend(storage, allocator, io, &.{ config.mlx_python, mlx_managed }, "mlx-lm", "mlx_lm", &.{ "mlx_lm.server", "--help" }, "mlx_lm.server");
 
     return .{

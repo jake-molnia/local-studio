@@ -213,10 +213,13 @@ fn writeTarget(allocator: std.mem.Allocator, writer: *std.Io.Writer, configurati
     const label = try std.fmt.allocPrint(allocator, "{s} {s}", .{ label_name, if (source[0] == 'c') "configured" else "discovered" });
     defer allocator.free(label);
     const active = (selected_id != null and std.mem.eql(u8, selected_id.?, id)) or (running_engine != null and std.mem.eql(u8, running_engine.?, backend_name));
+    const managed_llama_root = try std.fs.path.join(allocator, &.{ configuration.data_dir, "runtime", "llamacpp" });
+    defer allocator.free(managed_llama_root);
+    const managed_llama = backend == .llamacpp and binary_path != null and std.mem.startsWith(u8, binary_path.?, managed_llama_root);
     const can_update = switch (backend) {
         .vllm, .mlx => installed and python_path != null,
         .sglang => installed and (python_path != null or configuration.environment.get("LOCAL_STUDIO_SGLANG_UPGRADE_CMD") != null),
-        .llamacpp => configuration.environment.get("LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD") != null,
+        .llamacpp => managed_llama or configuration.environment.get("LOCAL_STUDIO_LLAMACPP_UPGRADE_CMD") != null,
     };
     const Capabilities = struct {
         canLaunch: bool,
@@ -254,11 +257,11 @@ fn writeTarget(allocator: std.mem.Allocator, writer: *std.Io.Writer, configurati
     const configured_vllm_version = if (configuration.environment.get("LOCAL_STUDIO_VLLM_UPGRADE_VERSION")) |value| std.mem.trim(u8, value, " \t\r\n") else "";
     const update = if (can_update) Update{
         .currentVersion = optionalString(info, "version"),
-        .targetVersion = if (backend == .vllm and configured_vllm_version.len > 0) configured_vllm_version else if (backend == .llamacpp) "configured" else "latest",
+        .targetVersion = if (backend == .vllm and configured_vllm_version.len > 0) configured_vllm_version else if (backend == .llamacpp and !managed_llama) "configured" else "latest",
         .packageSpec = switch (backend) {
             .vllm => if (configured_vllm_version.len > 0) try std.fmt.allocPrint(allocator, "vllm=={s}", .{configured_vllm_version}) else "vllm",
             .sglang => "sglang",
-            .llamacpp => "configured llama.cpp upgrade command",
+            .llamacpp => if (managed_llama) "llama.cpp source" else "configured llama.cpp upgrade command",
             .mlx => "mlx-lm",
         },
         .releaseNotesUrl = switch (backend) {
