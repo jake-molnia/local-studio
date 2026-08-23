@@ -25,6 +25,10 @@
     max-width: 180px;
   }
 
+  .workbench-project-context {
+    width: min(220px, 36vw);
+  }
+
   .workbench-sidebar {
     width: var(--sidebar-w);
     max-width: calc(100vw - 48px);

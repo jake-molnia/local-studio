@@ -65,10 +65,10 @@ export function WorkbenchProjectTabList({
 }) {
   return (
     <div
-      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "pl-7" : ""}`}
+      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-7" : ""}`}
     >
       <div
-        className="flex min-w-0 max-w-[220px] shrink-0 items-center gap-1.5 border-r border-(--border)/45 px-2.5"
+        className="workbench-project-context flex min-w-0 max-w-[220px] shrink-0 items-center gap-1.5 border-r border-(--border)/45 px-2.5"
         title={`${projectName} · ${threadTitle}`}
       >
         <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] bg-(--accent)/15 text-[9px] font-semibold leading-none text-(--accent)">
@@ -246,7 +246,7 @@ export function WorkbenchLauncher({
     <div
       className={`absolute right-1 top-[calc(100%+4px)] z-[180] w-52 p-1 ${POPOVER_SURFACE_CLASS}`}
       role="menu"
-      aria-label="Open thread tab"
+      aria-label="Open tool tab"
       onKeyDown={(event) => handleLauncherKeyDown(event, onDismiss)}
     >
       <input

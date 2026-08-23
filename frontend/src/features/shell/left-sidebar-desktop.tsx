@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { ProfileFooter } from "@/features/shell/profile-footer";
-import { type MouseEvent as ReactMouseEvent } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   BellIcon,
   ChevronLeft,
@@ -34,6 +37,7 @@ export function DesktopSidebar({
   projectsNavReady,
   ProjectsNavSection,
   onStartResize,
+  onResizeKeyDown,
   onRevealProjectsNav,
   onSetPinnedOpen,
   onOpenSearch,
@@ -50,6 +54,7 @@ export function DesktopSidebar({
   projectsNavReady: boolean;
   ProjectsNavSection: ProjectsNavSectionComponent | null;
   onStartResize: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onResizeKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onRevealProjectsNav: () => void;
   onSetPinnedOpen: (open: boolean) => void;
   onOpenSearch: () => void;
@@ -79,8 +84,13 @@ export function DesktopSidebar({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
+          aria-valuemin={194}
+          aria-valuemax={360}
+          aria-valuenow={width}
+          tabIndex={0}
           title="Resize sidebar"
           onMouseDown={onStartResize}
+          onKeyDown={onResizeKeyDown}
           className="group absolute right-0 top-0 z-[60] h-full w-2 cursor-col-resize"
         >
           <span

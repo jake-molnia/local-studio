@@ -558,8 +558,8 @@ export function WorkbenchTabStrip() {
           data-ui-control="compact"
           onClick={() => setLauncherOpen((open) => !open)}
           className="flex h-full w-8 items-center justify-center text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
-          aria-label="Open thread tab"
-          title="Open thread tab"
+          aria-label="Open tool tab"
+          title="Open tool tab"
           aria-expanded={launcherOpen}
           aria-haspopup="menu"
         >
@@ -567,7 +567,10 @@ export function WorkbenchTabStrip() {
         </button>
         {launcherOpen ? (
           <WorkbenchLauncher
-            onOpenTool={(tool) => activateTab(toolTab(tool, activeScope))}
+            onOpenTool={(tool) => {
+              activateTab(toolTab(tool, activeScope));
+              requestAnimationFrame(() => launcherRef.current?.querySelector("button")?.focus());
+            }}
             onDismiss={() => {
               setLauncherOpen(false);
               launcherRef.current?.querySelector("button")?.focus();

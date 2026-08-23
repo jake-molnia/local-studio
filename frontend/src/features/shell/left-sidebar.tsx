@@ -7,6 +7,7 @@ import {
   useCallback,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -178,6 +179,16 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     },
     [clampedSidebarWidth, isExpanded, setSidebarWidth],
   );
+  const resizeSidebarByKeyboard = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (!isExpanded || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+      event.preventDefault();
+      const step = event.shiftKey ? 32 : 16;
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      setSidebarWidth(clampSidebarWidth(clampedSidebarWidth + direction * step));
+    },
+    [clampedSidebarWidth, isExpanded, setSidebarWidth],
+  );
   const openNewTask = useCallback(
     () => router.push(hrefWithOpenNonce("/agent?new=1&replace=1")),
     [router],
@@ -215,6 +226,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         projectsNavReady={projectsNavReady}
         ProjectsNavSection={ProjectsNavSection}
         onStartResize={startSidebarResize}
+        onResizeKeyDown={resizeSidebarByKeyboard}
         onRevealProjectsNav={() => {
           if (!hidesAppSidebar && !projectsNavReady) setProjectsNavReady(true);
         }}
