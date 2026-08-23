@@ -19,6 +19,8 @@ import { cx } from "@/ui/utils";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { splitVisibleAgentModels } from "./model-visibility";
 
+export { AgentModelPicker } from "./agent-model-picker-controller";
+
 type AgentModelPickerProps = {
   models: AgentModel[];
   selectedModel: string;
@@ -62,7 +64,7 @@ const REASONING_MENU_LEVELS: readonly AgentThinkingLevel[] = [
   "off",
 ];
 
-export function AgentModelPicker({
+export function LegacyAgentModelPicker({
   models,
   selectedModel,
   defaultModel,
