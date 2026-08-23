@@ -158,9 +158,9 @@ export function WorkbenchTabButton({
       style={{
         flex: "0 1 clamp(var(--workbench-tab-min-width), 12vw, var(--workbench-tab-max-width))",
       }}
-      className={`workbench-tab group/tab relative flex h-[30px] min-w-[var(--workbench-tab-min-width)] max-w-[var(--workbench-tab-max-width)] shrink-0 items-center self-end border-x border-y px-2 text-left text-[length:var(--fs-xs)] transition-[background-color,border-color,color,box-shadow] duration-[var(--motion-fast)] ${
+      className={`workbench-tab group/tab relative flex h-[30px] min-w-[var(--workbench-tab-min-width)] max-w-[var(--workbench-tab-max-width)] shrink-0 items-center self-end border-x border-t px-2 text-left text-[length:var(--fs-xs)] transition-[background-color,border-color,color,box-shadow] duration-[var(--motion-fast)] ${
         active
-          ? "z-10 -mb-px rounded-t-[8px] border-(--border)/70 border-b-(--agent-bg) bg-(--agent-bg) text-(--fg) shadow-[0_-1px_0_color-mix(in_srgb,var(--border)_55%,transparent)]"
+          ? "z-10 -mb-px rounded-t-[8px] border-(--border)/70 border-b-0 bg-(--agent-bg) text-(--fg) shadow-[0_-1px_0_color-mix(in_srgb,var(--border)_55%,transparent)]"
           : "rounded-t-[7px] border-transparent bg-transparent text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
       } ${
         active
@@ -177,10 +177,11 @@ export function WorkbenchTabButton({
         aria-controls="workbench-active-surface"
         id={active ? "workbench-active-tab" : undefined}
         tabIndex={active ? 0 : -1}
+        onPointerUp={(event) => event.currentTarget.blur()}
         onClick={onActivate}
         onKeyDown={onKeyDown}
         onAuxClick={(event) => {
-          if (event.button === 1) onClose();
+          if (event.button === 1 && tab.kind === "tool") onClose();
         }}
         title={shortcut ? `${tab.title} (${shortcut})` : tab.title}
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:rounded-[4px] focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px]"
@@ -207,7 +208,8 @@ export function WorkbenchTabButton({
             onClose();
           }}
           className={cx(
-            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] group-hover/tab:opacity-80 focus-visible:opacity-100 focus-visible:bg-(--fg)/8 hover:bg-(--fg)/8 hover:text-(--fg)",
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] text-(--dim) transition-[background-color,color,opacity] duration-[var(--motion-fast)] focus-visible:opacity-100 focus-visible:bg-(--fg)/8 hover:bg-(--fg)/8 hover:text-(--fg)",
+            active ? "opacity-70" : "opacity-0 group-hover/tab:opacity-80",
           )}
         >
           <CloseIcon className="h-2.5 w-2.5" />

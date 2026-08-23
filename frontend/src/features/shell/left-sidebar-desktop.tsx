@@ -163,12 +163,13 @@ export function DesktopSidebar({
             <Link
               href="/agent?new=1&replace=1"
               prefetch={false}
+              onPointerUp={(event) => event.currentTarget.blur()}
               onClick={(event) => {
                 if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault();
                 onNewTask();
               }}
-              className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
+              className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
               title="New task"
             >
               <NewTaskIcon className="h-3.5 w-3.5 shrink-0 opacity-80" />
@@ -212,7 +213,10 @@ export function DesktopSidebar({
             className="group/studio mt-2 shrink-0 border-t border-(--border)/35 pt-1"
             open={studioTabs.some((tab) => isRouteActive(pathname, tab.href)) || undefined}
           >
-            <summary className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1 rounded-[var(--sidebar-row-radius)] px-2 text-[10px] font-medium text-(--dim)/60 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) [&::-webkit-details-marker]:hidden">
+            <summary
+              onPointerUp={(event) => event.currentTarget.blur()}
+              className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1 rounded-[var(--sidebar-row-radius)] px-2 text-[10px] font-medium text-(--dim)/60 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
+            >
               <ChevronRight className="h-2.5 w-2.5 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
               Studio
             </summary>

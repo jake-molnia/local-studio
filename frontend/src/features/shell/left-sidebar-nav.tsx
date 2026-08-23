@@ -86,7 +86,9 @@ export function NavItemMobile({
       prefetch={false}
       onClick={onClick}
       className={`flex h-10 items-center gap-2.5 rounded-[4px] px-3 text-[12px] transition-colors ${
-        active ? "bg-(--active) font-medium text-(--fg)" : "text-(--fg)/80 active:bg-(--hover)"
+        active
+          ? "bg-(--active) font-medium text-(--fg)"
+          : "text-(--fg)/80 hover:bg-(--hover) hover:text-(--fg) active:bg-(--active)/70"
       }`}
     >
       <Icon className="h-[15px] w-[15px] shrink-0" strokeWidth={1.6} />
@@ -110,8 +112,9 @@ export function NavItemDesktop({
     <Link
       href={href}
       prefetch={false}
+      onPointerUp={(event) => event.currentTarget.blur()}
       title={label}
-      className={`group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 transition-colors duration-[var(--motion-fast)] ${
+      className={`group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 ${
         active ? "bg-(--active) text-(--fg)" : "text-(--fg)/85 hover:bg-(--hover) hover:text-(--fg)"
       }`}
     >
@@ -138,9 +141,10 @@ export function NavActionDesktop({
   return (
     <button
       type="button"
+      onPointerUp={(event) => event.currentTarget.blur()}
       onClick={onClick}
       title={shortcut ? `${label} (${shortcut})` : label}
-      className="group flex h-[var(--sidebar-row-height)] w-full shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-(--fg)/85 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
+      className="group flex h-[var(--sidebar-row-height)] w-full shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-(--fg)/85 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
     >
       <Icon className="h-3.5 w-3.5 shrink-0 opacity-58 group-hover:opacity-95" strokeWidth={1.6} />
       <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)]">{label}</span>
