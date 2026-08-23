@@ -84,6 +84,7 @@ function formError(
 ): string | null {
   if (!form.name.trim()) return "Give this machine a name";
   if (connectingHead && !form.address.trim()) return "Enter the Head controller URL";
+  if (connectingHead && !form.hostname.trim()) return "Enter this desktop's reachable URL";
   if (form.role === "worker" && !hasHead) return "Connect a Studio Head before adding a Worker";
   if (groups && form.role === "standalone" && creatingGroup && !form.group_name.trim()) {
     return "Name the new group";
@@ -316,18 +317,32 @@ export function NodeFormModal({
             />
           </FormField>
           {connectingHead ? (
-            <FormField
-              label="Head controller URL"
-              required
-              description="The LAN URL where this desktop can reach the Head controller."
-            >
-              <Input
-                value={form.address}
-                onChange={(event) => set("address", event.target.value)}
-                placeholder="http://192.168.1.90:8080"
-                inputMode="url"
-              />
-            </FormField>
+            <>
+              <FormField
+                label="Head controller URL"
+                required
+                description="The LAN URL where this desktop can reach the Head controller."
+              >
+                <Input
+                  value={form.address}
+                  onChange={(event) => set("address", event.target.value)}
+                  placeholder="http://192.168.1.90:8080"
+                  inputMode="url"
+                />
+              </FormField>
+              <FormField
+                label="This desktop URL"
+                required
+                description="The LAN or Tailscale URL where the Head can reach this desktop."
+              >
+                <Input
+                  value={form.hostname}
+                  onChange={(event) => set("hostname", event.target.value)}
+                  placeholder="http://192.168.1.40:8080"
+                  inputMode="url"
+                />
+              </FormField>
+            </>
           ) : detected ? null : (
             <FormField label="Hostname (optional)" description="The machine's network hostname.">
               <Input

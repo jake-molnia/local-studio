@@ -80,7 +80,12 @@ export function MachinesSection({ state }: { state: ConfigureState }) {
     if (!nodeTarget) return;
     if (nodeTarget.mode === "head" || payload.role === "head") {
       if (!payload.address) throw new Error("Enter the Head controller URL");
-      await connectHead({ name: payload.name, url: payload.address, apiKey: payload.api_key });
+      await connectHead({
+        name: payload.name,
+        url: payload.address,
+        apiKey: payload.api_key,
+        nodeAddress: payload.hostname ?? "",
+      });
       await state.reload();
       return;
     }
