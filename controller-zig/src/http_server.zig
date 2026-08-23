@@ -4,6 +4,7 @@ const shutdown = @import("shutdown.zig");
 const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
 const rig_service = @import("services/rigs.zig");
+const worker_service = @import("services/workers.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
@@ -145,6 +146,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs")) {
         const response = try rig_service.payload(allocator, io, mode, system, database);
+        defer allocator.free(response);
+        try request.respond(response, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/workers")) {
+        const response = try worker_service.payload(allocator, io, mode, client, database);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},

@@ -128,8 +128,9 @@ pub const Database = struct {
     library: std.DynLib,
     api: Api,
     handle: *sqlite3,
-    active_statements: usize = 0,
-    active_transactions: usize = 0,
+    mutex: std.Io.Mutex = .init,
+    active_statements: std.atomic.Value(usize) = .init(0),
+    active_transactions: std.atomic.Value(usize) = .init(0),
 
     pub fn open(allocator: std.mem.Allocator, path: []const u8) !Database {
         var library = try openLibrary();
@@ -152,8 +153,8 @@ pub const Database = struct {
     }
 
     pub fn deinit(database: *Database) void {
-        std.debug.assert(database.active_statements == 0);
-        std.debug.assert(database.active_transactions == 0);
+        std.debug.assert(database.active_statements.load(.acquire) == 0);
+        std.debug.assert(database.active_transactions.load(.acquire) == 0);
         if (database.api.close_v2(database.handle) != SQLITE_OK) {
             std.log.err("SQLite close failed: {s}", .{database.api.errmsg(database.handle)});
         }
@@ -168,7 +169,7 @@ pub const Database = struct {
             return error.DatabasePrepareFailed;
         }
         const prepared = handle orelse return error.DatabasePrepareFailed;
-        database.active_statements += 1;
+        _ = database.active_statements.fetchAdd(1, .acq_rel);
         return .{ .database = database, .handle = prepared };
     }
 
@@ -190,7 +191,7 @@ pub const Database = struct {
 
     pub fn begin(database: *Database) !Transaction {
         try database.execute("BEGIN");
-        database.active_transactions += 1;
+        _ = database.active_transactions.fetchAdd(1, .acq_rel);
         return .{ .database = database };
     }
 
@@ -224,6 +225,14 @@ pub const Database = struct {
     pub fn version(database: *const Database) []const u8 {
         return std.mem.span(database.api.libversion());
     }
+
+    pub fn lock(database: *Database, io: std.Io) std.Io.Cancelable!void {
+        try database.mutex.lock(io);
+    }
+
+    pub fn unlock(database: *Database, io: std.Io) void {
+        database.mutex.unlock(io);
+    }
 };
 
 pub const Statement = struct {
@@ -233,14 +242,14 @@ pub const Statement = struct {
     pub fn deinit(statement: *Statement) void {
         const handle = statement.handle orelse return;
         statement.handle = null;
-        statement.database.active_statements -= 1;
+        _ = statement.database.active_statements.fetchSub(1, .acq_rel);
         _ = statement.database.api.finalize(handle);
     }
 
     pub fn finalize(statement: *Statement) !void {
         const handle = statement.handle orelse return;
         statement.handle = null;
-        statement.database.active_statements -= 1;
+        _ = statement.database.active_statements.fetchSub(1, .acq_rel);
         if (statement.database.api.finalize(handle) != SQLITE_OK) return error.DatabaseFinalizeFailed;
     }
 
@@ -331,21 +340,21 @@ pub const Transaction = struct {
             std.log.err("SQLite transaction rollback failed: {s}", .{transaction.database.errorInfo().message});
         };
         transaction.active = false;
-        transaction.database.active_transactions -= 1;
+        _ = transaction.database.active_transactions.fetchSub(1, .acq_rel);
     }
 
     pub fn commit(transaction: *Transaction) !void {
         if (!transaction.active) return error.TransactionClosed;
         try transaction.database.execute("COMMIT");
         transaction.active = false;
-        transaction.database.active_transactions -= 1;
+        _ = transaction.database.active_transactions.fetchSub(1, .acq_rel);
     }
 
     pub fn rollback(transaction: *Transaction) !void {
         if (!transaction.active) return error.TransactionClosed;
         try transaction.database.execute("ROLLBACK");
         transaction.active = false;
-        transaction.database.active_transactions -= 1;
+        _ = transaction.database.active_transactions.fetchSub(1, .acq_rel);
     }
 };
 

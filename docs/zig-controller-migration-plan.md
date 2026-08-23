@@ -53,6 +53,9 @@ Completed foundation evidence:
 - A live temporary database probe exercised committed and automatic-rollback transactions, migration rollback after invalid SQL, text, integer, float, blob, null, and constraint-error paths.
 - The Zig rigs repository initializes the existing table shape, preserves valid rig documents as opaque JSON, skips malformed documents, and retains Bun's creation-time ordering.
 - `GET /studio/rigs` is production-backed in Head, Worker, and Standalone modes. It seeds the default rig, refreshes detected local-node fields, preserves unknown rig and node fields, skips malformed JSON, and persists data that Bun reopens successfully.
+- Zig initializes and reads Bun's existing `rig_node_credentials` table without returning API keys to clients. Head derives deduplicated Workers from rig nodes, normalizes their HTTP origins once, and attaches credentials only to federation requests.
+- Head `GET /studio/workers` probes model and hardware contracts in parallel with a 16-Worker concurrency ceiling, a three-second deadline per request, and a 4 MiB response limit. Live acceptance covered an authenticated healthy Worker, a hanging Worker, duplicate IDs, concurrent rig reads, secret non-disclosure, and clean shutdown.
+- Shared SQLite web access is serialized with a cancellation-aware mutex, while statement and transaction lifetime counters are atomic.
 - The compatibility route registry is mechanically generated from all 94 unique manifest routes and matches exact paths and named path segments.
 - The reverse-proxy spike forwards methods, paths, queries, end-to-end headers, and request bodies while removing framing and hop-by-hop headers in both directions.
 - An 8 MiB request body streamed through the proxy with the exact expected SHA-256 and without whole-body buffering.
@@ -62,7 +65,7 @@ Completed foundation evidence:
 - An upstream that failed after response headers were flushed did not retry, returned a truncated response, and left the controller healthy.
 - SIGTERM during an active proxy stream canceled the work and exited the controller with status zero.
 
-The spike is not production-ready. Bounded task admission, timeouts, production Worker selection and authentication, full SQLite statement and transaction parity, and shutdown with child processes still require live proof.
+The migration is not production-ready. Selected-Worker management forwarding, inference routing, full SQLite table parity, runtime process supervision, and shutdown with child processes still require live proof.
 
 ## Compatibility ledger
 

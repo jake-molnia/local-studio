@@ -5,6 +5,8 @@ const repository = @import("../repository/rigs.zig");
 const sqlite = @import("../repository/sqlite.zig");
 
 pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot, database: *sqlite.Database) ![]u8 {
+    try database.lock(io);
+    defer database.unlock(io);
     var stored = try repository.list(allocator, database);
     defer stored.deinit();
 
