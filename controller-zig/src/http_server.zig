@@ -39,6 +39,7 @@ const agent_coordinator = @import("services/agent_coordinator.zig");
 const agent_sessions = @import("services/agent_sessions.zig");
 const automations = @import("services/automations.zig");
 const head_connection = @import("services/head_connection.zig");
+const agent_enrollments = @import("services/agent_enrollments.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -243,17 +244,33 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/api/agent/head-connection")) {
         const response = switch (request.head.method) {
             .GET => head_connection.payload(allocator, io, configuration.data_dir),
-            .DELETE => head_connection.deletePayload(allocator, io, configuration.data_dir),
+            .DELETE => head_connection.deletePayload(allocator, io, client, configuration.data_dir),
             .PUT => update: {
                 const document = try readBoundedAgentBody(allocator, request) orelse return false;
                 defer allocator.free(document);
-                break :update head_connection.updatePayload(allocator, io, configuration.data_dir, document);
+                break :update head_connection.updatePayload(allocator, io, mode, client, configuration.data_dir, system.hostname, system.os, harness.piIsAvailable(), document);
             },
             else => unreachable,
         };
         const payload = response catch |failure| return respondHeadConnectionFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/enrollments")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_enrollments.upsertPayload(allocator, io, database, document) catch |failure| return respondEnrollmentFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/enrollments/:id")) {
+        const node_id = try pathParameter(allocator, request.head.target, "/api/agent/enrollments/");
+        defer allocator.free(node_id);
+        const response = agent_enrollments.deletePayload(allocator, io, database, node_id) catch |failure| return respondEnrollmentFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/automations")) {
@@ -1467,17 +1484,40 @@ fn respondAutomationFailure(request: *http.Server.Request, failure: anyerror) !b
 
 fn respondHeadConnectionFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.InvalidHeadConnection, error.HeadUrlRequired, error.InvalidHeadUrl => .bad_request,
+        error.InvalidHeadConnection, error.HeadUrlRequired, error.InvalidHeadUrl, error.EnrollmentNodeAddressRequired, error.EnrollmentNodeCredentialRequired => .bad_request,
+        error.HeadEnrollmentRejected => .bad_gateway,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
         error.InvalidHeadConnection => "Invalid Head connection payload",
         error.HeadUrlRequired => "url is required",
         error.InvalidHeadUrl => "Head URL must use HTTP or HTTPS",
+        error.EnrollmentNodeAddressRequired => "nodeAddress is required",
+        error.EnrollmentNodeCredentialRequired => "nodeApiKey is required",
+        error.HeadEnrollmentRejected => "The Head rejected this node enrollment",
         error.HeadConnectionWriteFailed => "Head connection could not be persisted",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
+}
+
+fn respondEnrollmentFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.EnrollmentNotFound => .not_found,
+        error.InvalidEnrollmentPayload, error.EnrollmentNodeIdRequired, error.EnrollmentNodeNameRequired, error.EnrollmentNodeAddressRequired, error.EnrollmentNodeCredentialRequired, error.EnrollmentCapabilitiesRequired, error.InvalidEnrollmentNodeId, error.InvalidEnrollmentRole, error.InvalidEnrollmentAddress, error.InvalidEnrollmentCapabilities => .bad_request,
+        else => .internal_server_error,
+    };
+    return respondDownloadError(request, status, switch (failure) {
+        error.EnrollmentNotFound => "Enrollment not found",
+        error.EnrollmentNodeIdRequired => "nodeId is required",
+        error.EnrollmentNodeNameRequired => "name is required",
+        error.EnrollmentNodeAddressRequired => "address is required",
+        error.EnrollmentNodeCredentialRequired => "apiKey is required",
+        error.EnrollmentCapabilitiesRequired => "capabilities are required",
+        error.InvalidEnrollmentAddress => "address must use HTTP or HTTPS",
+        error.InvalidEnrollmentNodeId, error.InvalidEnrollmentRole, error.InvalidEnrollmentCapabilities, error.InvalidEnrollmentPayload => "Invalid enrollment payload",
+        else => @errorName(failure),
+    });
 }
 
 fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {

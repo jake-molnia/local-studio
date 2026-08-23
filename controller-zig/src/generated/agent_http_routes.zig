@@ -13,6 +13,8 @@ pub const routes = [_]http_routes.Route{
     .{ .method = .GET, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },
     .{ .method = .PUT, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/enrollments", .ownership = .head, .streaming = .never },
+    .{ .method = .DELETE, .path = "/api/agent/enrollments/:id", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/automations", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/automations", .ownership = .head, .streaming = .never },
     .{ .method = .PATCH, .path = "/api/agent/automations/:id", .ownership = .head, .streaming = .never },
