@@ -27,6 +27,28 @@ pub fn owns(allocator: std.mem.Allocator, io: std.Io, record: *const instances.R
         std.mem.eql(u8, identity.value.marker.?, record.nonce);
 }
 
+pub fn capture(allocator: std.mem.Allocator, io: std.Io, pid: i32) !instances.ProcessReference {
+    const identity = readIdentity(allocator, io, pid) orelse return error.ProcessIdentityUnavailable;
+    defer identity.deinit(allocator);
+    return .{
+        .pid = identity.value.pid,
+        .process_group_id = identity.value.process_group_id,
+        .session_id = identity.value.session_id,
+        .start_token = try allocator.dupe(u8, identity.value.start_token),
+    };
+}
+
+pub fn terminateOwned(allocator: std.mem.Allocator, io: std.Io, record: *const instances.Record, signal: std.posix.SIG) !bool {
+    if (!owns(allocator, io, record)) return false;
+    const reference = record.process orelse return false;
+    const group = reference.process_group_id orelse return false;
+    std.posix.kill(-group, signal) catch |failure| switch (failure) {
+        error.ProcessNotFound => return false,
+        else => return failure,
+    };
+    return true;
+}
+
 const OwnedIdentity = struct {
     value: Identity,
     storage: []u8,

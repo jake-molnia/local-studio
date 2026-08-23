@@ -61,6 +61,65 @@ pub fn readLlm(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !?Rec
     };
 }
 
+pub fn writeProcess(io: std.Io, path: []const u8, recipe_id: []const u8, engine: []const u8, port: u16, nonce: []const u8, reference: ProcessReference, ready_timeout_seconds: u64) !void {
+    var timestamp_buffer: [24]u8 = undefined;
+    const started_at = formatTimestamp(io, &timestamp_buffer);
+    var deadline_buffer: [24]u8 = undefined;
+    const ready_deadline_at = formatTimestampAt(io, ready_timeout_seconds, &deadline_buffer);
+    const Reference = struct {
+        kind: []const u8 = "process",
+        pid: i32,
+        processGroupId: ?i32,
+        sessionId: ?i32,
+        startToken: ?[]const u8,
+    };
+    const Document = struct {
+        name: []const u8 = "llm",
+        nodeId: []const u8 = "self",
+        engine: []const u8,
+        recipeId: []const u8,
+        runtime: []const u8 = "process",
+        ref: Reference,
+        port: u16,
+        devices: []const []const u8 = &.{},
+        nonce: []const u8,
+        startedAt: []const u8,
+        readyDeadlineAt: []const u8,
+    };
+    var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
+    defer output.deinit();
+    try std.json.Stringify.value(Document{
+        .engine = engine,
+        .recipeId = recipe_id,
+        .ref = .{
+            .pid = reference.pid,
+            .processGroupId = reference.process_group_id,
+            .sessionId = reference.session_id,
+            .startToken = reference.start_token,
+        },
+        .port = port,
+        .nonce = nonce,
+        .startedAt = started_at,
+        .readyDeadlineAt = ready_deadline_at,
+    }, .{ .whitespace = .indent_2 }, &output.writer);
+    var atomic_file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{
+        .permissions = @enumFromInt(0o600),
+        .make_path = true,
+        .replace = true,
+    });
+    defer atomic_file.deinit(io);
+    try atomic_file.file.writeStreamingAll(io, output.writer.buffered());
+    try atomic_file.file.sync(io);
+    try atomic_file.replace(io);
+}
+
+pub fn dropLlm(io: std.Io, path: []const u8) !void {
+    std.Io.Dir.cwd().deleteFile(io, path) catch |failure| switch (failure) {
+        error.FileNotFound => {},
+        else => return failure,
+    };
+}
+
 fn parseProcessReference(allocator: std.mem.Allocator, value: ?std.json.Value) !?ProcessReference {
     const present = value orelse return null;
     if (present == .null) return null;
@@ -109,4 +168,25 @@ fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     const value = object.get(name) orelse return null;
     if (value != .string or value.string.len == 0) return null;
     return value.string;
+}
+
+fn formatTimestamp(io: std.Io, buffer: *[24]u8) []const u8 {
+    return formatTimestampAt(io, 0, buffer);
+}
+
+fn formatTimestampAt(io: std.Io, offset_seconds: u64, buffer: *[24]u8) []const u8 {
+    const seconds = std.Io.Clock.real.now(io).toSeconds();
+    const now: u64 = @intCast(@max(seconds, 0));
+    const epoch = std.time.epoch.EpochSeconds{ .secs = now +| offset_seconds };
+    const year_day = epoch.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch.getDaySeconds();
+    return std.fmt.bufPrint(buffer, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+    }) catch unreachable;
 }
