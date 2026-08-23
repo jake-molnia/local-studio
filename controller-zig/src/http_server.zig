@@ -4,6 +4,7 @@ const shutdown = @import("shutdown.zig");
 const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
 const rig_service = @import("services/rigs.zig");
+const rig_mutations = @import("services/rig_mutations.zig");
 const worker_service = @import("services/workers.zig");
 const model_service = @import("services/models.zig");
 const tokenization_service = @import("services/tokenization.zig");
@@ -337,11 +338,60 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs")) {
+        if (request.head.method == .POST) {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            const response = rig_mutations.createRig(allocator, io, database, document) catch |failure| return respondRigFailure(request, failure);
+            defer allocator.free(response);
+            try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
         const response = try rig_service.payload(allocator, io, mode, system, database, harness.piIsAvailable());
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId")) {
+        const rig_id = try pathParameter(allocator, request.head.target, "/studio/rigs/");
+        defer allocator.free(rig_id);
+        const response = if (request.head.method == .DELETE)
+            rig_mutations.deleteRig(allocator, io, database, rig_id)
+        else update: {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            break :update rig_mutations.updateRig(allocator, io, database, rig_id, document);
+        };
+        const payload = response catch |failure| return respondRigFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId/nodes")) {
+        const rig_id = try pathParameterBetween(allocator, request.head.target, "/studio/rigs/", "/nodes");
+        defer allocator.free(rig_id);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = rig_mutations.createNode(allocator, io, mode, database, rig_id, document) catch |failure| return respondRigFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId/nodes/:nodeId")) {
+        const parameters = try rigNodeParameters(allocator, request.head.target);
+        defer allocator.free(parameters.rig_id);
+        defer allocator.free(parameters.node_id);
+        const response = if (request.head.method == .DELETE)
+            rig_mutations.deleteNode(allocator, io, database, parameters.rig_id, parameters.node_id)
+        else update: {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            break :update rig_mutations.updateNode(allocator, io, mode, database, parameters.rig_id, parameters.node_id, document);
+        };
+        const payload = response catch |failure| return respondRigFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/workers")) {
@@ -1297,6 +1347,29 @@ fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool
     return respondDownloadError(request, status, detail);
 }
 
+fn respondRigFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.RigNotFound, error.NodeNotFound => .not_found,
+        error.HeadRequiredForWorker, error.LocalNodeImmutable => .conflict,
+        error.InvalidRigPayload, error.InvalidRigRecord, error.RigNameRequired, error.NodeNameRequired, error.InvalidNodePayload, error.InvalidNodeCapabilities, error.InvalidNodeRole => .bad_request,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.RigNotFound => "Rig not found",
+        error.NodeNotFound => "Node not found",
+        error.HeadRequiredForWorker => "Workers can only be managed by a Head controller",
+        error.LocalNodeImmutable => "The detected local node cannot be changed or removed",
+        error.RigNameRequired => "name is required",
+        error.NodeNameRequired => "node name is required",
+        error.InvalidNodeCapabilities => "Invalid node capabilities",
+        error.InvalidNodeRole => "Invalid node role",
+        error.InvalidRigPayload, error.InvalidNodePayload => "Invalid JSON body",
+        error.InvalidRigRecord => "Stored rig data is invalid",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
 fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {
     const storage = try allocator.alloc(u8, max_settings_request_bytes);
     defer allocator.free(storage);
@@ -2025,6 +2098,29 @@ fn pathParameterBetween(allocator: std.mem.Allocator, target: []const u8, prefix
     const storage = try allocator.dupe(u8, encoded);
     defer allocator.free(storage);
     return try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage));
+}
+
+const RigNodeParameters = struct {
+    rig_id: []u8,
+    node_id: []u8,
+};
+
+fn rigNodeParameters(allocator: std.mem.Allocator, target: []const u8) !RigNodeParameters {
+    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
+    const path = target[0..query_start];
+    const prefix = "/studio/rigs/";
+    if (!std.mem.startsWith(u8, path, prefix)) return error.InvalidPathParameter;
+    const separator = std.mem.indexOf(u8, path[prefix.len..], "/nodes/") orelse return error.InvalidPathParameter;
+    const rig_encoded = path[prefix.len .. prefix.len + separator];
+    const node_encoded = path[prefix.len + separator + "/nodes/".len ..];
+    if (rig_encoded.len == 0 or node_encoded.len == 0) return error.InvalidPathParameter;
+    const rig_storage = try allocator.dupe(u8, rig_encoded);
+    defer allocator.free(rig_storage);
+    const rig_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(rig_storage));
+    errdefer allocator.free(rig_id);
+    const node_storage = try allocator.dupe(u8, node_encoded);
+    defer allocator.free(node_storage);
+    return .{ .rig_id = rig_id, .node_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(node_storage)) };
 }
 
 const ModelProviderJobParameters = struct {
