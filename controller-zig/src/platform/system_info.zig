@@ -5,6 +5,7 @@ pub const Snapshot = struct {
     allocator: std.mem.Allocator,
     hostname: []u8,
     os: []u8,
+    release: []u8,
     cpu_model: ?[]u8,
     cpu_cores: usize,
     memory_total_bytes: u64,
@@ -14,6 +15,7 @@ pub const Snapshot = struct {
     pub fn deinit(snapshot: *Snapshot) void {
         snapshot.allocator.free(snapshot.hostname);
         snapshot.allocator.free(snapshot.os);
+        snapshot.allocator.free(snapshot.release);
         if (snapshot.cpu_model) |model| snapshot.allocator.free(model);
         snapshot.* = undefined;
     }
@@ -29,6 +31,8 @@ pub fn detect(allocator: std.mem.Allocator) !Snapshot {
     const release = std.mem.sliceTo(&uts.release, 0);
     const os = try std.fmt.allocPrint(allocator, "{s} {s}", .{ system_name, release });
     errdefer allocator.free(os);
+    const owned_release = try allocator.dupe(u8, release);
+    errdefer allocator.free(owned_release);
 
     const cpu_model = try detectCpuModel(allocator);
     errdefer if (cpu_model) |model| allocator.free(model);
@@ -38,6 +42,7 @@ pub fn detect(allocator: std.mem.Allocator) !Snapshot {
         .allocator = allocator,
         .hostname = hostname,
         .os = os,
+        .release = owned_release,
         .cpu_model = cpu_model,
         .cpu_cores = std.Thread.getCpuCount() catch 1,
         .memory_total_bytes = memory_bytes,

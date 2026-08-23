@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const config_module = @import("../config.zig");
 const system_info = @import("../platform/system_info.zig");
 const lifecycle = @import("lifecycle.zig");
@@ -202,6 +203,126 @@ pub fn compatibilityPayload(allocator: std.mem.Allocator, io: Io, config: *const
         .checks = checks.items,
     }, .{}, &output.writer);
     return try output.toOwnedSlice();
+}
+
+pub fn computeEnginesPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, system: *const system_info.Snapshot, runtime_cache: *runtime_info.Cache) ![]u8 {
+    const runtime_document = try runtime_cache.payload(allocator, config, system);
+    defer allocator.free(runtime_document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, runtime_document, .{}) catch return error.InvalidRuntimePayload;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidRuntimePayload;
+    const platform = objectField(parsed.value.object, "platform") orelse return error.InvalidRuntimePayload;
+    const kind = stringField(platform, "kind") orelse return error.InvalidRuntimePayload;
+    const gpus = objectField(parsed.value.object, "gpus") orelse return error.InvalidRuntimePayload;
+    const device_count = unsignedField(gpus, "count") orelse 0;
+    const platform_name = switch (builtin.os.tag) {
+        .macos => "darwin",
+        else => "linux",
+    };
+    const arch_name = switch (builtin.cpu.arch) {
+        .aarch64 => "arm64",
+        else => "x64",
+    };
+    const accelerator = if (std.mem.eql(u8, kind, "metal"))
+        "metal"
+    else if (std.mem.eql(u8, kind, "cuda"))
+        "cuda"
+    else if (std.mem.eql(u8, kind, "rocm"))
+        "rocm"
+    else
+        "cpu";
+    const Host = struct {
+        nodeId: []const u8 = "self",
+        platform: []const u8,
+        arch: []const u8,
+        accelerator: []const u8,
+        unifiedMemory: bool,
+        wsl: bool,
+        docker: bool = false,
+        dockerGpu: bool = false,
+        deviceCount: u64,
+    };
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"host\":");
+    try std.json.Stringify.value(Host{
+        .platform = platform_name,
+        .arch = arch_name,
+        .accelerator = accelerator,
+        .unifiedMemory = std.mem.eql(u8, accelerator, "metal"),
+        .wsl = isWsl(io),
+        .deviceCount = device_count,
+    }, .{}, &output.writer);
+    try output.writer.writeAll(",\"engines\":[");
+    try writeEngineSupport(&output.writer, "vllm", vllmSupport(platform_name, accelerator));
+    try output.writer.writeByte(',');
+    try writeEngineSupport(&output.writer, "sglang", sglangSupport(platform_name, accelerator));
+    try output.writer.writeByte(',');
+    try writeEngineSupport(&output.writer, "llamacpp", .{ .runtimes = &.{"process"} });
+    try output.writer.writeByte(',');
+    try writeEngineSupport(&output.writer, "mlx", mlxSupport(platform_name, arch_name));
+    try output.writer.writeByte(',');
+    try writeEngineSupport(&output.writer, "exllamav3", exllamaSupport(platform_name, accelerator));
+    try output.writer.writeAll("]}");
+    return try output.toOwnedSlice();
+}
+
+const Support = union(enum) {
+    runtimes: []const []const u8,
+    reason: []const u8,
+};
+
+fn vllmSupport(platform: []const u8, accelerator: []const u8) Support {
+    if (std.mem.eql(u8, platform, "darwin")) return .{ .reason = "vLLM has no Metal backend — use llamacpp or mlx on Apple Silicon" };
+    if (std.mem.eql(u8, accelerator, "rocm")) return .{ .reason = "vLLM on ROCm needs Docker with GPU passthrough (rocm/vllm)" };
+    if (!std.mem.eql(u8, accelerator, "cuda")) return .{ .reason = "vLLM needs a CUDA or ROCm device; this host reports cpu" };
+    return .{ .runtimes = &.{"process"} };
+}
+
+fn sglangSupport(platform: []const u8, accelerator: []const u8) Support {
+    if (std.mem.eql(u8, platform, "darwin")) return .{ .reason = "SGLang has no Metal backend" };
+    if (std.mem.eql(u8, accelerator, "rocm")) return .{ .reason = "SGLang needs a CUDA device; this host reports rocm" };
+    if (!std.mem.eql(u8, accelerator, "cuda")) return .{ .reason = "SGLang needs a CUDA device; this host reports cpu" };
+    return .{ .runtimes = &.{"process"} };
+}
+
+fn mlxSupport(platform: []const u8, arch: []const u8) Support {
+    if (!std.mem.eql(u8, platform, "darwin")) return .{ .reason = "MLX runs only on macOS (Apple Silicon)" };
+    if (!std.mem.eql(u8, arch, "arm64")) return .{ .reason = "MLX requires Apple Silicon; this Mac is Intel" };
+    return .{ .runtimes = &.{"process"} };
+}
+
+fn exllamaSupport(platform: []const u8, accelerator: []const u8) Support {
+    if (std.mem.eql(u8, platform, "darwin")) return .{ .reason = "exllamav3 requires CUDA; macOS has none" };
+    if (std.mem.eql(u8, accelerator, "rocm")) return .{ .reason = "exllamav3 needs a CUDA device; this host reports rocm" };
+    if (!std.mem.eql(u8, accelerator, "cuda")) return .{ .reason = "exllamav3 needs a CUDA device; this host reports cpu" };
+    return .{ .runtimes = &.{"process"} };
+}
+
+fn writeEngineSupport(writer: *Io.Writer, id: []const u8, support: Support) !void {
+    try writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(id, .{}, writer);
+    try writer.writeAll(",\"support\":");
+    switch (support) {
+        .runtimes => |runtimes| {
+            try writer.writeAll("{\"ok\":true,\"runtimes\":");
+            try std.json.Stringify.value(runtimes, .{}, writer);
+            try writer.writeByte('}');
+        },
+        .reason => |reason| {
+            try writer.writeAll("{\"ok\":false,\"reason\":");
+            try std.json.Stringify.value(reason, .{}, writer);
+            try writer.writeByte('}');
+        },
+    }
+    try writer.writeByte('}');
+}
+
+fn isWsl(io: Io) bool {
+    if (builtin.os.tag != .linux) return false;
+    const version = std.Io.Dir.cwd().readFileAlloc(io, "/proc/version", std.heap.page_allocator, .limited(64 * 1024)) catch return false;
+    defer std.heap.page_allocator.free(version);
+    return std.ascii.indexOfIgnoreCase(version, "microsoft") != null;
 }
 
 fn serviceReachable(io: Io, port: u16) bool {

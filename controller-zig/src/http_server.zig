@@ -282,6 +282,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/engines")) {
+        const response = try system_service.computeEnginesPayload(allocator, io, configuration, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/devices")) {
+        const response = try telemetry.devicePayload(allocator, io, system);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances") and request.head.method == .GET) {
         const response = try supervisor.instancesPayload(client);
         defer allocator.free(response);
