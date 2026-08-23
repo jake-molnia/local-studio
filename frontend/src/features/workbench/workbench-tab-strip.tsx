@@ -52,6 +52,7 @@ import {
 } from "@/features/workbench/workbench-tab-helpers";
 import { useAppStore } from "@/store";
 import type { AggregatedSession } from "@shared/agent/session-summary";
+import { clearKeyboardTabFocus, requestKeyboardTabFocus } from "@/features/workbench/focus-handoff";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -151,7 +152,8 @@ export function WorkbenchTabStrip() {
     pendingTaskId: pendingTask?.id,
   });
 
-  const activateTab = (tab: WorkbenchTab) => {
+  const activateTab = (tab: WorkbenchTab, origin: "pointer" | "keyboard" = "pointer") => {
+    if (origin === "pointer") clearKeyboardTabFocus();
     setLauncherOpen(false);
     setState((current) => ({
       ...current,
@@ -273,7 +275,8 @@ export function WorkbenchTabStrip() {
     const boundedIndex = (index + orderedTabs.length) % orderedTabs.length;
     const tab = orderedTabs[boundedIndex];
     if (!tab) return;
-    activateTab(tab);
+    requestKeyboardTabFocus(tab.id);
+    activateTab(tab, "keyboard");
     requestAnimationFrame(() => {
       requestAnimationFrame(() => tabElementsRef.current.get(tab.id)?.focus());
     });

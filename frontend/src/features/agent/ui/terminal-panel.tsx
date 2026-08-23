@@ -7,6 +7,7 @@ import type { TerminalRunResult } from "@/features/agent/contracts";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { effectTimeout } from "@/lib/effect-timers";
 import { webPtyBridge } from "@/features/agent/ui/web-pty-bridge";
+import { isKeyboardTabFocusPending } from "@/features/workbench/focus-handoff";
 import {
   bumpTerminalFontSize,
   getTerminalFontSize,
@@ -298,7 +299,7 @@ function useTerminalPanelEffects({
       // have changed while detached), fit to the new box, and focus.
       refreshTerminalPresentation(entry, container);
       effectTimeout(() => {
-        if (!entry.refs.disposed) {
+        if (!entry.refs.disposed && !isKeyboardTabFocusPending()) {
           entry.refs.applyResize?.();
           entry.refs.term?.focus();
         }
@@ -389,7 +390,7 @@ async function bootTerminal(
   }
 
   effectTimeout(() => {
-    if (!refs.disposed && element.isConnected) term.focus();
+    if (!refs.disposed && element.isConnected && !isKeyboardTabFocusPending()) term.focus();
   }, 0);
 }
 

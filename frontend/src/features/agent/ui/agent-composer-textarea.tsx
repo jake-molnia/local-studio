@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ComposerFocusContext } from "@/features/agent/workspace/pane-context";
+import { isKeyboardTabFocusPending } from "@/features/workbench/focus-handoff";
 
 export function AgentComposerTextArea({
   inputRef,
@@ -32,7 +33,9 @@ export function AgentComposerTextArea({
   useMountSubscription(() => {
     if (nonce === 0 || lastSeenNonceRef.current === nonce) return;
     lastSeenNonceRef.current = nonce;
-    if (composerFocusIntent?.targetTabId === tabId) inputRef.current?.focus();
+    if (composerFocusIntent?.targetTabId === tabId && !isKeyboardTabFocusPending()) {
+      inputRef.current?.focus();
+    }
   }, [nonce, composerFocusIntent, tabId, inputRef]);
   return (
     <textarea
