@@ -39,8 +39,8 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           logs.selectedSession ? logs.loadLogContent(logs.selectedSession) : undefined
         }
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[248px_minmax(0,1fr)]">
-        <ServerStatusAside
+      {embedded ? (
+        <EmbeddedServerBody
           realtime={realtime}
           backendUrl={backendUrl}
           tab={tab}
@@ -48,10 +48,6 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           sessions={logs.filteredSessions}
           selectedSession={logs.selectedSession}
           onSelectSession={logs.handleSelectSession}
-        />
-        <ServerViewerPanel
-          tab={tab}
-          selectedSession={logs.selectedSession}
           loadingContent={logs.loadingContent}
           autoScroll={logs.autoScroll}
           setAutoScroll={logs.setAutoScroll}
@@ -59,7 +55,29 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           hasLogContent={logs.hasLogContent}
           renderLogs={logs.renderLogs}
         />
-      </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[248px_minmax(0,1fr)]">
+          <ServerStatusAside
+            realtime={realtime}
+            backendUrl={backendUrl}
+            tab={tab}
+            setTab={setTab}
+            sessions={logs.filteredSessions}
+            selectedSession={logs.selectedSession}
+            onSelectSession={logs.handleSelectSession}
+          />
+          <ServerViewerPanel
+            tab={tab}
+            selectedSession={logs.selectedSession}
+            loadingContent={logs.loadingContent}
+            autoScroll={logs.autoScroll}
+            setAutoScroll={logs.setAutoScroll}
+            logRef={logs.logRef}
+            hasLogContent={logs.hasLogContent}
+            renderLogs={logs.renderLogs}
+          />
+        </div>
+      )}
     </>
   );
 
@@ -72,6 +90,76 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
   }
 
   return <AppPage className="flex h-full min-h-0 flex-col overflow-hidden">{content}</AppPage>;
+}
+
+function EmbeddedServerBody({
+  realtime,
+  backendUrl,
+  tab,
+  setTab,
+  sessions,
+  selectedSession,
+  onSelectSession,
+  loadingContent,
+  autoScroll,
+  setAutoScroll,
+  logRef,
+  hasLogContent,
+  renderLogs,
+}: {
+  realtime: RealtimeStatusSnapshot;
+  backendUrl: string;
+  tab: Tab;
+  setTab: (t: Tab) => void;
+  sessions: ReturnType<typeof useLogs>["filteredSessions"];
+  selectedSession: string | null;
+  onSelectSession: (id: string) => void;
+  loadingContent: boolean;
+  autoScroll: boolean;
+  setAutoScroll: (v: boolean) => void;
+  logRef: React.RefObject<HTMLDivElement | null>;
+  hasLogContent: boolean;
+  renderLogs: () => ReactNode;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+      <div className="grid grid-cols-1 gap-x-5 gap-y-1 border-b border-(--border) py-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ConnectionGroup realtime={realtime} backendUrl={backendUrl} />
+        <RuntimeGroup realtime={realtime} />
+        <BackendsGroup realtime={realtime} />
+        <ProcessGroup realtime={realtime} />
+        <ServicesGroup realtime={realtime} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-(--border) py-2">
+        <Tabs
+          variant="pill"
+          items={[
+            { id: "logs", label: "Server Logs" },
+            { id: "docs", label: "API Docs" },
+          ]}
+          activeTab={tab}
+          onSelectTab={setTab}
+        />
+        <EmbeddedSessionList
+          sessions={sessions}
+          selectedSession={selectedSession}
+          onSelect={onSelectSession}
+          onActivate={() => setTab("logs")}
+        />
+      </div>
+      <ServerViewerPanel
+        embedded
+        tab={tab}
+        selectedSession={selectedSession}
+        loadingContent={loadingContent}
+        autoScroll={autoScroll}
+        setAutoScroll={setAutoScroll}
+        logRef={logRef}
+        hasLogContent={hasLogContent}
+        renderLogs={renderLogs}
+      />
+    </div>
+  );
 }
 
 function ServerHeader({
@@ -335,7 +423,51 @@ function SessionList({
   );
 }
 
+function EmbeddedSessionList({
+  sessions,
+  selectedSession,
+  onSelect,
+  onActivate,
+}: {
+  sessions: ReturnType<typeof useLogs>["filteredSessions"];
+  selectedSession: string | null;
+  onSelect: (id: string) => void;
+  onActivate: () => void;
+}) {
+  if (sessions.length === 0) {
+    return (
+      <span className="text-[length:var(--fs-xs)] text-(--color-foreground-subtlest)">
+        No log streams
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+      {sessions.map((session) => (
+        <button
+          key={session.id}
+          type="button"
+          onClick={() => {
+            onActivate();
+            onSelect(session.id);
+          }}
+          className={`max-w-full truncate rounded px-2 py-1 text-left text-[length:var(--fs-xs)] transition-[background-color,color] duration-[var(--motion-fast)] ${
+            selectedSession === session.id
+              ? "bg-(--color-surface) text-(--fg)"
+              : "text-(--color-foreground-subtle) hover:bg-(--hover) hover:text-(--fg)"
+          }`}
+          title={session.id}
+        >
+          {session.recipe_name || session.model || session.id}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ServerViewerPanel(props: {
+  embedded?: boolean;
   tab: Tab;
   selectedSession: string | null;
   loadingContent: boolean;
@@ -346,10 +478,11 @@ function ServerViewerPanel(props: {
   renderLogs: () => ReactNode;
 }) {
   if (props.tab === "logs") return <LogsPanel {...props} />;
-  return <DocsPanel />;
+  return <DocsPanel embedded={props.embedded} />;
 }
 
 function LogsPanel({
+  embedded = false,
   selectedSession,
   loadingContent,
   autoScroll,
@@ -358,6 +491,7 @@ function LogsPanel({
   hasLogContent,
   renderLogs,
 }: {
+  embedded?: boolean;
   selectedSession: string | null;
   loadingContent: boolean;
   autoScroll: boolean;
@@ -367,8 +501,14 @@ function LogsPanel({
   renderLogs: () => ReactNode;
 }) {
   return (
-    <div className="min-h-0 p-3">
-      <section className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-md border border-(--color-card-border) bg-(--color-card)">
+    <div className={`min-h-0 ${embedded ? "pt-3" : "p-3"}`}>
+      <section
+        className={`flex h-full min-h-[32rem] flex-col overflow-hidden ${
+          embedded
+            ? "border-y border-(--border) bg-(--color-card)/30"
+            : "rounded-md border border-(--color-card-border) bg-(--color-card)"
+        }`}
+      >
         <div className="flex min-h-10 items-center justify-between border-b border-(--color-card-border) px-3">
           <div className="truncate font-mono text-xs text-(--color-foreground-subtle)">
             {selectedSession ?? "select a log stream"}
@@ -410,10 +550,16 @@ function LogContent({
   return <div className="text-(--color-foreground-subtle)">No log content selected.</div>;
 }
 
-function DocsPanel() {
+function DocsPanel({ embedded = false }: { embedded?: boolean }) {
   return (
-    <div className="min-h-0 p-3">
-      <section className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-md border border-(--color-card-border) bg-(--color-card)">
+    <div className={`min-h-0 ${embedded ? "pt-3" : "p-3"}`}>
+      <section
+        className={`flex h-full min-h-[32rem] flex-col overflow-hidden ${
+          embedded
+            ? "border-y border-(--border) bg-(--color-card)/30"
+            : "rounded-md border border-(--color-card-border) bg-(--color-card)"
+        }`}
+      >
         <div className="flex min-h-10 items-center justify-between border-b border-(--color-card-border) px-3 text-xs">
           <span className="text-(--color-foreground-subtle)">OpenAPI reference</span>
           <a
