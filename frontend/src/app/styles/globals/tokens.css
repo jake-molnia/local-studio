@@ -402,7 +402,7 @@
   --composer: var(--color-sidebar);
   --composer-footer: var(--color-sidebar);
   /* Light and dark composer share Codex's flat elevated-gray treatment. */
-  --composer-border: transparent;
+  --composer-border: var(--border);
   --composer-placeholder: light-dark(
     color-mix(in srgb, var(--fg) 40%, transparent),
     color-mix(in srgb, var(--fg) 32%, transparent)
@@ -441,7 +441,7 @@
   --composer-w: 29rem;
   --thread-w: 900px;
   --composer-radius: 12px;
-  --composer-radius-inner: 8px;
+  --composer-radius-inner: 10px;
   --composer-font-size: 13px;
   --composer-elevation: 0 4px 12px rgba(0, 0, 0, 0.1);
   --composer-elevation-inner: 0 2px 8px rgba(0, 0, 0, 0.08);
