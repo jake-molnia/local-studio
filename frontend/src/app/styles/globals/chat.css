@@ -3,9 +3,9 @@
   --codex-chat-font-family: var(--font-sans);
   --codex-chat-mono-font-family:
     ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --codex-chat-font-size: 16px;
+  --codex-chat-font-size: 14px;
   --codex-chat-line-height: 1.5;
-  --codex-chat-code-font-size: 13px;
+  --codex-chat-code-font-size: 12px;
   --codex-chat-font-weight: 400;
 }
 
@@ -26,6 +26,21 @@
 .agent-thread-shell {
   width: 90%;
   max-width: calc(var(--composer-w) * 0.9);
+}
+
+[data-empty-prompt="true"] {
+  position: relative;
+}
+
+[data-empty-prompt="true"] .agent-composer-form {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+[data-empty-prompt="true"] .agent-composer-form > .agent-composer-box {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--bg) 20%, transparent);
 }
 
 /* Phone widths: give the thread the full column — the 90% inset plus the
@@ -454,6 +469,27 @@
 
 .agent-composer-box {
   container-type: inline-size;
+}
+
+.agent-composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+
+.agent-composer-box textarea:focus-visible {
+  outline: none;
+}
+
+.agent-composer-project-drawer[data-open="true"] {
+  margin: 0 0 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--composer-radius-inner);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  padding-bottom: 0.5rem;
+  box-shadow: var(--composer-elevation-inner);
+}
+
+.agent-composer-project-drawer[data-open="false"] > div:first-child {
+  padding-top: 0.25rem;
 }
 
 @container (max-width: 27rem) {
