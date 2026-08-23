@@ -150,7 +150,7 @@ export function WorkbenchTabButton({
   const working = tab.kind === "task" && Boolean(tab.status && isWorkingStatus(tab.status));
   return (
     <div
-      role="presentation"
+      role="none"
       draggable={tab.kind === "tool"}
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
@@ -177,7 +177,6 @@ export function WorkbenchTabButton({
         aria-controls="workbench-active-surface"
         id={active ? "workbench-active-tab" : undefined}
         tabIndex={active ? 0 : -1}
-        onPointerUp={(event) => event.currentTarget.blur()}
         onClick={onActivate}
         onKeyDown={onKeyDown}
         onAuxClick={(event) => {
