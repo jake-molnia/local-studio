@@ -42,6 +42,8 @@ Completed foundation evidence:
 - Invalid and oversized request heads have explicit 400 and 431 response paths.
 - The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
 - A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
+- The SQLite wrapper owns prepared statements, typed bindings and columns, reset/finalize, multi-statement scripts, change counts, extended errors, and rollback-safe migration transactions.
+- A live temporary database probe exercised committed and automatic-rollback transactions, migration rollback after invalid SQL, text, integer, float, blob, null, and constraint-error paths.
 - The compatibility route registry is mechanically generated from all 94 unique manifest routes and matches exact paths and named path segments.
 - The reverse-proxy spike forwards methods, paths, queries, end-to-end headers, and request bodies while removing framing and hop-by-hop headers in both directions.
 - An 8 MiB request body streamed through the proxy with the exact expected SHA-256 and without whole-body buffering.
