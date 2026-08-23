@@ -103,7 +103,7 @@ const appendAssistantBlock = (
 const requestContext = (model: Model<Api>, request: Record<string, unknown>): Context => {
   const messages: Message[] = [];
   const system: string[] = [];
-  const toolNames = new Map<string, string>();
+  const toolCalls = new Map<string, { id: string; name: string }>();
   if (typeof request["instructions"] === "string" && request["instructions"]) {
     system.push(request["instructions"]);
   }
@@ -136,10 +136,11 @@ const requestContext = (model: Model<Api>, request: Record<string, unknown>): Co
       const callId = typeof entry["call_id"] === "string" ? entry["call_id"] : randomUUID();
       const itemId = typeof entry["id"] === "string" ? entry["id"] : `fc_${randomUUID()}`;
       const name = typeof entry["name"] === "string" ? entry["name"] : "tool";
-      toolNames.set(callId, name);
+      const toolCallId = `${callId}|${itemId}`;
+      toolCalls.set(callId, { id: toolCallId, name });
       appendAssistantBlock(messages, model, {
         type: "toolCall",
-        id: `${callId}|${itemId}`,
+        id: toolCallId,
         name,
         arguments: parseArguments(entry["arguments"] ?? entry["input"]),
       });
@@ -148,10 +149,11 @@ const requestContext = (model: Model<Api>, request: Record<string, unknown>): Co
     if (type === "function_call_output" || type === "custom_tool_call_output") {
       const callId = typeof entry["call_id"] === "string" ? entry["call_id"] : randomUUID();
       const output = contentParts(entry["output"]);
+      const toolCall = toolCalls.get(callId);
       messages.push({
         role: "toolResult",
-        toolCallId: callId,
-        toolName: toolNames.get(callId) ?? "tool",
+        toolCallId: toolCall?.id ?? callId,
+        toolName: toolCall?.name ?? "tool",
         content: output.length > 0 ? output : [{ type: "text", text: "(no tool output)" }],
         isError: false,
         timestamp: Date.now(),

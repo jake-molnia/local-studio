@@ -23,6 +23,11 @@ export type HeadProviderResponse = {
   completion: Promise<HeadProviderCompletion | null>;
 };
 
+export type HeadProviderCatalog = {
+  providerId: string;
+  models: HeadProviderModel[];
+};
+
 export interface HeadProviderAdapter {
   readonly id: string;
   view(): Promise<ProviderView>;
@@ -59,6 +64,14 @@ export class HeadProviderService {
 
   public models(providerId: string): Promise<HeadProviderModel[]> {
     return this.#provider(providerId).models();
+  }
+
+  public catalogs(): Promise<HeadProviderCatalog[]> {
+    return Promise.all(
+      [...this.#providers.values()].map((provider) =>
+        provider.models().then((models) => ({ providerId: provider.id, models })),
+      ),
+    );
   }
 
   public startLogin(providerId: string, authType: ProviderAuthType): string {

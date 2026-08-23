@@ -91,6 +91,16 @@ const serializePrompt = (job: LoginJob, prompt: AuthPrompt): ProviderLoginPrompt
   };
 };
 
+const abortable = <A>(operation: Promise<A>, signal?: AbortSignal): Promise<A> => {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(new Error("Login cancelled"));
+  return new Promise<A>((resolve, reject) => {
+    const abort = (): void => reject(new Error("Login cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+};
+
 export class CursorProviderService implements HeadProviderAdapter {
   public readonly id = CURSOR_PROVIDER_ID;
   readonly #models: MutableModels;
@@ -168,8 +178,8 @@ export class CursorProviderService implements HeadProviderAdapter {
             name: oauth.name,
             loginLabel: oauth.name,
             login: (interaction) =>
-              oauth
-                .login({
+              abortable(
+                oauth.login({
                   ...(interaction.signal ? { signal: interaction.signal } : {}),
                   onAuth: (info) => interaction.notify({ type: "auth_url", ...info }),
                   onDeviceCode: (info) => interaction.notify({ type: "device_code", ...info }),
@@ -191,8 +201,9 @@ export class CursorProviderService implements HeadProviderAdapter {
                       message: prompt.message,
                       options: prompt.options,
                     }),
-                })
-                .then((credential) => ({ ...credential, type: "oauth" as const })),
+                }),
+                interaction.signal,
+              ).then((credential) => ({ ...credential, type: "oauth" as const })),
             refresh: (credential) =>
               oauth
                 .refreshToken(credential)
