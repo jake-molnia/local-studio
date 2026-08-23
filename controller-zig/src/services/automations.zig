@@ -121,31 +121,36 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     const target_session = optionalString(object, "targetSessionId");
     const node_id = optionalString(object, "nodeId");
     const project_id = optionalString(object, "projectId");
-    const session_id = if (target_session) |value| try allocator.dupe(u8, value) else fresh: {
-        var random: [8]u8 = undefined;
-        io.random(&random);
-        const suffix = std.fmt.bytesToHex(random, .lower);
-        break :fresh try std.fmt.allocPrint(allocator, "automation:{s}:{s}", .{ automation_id, suffix[0..] });
-    };
+    var random: [8]u8 = undefined;
+    io.random(&random);
+    const suffix = std.fmt.bytesToHex(random, .lower);
+    const session_id = try std.fmt.allocPrint(allocator, "automation:{s}:{s}", .{ automation_id, suffix[0..] });
     defer allocator.free(session_id);
     const turn = try turnDocument(allocator, session_id, model_id, prompt, cwd, target_session, node_id, project_id);
     defer allocator.free(turn);
-    var dispatch_error: ?[]const u8 = null;
+    var run_error: ?[]const u8 = null;
     const response = agent_coordinator.turnPayload(allocator, io, mode, client, database, harness, turn) catch |failure| failed: {
-        dispatch_error = @errorName(failure);
+        run_error = @errorName(failure);
         break :failed null;
     };
     defer if (response) |value| allocator.free(value);
+    var result: ?RunResult = null;
+    defer if (result) |*value| value.deinit();
+    if (response != null) result = waitForRun(allocator, io, mode, client, database, harness, session_id) catch |failure| failed: {
+        run_error = @errorName(failure);
+        break :failed null;
+    };
     var at_buffer: [24]u8 = undefined;
     const at = formatTimestampAt(io, 0, &at_buffer);
-    const updated = try recordRun(allocator, io, &automation, at, cwd, target_session, project_id, dispatch_error);
+    const completed_error = if (result) |value| value.failure else run_error;
+    const updated = try recordRun(allocator, io, &automation, at, cwd, if (result) |value| value.native_session else target_session, project_id, if (result) |value| value.summary else "", completed_error);
     defer allocator.free(updated);
     const status = optionalString(automation.value.object, "status") orelse "active";
     const next = nullableStringValue(automation.value.object.get("nextRunAt"));
     try lockedSave(io, database, automation_id, status, next, updated);
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
-    try output.writer.print("{{\"ok\":true,\"started\":{},\"automation\":{s}}}", .{ dispatch_error == null, updated });
+    try output.writer.print("{{\"ok\":true,\"started\":{},\"automation\":{s}}}", .{ response != null, updated });
     return output.toOwnedSlice();
 }
 
@@ -184,7 +189,111 @@ fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http
     }
 }
 
-fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, cwd: []const u8, native_session: ?[]const u8, project_id: ?[]const u8, failure: ?[]const u8) ![]u8 {
+const RunResult = struct {
+    allocator: std.mem.Allocator,
+    native_session: ?[]u8,
+    summary: []u8,
+    failure: ?[]u8,
+
+    fn deinit(result: *RunResult) void {
+        if (result.native_session) |value| result.allocator.free(value);
+        result.allocator.free(result.summary);
+        if (result.failure) |value| result.allocator.free(value);
+        result.* = undefined;
+    }
+};
+
+fn waitForRun(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8) !RunResult {
+    var cursor: u64 = 0;
+    var native_session: ?[]u8 = null;
+    errdefer if (native_session) |value| allocator.free(value);
+    var attempts: usize = 0;
+    while (attempts < 14_400) : (attempts += 1) {
+        try io.sleep(.fromMilliseconds(250), .awake);
+        const payload = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, cursor);
+        defer allocator.free(payload);
+        var status = std.json.parseFromSlice(std.json.Value, allocator, payload, .{}) catch return error.InvalidHarnessResponse;
+        defer status.deinit();
+        if (status.value != .object) return error.InvalidHarnessResponse;
+        const state = status.value.object.get("status") orelse return error.InvalidHarnessResponse;
+        if (state != .object) return error.InvalidHarnessResponse;
+        if (native_session == null) {
+            if (optionalString(state.object, "nativeSessionId") orelse optionalString(state.object, "piSessionId")) |value| native_session = try allocator.dupe(u8, value);
+        }
+        if (optionalString(state.object, "lastError")) |failure| return .{
+            .allocator = allocator,
+            .native_session = native_session,
+            .summary = try allocator.dupe(u8, ""),
+            .failure = try allocator.dupe(u8, failure),
+        };
+        var settled = false;
+        if (status.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
+            if (event != .object) continue;
+            cursor = @max(cursor, unsignedField(event.object, "seq") orelse 0);
+            const native = event.object.get("event") orelse continue;
+            if (native == .object and std.mem.eql(u8, optionalString(native.object, "type") orelse "", "agent_settled")) settled = true;
+        };
+        if (!settled) continue;
+        const transcript = try agent_coordinator.transcriptPayload(allocator, io, mode, client, database, harness, session_id, null);
+        defer allocator.free(transcript);
+        var assistant = try lastAssistantResult(allocator, transcript);
+        errdefer assistant.deinit();
+        if (native_session) |value| {
+            if (assistant.native_session) |previous| allocator.free(previous);
+            assistant.native_session = value;
+            native_session = null;
+        }
+        return assistant;
+    }
+    return error.AutomationRunTimeout;
+}
+
+fn lastAssistantResult(allocator: std.mem.Allocator, document: []const u8) !RunResult {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHarnessResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidHarnessResponse;
+    const entries = parsed.value.object.get("entries") orelse return error.InvalidHarnessResponse;
+    if (entries != .array) return error.InvalidHarnessResponse;
+    var summary = try allocator.dupe(u8, "");
+    errdefer allocator.free(summary);
+    var failure: ?[]u8 = null;
+    errdefer if (failure) |value| allocator.free(value);
+    for (entries.array.items) |entry| {
+        if (entry != .object or !std.mem.eql(u8, optionalString(entry.object, "type") orelse "", "message")) continue;
+        const message = entry.object.get("message") orelse continue;
+        if (message != .object or !std.mem.eql(u8, optionalString(message.object, "role") orelse "", "assistant")) continue;
+        const text = try messageText(allocator, message.object.get("content"));
+        defer allocator.free(text);
+        const trimmed = std.mem.trim(u8, text, " \t\r\n");
+        if (trimmed.len > 0) {
+            allocator.free(summary);
+            summary = try allocator.dupe(u8, trimmed[0..@min(trimmed.len, 2000)]);
+            if (failure) |value| allocator.free(value);
+            failure = null;
+        } else if (optionalString(message.object, "errorMessage")) |value| {
+            if (failure) |previous| allocator.free(previous);
+            failure = try allocator.dupe(u8, value);
+        }
+    }
+    if (summary.len == 0 and failure == null) failure = try allocator.dupe(u8, "Automation completed without an assistant response.");
+    const native = if (optionalString(parsed.value.object, "nativeSessionId")) |value| try allocator.dupe(u8, value) else null;
+    return .{ .allocator = allocator, .native_session = native, .summary = summary, .failure = failure };
+}
+
+fn messageText(allocator: std.mem.Allocator, content: ?std.json.Value) ![]u8 {
+    const value = content orelse return allocator.dupe(u8, "");
+    if (value == .string) return allocator.dupe(u8, value.string);
+    if (value != .array) return allocator.dupe(u8, "");
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    for (value.array.items) |block| {
+        if (block != .object or !std.mem.eql(u8, optionalString(block.object, "type") orelse "", "text")) continue;
+        if (optionalString(block.object, "text")) |text| try output.writer.writeAll(text);
+    }
+    return output.toOwnedSlice();
+}
+
+fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, cwd: []const u8, native_session: ?[]const u8, project_id: ?[]const u8, summary: []const u8, failure: ?[]const u8) ![]u8 {
     const arena = automation.arena.allocator();
     var run: std.json.ObjectMap = .empty;
     try run.put(arena, "at", .{ .string = try arena.dupe(u8, at) });
@@ -192,7 +301,7 @@ fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(
     try run.put(arena, "cwd", .{ .string = cwd });
     try run.put(arena, "projectId", if (project_id) |value| .{ .string = value } else .null);
     try run.put(arena, "outcome", .{ .string = if (failure == null) "ok" else "error" });
-    try run.put(arena, "summary", .{ .string = if (failure == null) "Dispatched to harness node." else "" });
+    try run.put(arena, "summary", .{ .string = try arena.dupe(u8, summary) });
     if (failure) |value| try run.put(arena, "error", .{ .string = value });
     const run_value: std.json.Value = .{ .object = run };
     try automation.value.object.put(arena, "lastRun", run_value);
