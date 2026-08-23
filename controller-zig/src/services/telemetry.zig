@@ -34,6 +34,34 @@ const Collection = struct {
     }
 };
 
+pub const PlacementDevices = struct {
+    arena: std.heap.ArenaAllocator,
+    ids: []const []const u8,
+    accelerator: []const u8,
+    shareable: bool,
+
+    pub fn deinit(devices: *PlacementDevices) void {
+        devices.arena.deinit();
+        devices.* = undefined;
+    }
+};
+
+pub fn placementDevices(allocator: std.mem.Allocator, io: Io, system: *const system_info.Snapshot) !PlacementDevices {
+    var collection = try collect(allocator, io, system);
+    errdefer collection.deinit();
+    const storage = collection.arena.allocator();
+    const ids = try storage.alloc([]const u8, collection.gpus.len);
+    for (collection.gpus, ids) |gpu, *id| id.* = gpu.id orelse gpu.uuid orelse gpu.pci_bus_id orelse try std.fmt.allocPrint(storage, "gpu:{d}", .{gpu.index});
+    const result = PlacementDevices{
+        .arena = collection.arena,
+        .ids = ids,
+        .accelerator = if (system.apple_silicon) "metal" else if (ids.len > 0) "cuda" else "cpu",
+        .shareable = system.apple_silicon,
+    };
+    collection = undefined;
+    return result;
+}
+
 pub fn gpuPayload(allocator: std.mem.Allocator, io: Io, system: *const system_info.Snapshot) ![]u8 {
     var collection = try collect(allocator, io, system);
     defer collection.deinit();
