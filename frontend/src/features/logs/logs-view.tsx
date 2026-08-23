@@ -72,11 +72,12 @@ export function LogsView({
     <div
       className={`relative flex min-h-0 bg-(--surface) text-(--fg) ${
         embedded
-          ? "h-[min(70vh,48rem)] min-h-[32rem] rounded-md border border-(--border)"
+          ? "h-[min(70vh,48rem)] min-h-[32rem] flex-col rounded-md border border-(--border)"
           : "h-full"
       }`}
     >
       <LogsSessionsSidebar
+        embedded={embedded}
         sessions={sessions}
         filteredSessions={filteredSessions}
         selectedSession={selectedSession}

@@ -7,6 +7,7 @@ import { Drawer, DrawerOverlay } from "@/ui/drawer";
 import type { LogSession } from "@/lib/types";
 
 export function LogsSessionsSidebar({
+  embedded = false,
   sessions,
   filteredSessions,
   selectedSession,
@@ -18,6 +19,7 @@ export function LogsSessionsSidebar({
   onDeleteSession,
   formatDateTime,
 }: {
+  embedded?: boolean;
   sessions: LogSession[];
   filteredSessions: LogSession[];
   selectedSession: string | null;
@@ -83,6 +85,45 @@ export function LogsSessionsSidebar({
       </div>
     </div>
   );
+
+  if (embedded) {
+    return (
+      <div className="shrink-0 border-b border-(--border) bg-(--surface)">
+        <div className="flex flex-wrap items-center gap-2 px-2.5 py-2">
+          <h1 className="text-[length:var(--fs-sm)] font-medium text-(--dim)">Log Sessions</h1>
+          <span className="text-[length:var(--fs-xs)] text-(--dim)/70">{countLabel}</span>
+          <SearchInput
+            value={filter}
+            onChange={onFilterChange}
+            placeholder="Filter..."
+            className="ml-auto w-32 [&_input]:h-7 [&_input]:text-[length:var(--fs-xs)]"
+          />
+        </div>
+        <div className="flex min-h-8 gap-1 overflow-x-auto px-2.5 pb-2">
+          {filteredSessions.length === 0 ? (
+            <span className="py-1 text-[length:var(--fs-xs)] text-(--dim)">No log files found</span>
+          ) : (
+            filteredSessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => onSelectSession(session.id)}
+                aria-pressed={selectedSession === session.id}
+                className={`max-w-52 shrink-0 truncate rounded-[4px] border px-2 py-1 text-left text-[length:var(--fs-xs)] transition-colors ${
+                  selectedSession === session.id
+                    ? "border-(--ui-border-heavy) bg-(--ui-active) text-(--ui-fg)"
+                    : "border-(--ui-separator) text-(--ui-muted) hover:bg-(--ui-hover) hover:text-(--ui-fg)"
+                }`}
+                title={`${session.model || session.id} · ${formatDateTime(session.created_at)}`}
+              >
+                {session.model || session.id}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
 
   /** One body, two hosts: the docked desktop column and the mobile drawer used
    * to render this markup twice, which is how the two copies drifted apart. */

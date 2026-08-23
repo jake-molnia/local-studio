@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   AppPage,
   Button,
@@ -81,6 +82,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
   children,
 }: LayoutProps<Id>) {
   const [navigationQuery, setNavigationQuery] = useState("");
+  const router = useRouter();
   const active = sections.find((section) => section.id === activeSection);
   const searchResults = useMemo(() => {
     const query = navigationQuery.trim().toLowerCase();
@@ -133,6 +135,22 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
       });
     });
   };
+  const navigateBack = useCallback(() => {
+    const referrer = typeof document === "undefined" ? "" : document.referrer;
+    let sameOrigin = false;
+    if (referrer) {
+      try {
+        sameOrigin = new URL(referrer).origin === window.location.origin;
+      } catch {
+        sameOrigin = false;
+      }
+    }
+    if (sameOrigin && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push("/agent");
+  }, [router]);
   const navigation = navigationQuery.trim() ? (
     searchResults.length ? (
       <div role="listbox" aria-label="Matching settings" className="flex flex-col gap-px">
@@ -209,13 +227,14 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[194px_minmax(0,1fr)]">
           <aside className="hidden min-h-0 flex-col border-r border-(--ui-separator) bg-(--sidebar-bg) lg:flex">
             <div className="flex h-9 shrink-0 items-center px-2">
-              <Link
-                href="/agent"
+              <button
+                type="button"
+                onClick={navigateBack}
                 className="inline-flex h-6 items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
               >
                 <ChevronLeft className="h-3 w-3" />
                 Back
-              </Link>
+              </button>
             </div>
             <div className="px-1.5 pb-1.5">
               <SearchInput
@@ -232,13 +251,14 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
           <section className="min-h-0 min-w-0 overflow-y-auto">
             <div className="border-b border-(--ui-separator) px-3 py-2 lg:hidden">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <Link
-                  href="/agent"
+                <button
+                  type="button"
+                  onClick={navigateBack}
                   className="inline-flex h-7 items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted)"
                 >
                   <ChevronLeft className="h-3 w-3" />
                   Back
-                </Link>
+                </button>
                 <span className="text-[length:var(--fs-sm)] font-medium">{title}</span>
               </div>
               <SearchInput
@@ -252,12 +272,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 {navigation}
               </div>
             </div>
-            <div
-              className={cx(
-                "mx-auto w-full px-4 pb-12 pt-5 sm:px-6 lg:pt-7",
-                width === "wide" ? "max-w-[68rem]" : "max-w-[32rem]",
-              )}
-            >
+            <div className={cx("mx-auto w-full max-w-[56rem] px-4 pb-12 pt-6 sm:px-8 lg:pt-8")}>
               {content}
             </div>
           </section>
@@ -337,7 +352,7 @@ export function SettingsGroup({
     <section
       data-setting-key={settingsSearchKey(title)}
       tabIndex={-1}
-      className="mb-4 rounded-[6px] outline-none transition-colors duration-[var(--motion-fast)] focus:bg-(--ui-hover)/30 last:mb-0"
+      className="mb-6 outline-none transition-colors duration-[var(--motion-fast)] focus:bg-(--ui-hover)/30 last:mb-0"
     >
       <div className="mb-1.5 flex items-start justify-between gap-3 px-1">
         <div className="min-w-0">
@@ -371,7 +386,7 @@ export function SettingsGroup({
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
       {showBody ? (
-        <div className="overflow-hidden rounded-[5px] bg-(--ui-surface)/60 ring-1 ring-inset ring-(--ui-separator)/50 [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/65">
+        <div className="overflow-hidden border-y border-(--ui-separator)/75 [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/65">
           {children}
         </div>
       ) : null}
@@ -394,7 +409,7 @@ export function SettingsRow({
     <div
       data-setting-key={settingsSearchKey(label)}
       tabIndex={-1}
-      className="px-3 py-1.5 outline-none transition-colors hover:bg-(--ui-hover)/35 focus:bg-(--ui-hover)/45"
+      className="px-2.5 py-2 outline-none transition-colors hover:bg-(--ui-hover)/45 focus:bg-(--ui-hover)/55"
     >
       <div className="grid min-h-7 grid-cols-1 gap-1 md:grid-cols-[minmax(160px,0.3fr)_minmax(0,1fr)] md:items-center md:gap-3">
         <div className="min-w-0">

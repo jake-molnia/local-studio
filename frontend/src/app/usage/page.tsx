@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
+import { settingsHref } from "@/features/settings/settings-navigation";
 
 export default function Page() {
-  redirect("/settings#machine:local:usage");
+  redirect(settingsHref("machine:local:usage"));
 }

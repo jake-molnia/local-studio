@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   ChevronDown,
@@ -38,6 +38,8 @@ import { useLogs, type LogsTarget } from "@/features/logs/use-logs";
 import type { UsageTarget } from "@/features/usage/use-usage";
 import { ServerContent } from "@/features/logs/server-view";
 import { ErrorBox } from "@/ui";
+import { cx } from "@/ui/utils";
+import { legacySettingsHash } from "./settings-navigation";
 interface SettingsViewProps {
   data: ConfigData | null;
   compatibilityReport: CompatibilityReport | null;
@@ -329,12 +331,6 @@ export function SettingsView({
     ? machineTargets.get(activeMachineNodeId)
     : undefined;
   const activeMachineView = machineViewFromSection(activeSection);
-  const settingsWidth =
-    activeSection === "controller" ||
-    activeSection === MACHINES_SECTION.id ||
-    Boolean(activeMachineView)
-      ? "wide"
-      : "default";
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
@@ -342,8 +338,10 @@ export function SettingsView({
         window.location.replace(`/customize#${hash}`);
         return;
       }
+      const normalizedHash = legacySettingsHash(hash) ?? hash;
       const normalized =
-        normalizeSectionId(hash) ?? (sections.some((section) => section.id === hash) ? hash : null);
+        normalizeSectionId(normalizedHash) ??
+        (sections.some((section) => section.id === normalizedHash) ? normalizedHash : null);
       if (!normalized) return;
       setActiveSection(normalized);
       if (normalized === "system") onSystemSectionActive();
@@ -365,7 +363,7 @@ export function SettingsView({
       activeSection={activeSection}
       title="Settings"
       loading={loading}
-      width={settingsWidth}
+      width="wide"
       takeover
       onReload={onReload}
       onSelectSection={selectSection}
@@ -462,15 +460,10 @@ function SettingsMachineRail({
   hasMachines: boolean;
   machineTargets: Map<string, MachineTargets>;
 }) {
-  const machinesDetailsRef = useRef<HTMLDetailsElement>(null);
-  const nodeDetailsRef = useRef(new Map<string, HTMLDetailsElement>());
-  const setMachinesDetails = useCallback(
-    (element: HTMLDetailsElement | null) => {
-      machinesDetailsRef.current = element;
-      if (element && hasMachines) element.open = true;
-    },
-    [hasMachines],
-  );
+  const [localOpen, setLocalOpen] = useState(true);
+  const [machinesOpen, setMachinesOpen] = useState(hasMachines);
+  const [openNodes, setOpenNodes] = useState<Record<string, boolean>>({});
+  const machinesInteracted = useRef(false);
   const localSections = sections.filter(
     (section) => !section.id.startsWith("machine:") && section.id !== MACHINES_SECTION.id,
   );
@@ -491,72 +484,116 @@ function SettingsMachineRail({
   );
 
   useMountSubscription(() => {
+    if (hasMachines && !machinesInteracted.current) setMachinesOpen(true);
+  }, [hasMachines]);
+
+  useMountSubscription(() => {
+    if (activeSection !== MACHINES_SECTION.id && !activeSection.startsWith("machine:")) {
+      setLocalOpen(true);
+    }
     if (activeSection === MACHINES_SECTION.id || activeSection.startsWith("machine:")) {
-      if (machinesDetailsRef.current) machinesDetailsRef.current.open = true;
+      setMachinesOpen(true);
     }
     const nodeId = machineNodeIdFromSection(activeSection);
-    if (nodeId) nodeDetailsRef.current.get(nodeId)?.setAttribute("open", "");
+    if (nodeId) setOpenNodes((current) => ({ ...current, [nodeId]: true }));
   }, [activeSection]);
 
   return (
     <nav aria-label="Settings sections" className="flex flex-col gap-2 pb-1">
-      <details className="group/local" open>
-        <summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) [&::-webkit-details-marker]:hidden">
-          <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/local:rotate-0" />
+      <div>
+        <button
+          type="button"
+          aria-expanded={localOpen}
+          onClick={() => setLocalOpen((current) => !current)}
+          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60"
+        >
+          <ChevronDown
+            className={cx(
+              "h-3 w-3 transition-transform duration-[var(--motion-fast)]",
+              localOpen ? "" : "-rotate-90",
+            )}
+          />
           Local settings
-        </summary>
-        <div className="mt-0.5 flex flex-col gap-px">
-          {localSections.map((section) => renderButton(section.id, section.label, section.icon))}
-        </div>
-      </details>
-      <details ref={setMachinesDetails} className="group/machines">
-        <summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) [&::-webkit-details-marker]:hidden">
-          <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/machines:rotate-0" />
+        </button>
+        {localOpen ? (
+          <div className="mt-0.5 flex flex-col gap-px">
+            {localSections.map((section) => renderButton(section.id, section.label, section.icon))}
+          </div>
+        ) : null}
+      </div>
+      <div>
+        <button
+          type="button"
+          aria-expanded={machinesOpen}
+          onClick={() => {
+            machinesInteracted.current = true;
+            setMachinesOpen((current) => !current);
+          }}
+          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60"
+        >
+          <ChevronDown
+            className={cx(
+              "h-3 w-3 transition-transform duration-[var(--motion-fast)]",
+              machinesOpen ? "" : "-rotate-90",
+            )}
+          />
           Machines
-        </summary>
-        <div className="mt-0.5 flex flex-col gap-1">
-          {renderButton(MACHINES_SECTION.id, MACHINES_SECTION.label, MACHINES_SECTION.icon)}
-          {nodes.length ? (
-            nodes.map((node) => (
-              <details
-                key={node.id}
-                className="group/node"
-                ref={(element) => {
-                  if (element) nodeDetailsRef.current.set(node.id, element);
-                  else nodeDetailsRef.current.delete(node.id);
-                }}
-              >
-                <summary className="flex h-6 cursor-pointer list-none items-center gap-1.5 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg) [&::-webkit-details-marker]:hidden">
-                  <ChevronDown className="h-3 w-3 -rotate-90 transition-transform duration-[var(--motion-fast)] group-open/node:rotate-0" />
-                  <Monitor className="h-3 w-3 opacity-75" />
-                  <span className="min-w-0 truncate">{node.name}</span>
-                  {node.role === "head" ? (
-                    <span className="ml-auto text-[10px] text-(--ui-muted)/65">Head</span>
-                  ) : null}
-                </summary>
-                <div className="mt-0.5 flex flex-col gap-px">
-                  {(Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
-                    machineTargets.get(node.id)?.[view]
-                      ? [
-                          renderButton(
-                            machineSectionId(node.id, view),
-                            machineViewLabel[view],
-                            machineViewIcon[view],
-                            true,
-                          ),
-                        ]
-                      : [],
-                  )}
-                </div>
-              </details>
-            ))
-          ) : (
-            <div className="px-1.5 py-1 text-[length:var(--fs-xs)] text-(--ui-muted)">
-              No machines connected
-            </div>
-          )}
-        </div>
-      </details>
+        </button>
+        {machinesOpen ? (
+          <div className="mt-0.5 flex flex-col gap-1">
+            {renderButton(MACHINES_SECTION.id, MACHINES_SECTION.label, MACHINES_SECTION.icon)}
+            {nodes.length ? (
+              nodes.map((node) => {
+                const nodeOpen = Boolean(openNodes[node.id]);
+                return (
+                  <div key={node.id}>
+                    <button
+                      type="button"
+                      aria-expanded={nodeOpen}
+                      onClick={() =>
+                        setOpenNodes((current) => ({ ...current, [node.id]: !current[node.id] }))
+                      }
+                      className="flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg)"
+                    >
+                      <ChevronDown
+                        className={cx(
+                          "h-3 w-3 transition-transform duration-[var(--motion-fast)]",
+                          nodeOpen ? "" : "-rotate-90",
+                        )}
+                      />
+                      <Monitor className="h-3 w-3 opacity-75" />
+                      <span className="min-w-0 truncate">{node.name}</span>
+                      {node.role === "head" ? (
+                        <span className="ml-auto text-[10px] text-(--ui-muted)/65">Head</span>
+                      ) : null}
+                    </button>
+                    {nodeOpen ? (
+                      <div className="mt-0.5 flex flex-col gap-px">
+                        {(Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
+                          machineTargets.get(node.id)?.[view]
+                            ? [
+                                renderButton(
+                                  machineSectionId(node.id, view),
+                                  machineViewLabel[view],
+                                  machineViewIcon[view],
+                                  true,
+                                ),
+                              ]
+                            : [],
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="px-1.5 py-1 text-[length:var(--fs-xs)] text-(--ui-muted)">
+                No machines connected
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
     </nav>
   );
 }

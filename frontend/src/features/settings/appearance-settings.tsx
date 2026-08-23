@@ -102,6 +102,17 @@ function readVar(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function readRemVar(name: string, fallback: number): number {
+  if (typeof document === "undefined") return fallback;
+  const root = getComputedStyle(document.documentElement);
+  const value = root.getPropertyValue(name).trim();
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (!value.endsWith("px")) return parsed;
+  const rem = Number.parseFloat(root.fontSize);
+  return Number.isFinite(rem) && rem > 0 ? parsed / rem : fallback;
+}
+
 function ThemeSwatches({ theme }: { theme: ThemeMeta }) {
   return (
     <div className="flex items-center gap-0.5">
@@ -151,7 +162,7 @@ export function AppearanceSettings() {
   const [chatLineHeight, setChatLineHeight] = useState(() =>
     readVar("--codex-chat-line-height", 1.5),
   );
-  const [chatWidth, setChatWidth] = useState(() => readVar("--composer-w", 29));
+  const [chatWidth, setChatWidth] = useState(() => readRemVar("--thread-w", 56));
   const [bubbleTone, setBubbleTone] = useState(() => readVarString("--bubble", "#282828"));
   const setChatFont = (value: number) => {
     setChatFontSize(value);
@@ -163,7 +174,7 @@ export function AppearanceSettings() {
   };
   const setChatColumn = (value: number) => {
     setChatWidth(value);
-    applyUiControl("--composer-w", `${value}rem`);
+    applyUiControl("--thread-w", `${value}rem`);
   };
   const setBubble = (value: string) => {
     setBubbleTone(value);
@@ -546,13 +557,13 @@ export function AppearanceSettings() {
         />
         <SettingsRow
           label="Chat column width"
-          description="Maximum width of the thread and composer"
+          description="Maximum width of the message thread"
           control={
             <div className="flex w-full items-center gap-3">
               <Slider
                 value={chatWidth}
                 min={26}
-                max={56}
+                max={64}
                 step={1}
                 onChange={setChatColumn}
                 aria-label="Chat column width"

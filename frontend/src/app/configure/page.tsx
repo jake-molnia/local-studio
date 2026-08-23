@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { settingsHref } from "@/features/settings/settings-navigation";
 
 export default async function Page({
   searchParams,
@@ -6,5 +7,5 @@ export default async function Page({
   searchParams: Promise<{ section?: string }>;
 }) {
   const params = await searchParams;
-  redirect(params.section === "server" ? "/settings#controller" : "/settings#machines");
+  redirect(settingsHref(params.section === "server" ? "controller" : "machines"));
 }
