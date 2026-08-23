@@ -96,19 +96,23 @@ pub const Manager = struct {
         };
         if (cancellation.requested.load(.acquire)) return error.LaunchCancelled;
 
-        var plan = try compute_plan.build(manager.allocator, manager.io, request, configuration, port);
+        var plan = try compute_plan.build(manager.allocator, manager.io, request, configuration, devices.accelerator, port);
         defer plan.deinit();
+        const process_plan = switch (plan) {
+            .process => |*value| value,
+            .docker => return error.DockerRuntimeNotImplemented,
+        };
         const log_path = try compute_instances.logPath(manager.allocator, manager.directory, request.name);
         defer manager.allocator.free(log_path);
         var log_file = try Io.Dir.cwd().createFile(manager.io, log_path, .{ .permissions = @enumFromInt(0o600) });
         defer log_file.close(manager.io);
         var environment = try configuration.environment.clone(manager.allocator);
         defer environment.deinit();
-        for (plan.environment) |entry| try environment.put(entry.key, entry.value);
+        for (process_plan.environment) |entry| try environment.put(entry.key, entry.value);
         try applyDeviceEnvironment(manager.allocator, &environment, devices.accelerator, selected);
         try environment.put("LOCAL_STUDIO_LAUNCH_NONCE", record.nonce);
         var child = try std.process.spawn(manager.io, .{
-            .argv = plan.argv,
+            .argv = process_plan.argv,
             .environ_map = &environment,
             .stdin = .ignore,
             .stdout = .{ .file = log_file },

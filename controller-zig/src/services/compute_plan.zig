@@ -27,6 +27,32 @@ pub const Request = struct {
     }
 };
 
+pub const DockerPlan = struct {
+    base: launch_plan.Plan,
+    image: []const u8,
+    model_path: []const u8,
+};
+
+pub const Plan = union(enum) {
+    process: launch_plan.Plan,
+    docker: DockerPlan,
+
+    pub fn deinit(plan: *Plan) void {
+        switch (plan.*) {
+            .process => |*value| value.deinit(),
+            .docker => |*value| value.base.deinit(),
+        }
+        plan.* = undefined;
+    }
+
+    pub fn environment(plan: *const Plan) []const launch_plan.EnvironmentEntry {
+        return switch (plan.*) {
+            .process => |value| value.environment,
+            .docker => |value| value.base.environment,
+        };
+    }
+};
+
 pub fn parse(allocator: std.mem.Allocator, document: []const u8) !Request {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
@@ -79,8 +105,7 @@ pub fn parse(allocator: std.mem.Allocator, document: []const u8) !Request {
     };
 }
 
-pub fn build(allocator: std.mem.Allocator, io: std.Io, request: *const Request, configuration: *const config_module.Config, port: u16) !launch_plan.Plan {
-    if (!std.mem.eql(u8, request.runtime, "process")) return error.DockerRuntimeNotImplemented;
+pub fn build(allocator: std.mem.Allocator, io: std.Io, request: *const Request, configuration: *const config_module.Config, accelerator: []const u8, port: u16) !Plan {
     var document: std.Io.Writer.Allocating = .init(allocator);
     defer document.deinit();
     try document.writer.writeAll("{\"id\":");
@@ -88,7 +113,7 @@ pub fn build(allocator: std.mem.Allocator, io: std.Io, request: *const Request, 
     try document.writer.writeAll(",\"backend\":");
     try std.json.Stringify.value(request.engine, .{}, &document.writer);
     try document.writer.writeAll(",\"model_path\":");
-    try std.json.Stringify.value(request.model_path, .{}, &document.writer);
+    try std.json.Stringify.value(if (std.mem.eql(u8, request.runtime, "docker")) "/models" else request.model_path, .{}, &document.writer);
     try document.writer.writeAll(",\"served_model_name\":");
     try std.json.Stringify.value(request.served_model_name, .{}, &document.writer);
     try document.writer.print(",\"port\":{d},\"runtime\":{{\"kind\":", .{port});
@@ -116,7 +141,14 @@ pub fn build(allocator: std.mem.Allocator, io: std.Io, request: *const Request, 
     defer allocator.free(arguments);
     for (request.extra_args, arguments) |argument, *target| target.* = argument.string;
     try launch_plan.mergeArguments(&plan, arguments);
-    return plan;
+    if (std.mem.eql(u8, request.runtime, "process")) return .{ .process = plan };
+    const image = request.docker_image orelse defaultDockerImage(request.engine, accelerator) orelse return error.MissingDockerImage;
+    try makeDockerArguments(&plan, request.engine);
+    return .{ .docker = .{
+        .base = plan,
+        .image = try plan.arena.allocator().dupe(u8, image),
+        .model_path = try plan.arena.allocator().dupe(u8, request.model_path),
+    } };
 }
 
 pub fn basePort(engine: []const u8) u16 {
@@ -200,6 +232,28 @@ fn defaultBinary(engine: []const u8) []const u8 {
     if (std.mem.eql(u8, engine, "llamacpp")) return "llama-server";
     if (std.mem.eql(u8, engine, "mlx")) return "mlx_lm.server";
     return "tabbyapi";
+}
+
+fn defaultDockerImage(engine: []const u8, accelerator: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, engine, "vllm")) return if (std.mem.eql(u8, accelerator, "rocm")) "rocm/vllm:latest" else if (std.mem.eql(u8, accelerator, "cuda")) "vllm/vllm-openai:latest" else null;
+    if (std.mem.eql(u8, engine, "sglang")) return if (std.mem.eql(u8, accelerator, "cuda")) "lmsysorg/sglang:latest" else null;
+    if (std.mem.eql(u8, engine, "llamacpp")) return if (std.mem.eql(u8, accelerator, "cuda")) "ghcr.io/ggml-org/llama.cpp:server-cuda" else if (std.mem.eql(u8, accelerator, "rocm")) "ghcr.io/ggml-org/llama.cpp:server-rocm" else "ghcr.io/ggml-org/llama.cpp:server";
+    return null;
+}
+
+fn makeDockerArguments(plan: *launch_plan.Plan, engine: []const u8) !void {
+    var arguments: std.ArrayList([]const u8) = .empty;
+    var index: usize = 1;
+    if (std.mem.eql(u8, engine, "vllm") and index < plan.argv.len and std.mem.eql(u8, plan.argv[index], "serve")) index += 1;
+    while (index < plan.argv.len) : (index += 1) {
+        const argument = plan.argv[index];
+        try arguments.append(plan.arena.allocator(), argument);
+        if (std.mem.eql(u8, argument, "--host") and index + 1 < plan.argv.len) {
+            index += 1;
+            try arguments.append(plan.arena.allocator(), "0.0.0.0");
+        }
+    }
+    plan.argv = try arguments.toOwnedSlice(plan.arena.allocator());
 }
 
 fn forbiddenArgument(value: []const u8) bool {

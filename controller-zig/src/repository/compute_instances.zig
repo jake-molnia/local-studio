@@ -125,6 +125,32 @@ pub fn setProcess(record: *Record, reference: instances.ProcessReference) !void 
     } };
 }
 
+pub fn setDocker(record: *Record, container_id: []const u8, daemon_id: []const u8, executable_path: []const u8, executable_token: []const u8) !void {
+    const id = try record.allocator.dupe(u8, container_id);
+    errdefer record.allocator.free(id);
+    const daemon = try record.allocator.dupe(u8, daemon_id);
+    errdefer record.allocator.free(daemon);
+    const path = try record.allocator.dupe(u8, executable_path);
+    errdefer record.allocator.free(path);
+    const token = try record.allocator.dupe(u8, executable_token);
+    if (record.reference) |*current| current.deinit(record.allocator);
+    record.reference = .{ .docker = .{ .container_id = id, .daemon_id = daemon, .executable_path = path, .executable_token = token } };
+}
+
+pub fn setDockerPending(record: *Record, container_name: []const u8, daemon_id: []const u8, executable_path: []const u8, executable_token: []const u8) !void {
+    const name = try record.allocator.dupe(u8, container_name);
+    errdefer record.allocator.free(name);
+    const nonce = try record.allocator.dupe(u8, record.nonce);
+    errdefer record.allocator.free(nonce);
+    const daemon = try record.allocator.dupe(u8, daemon_id);
+    errdefer record.allocator.free(daemon);
+    const path = try record.allocator.dupe(u8, executable_path);
+    errdefer record.allocator.free(path);
+    const token = try record.allocator.dupe(u8, executable_token);
+    if (record.reference) |*current| current.deinit(record.allocator);
+    record.reference = .{ .docker_pending = .{ .container_name = name, .nonce = nonce, .daemon_id = daemon, .executable_path = path, .executable_token = token } };
+}
+
 pub fn write(io: std.Io, directory: []const u8, record: *const Record) !void {
     const path = try recordPath(record.allocator, directory, record.name);
     defer record.allocator.free(path);
