@@ -16,6 +16,7 @@ import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { POPOVER_MENU_CLASS } from "@/ui/popover";
 import { cx } from "@/ui/utils";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { splitVisibleAgentModels } from "./model-visibility";
 
 type AgentModelPickerProps = {
@@ -103,6 +104,18 @@ export function AgentModelPicker({
     setOpen(false);
     setView("root");
   }, []);
+  const closeAndFocus = useCallback(() => {
+    close();
+    requestAnimationFrame(() => anchorRef.current?.querySelector("button")?.focus());
+  }, [close]);
+
+  useMountSubscription(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      panelRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, view]);
 
   const placePanel = useCallback((node: HTMLDivElement | null) => {
     panelRef.current = node;
@@ -130,14 +143,6 @@ export function AgentModelPicker({
       panelRef.current = null;
     };
   }, []);
-  const select = useCallback(
-    (modelId: string) => {
-      onSelect(modelId);
-      close();
-    },
-    [close, onSelect],
-  );
-
   return (
     <div
       ref={anchorRef}
@@ -172,10 +177,10 @@ export function AgentModelPicker({
         ? createPortal(
             <div
               ref={placePanel}
-              className={`fixed z-[300] w-[22rem] max-w-[calc(100vw-1rem)] ${POPOVER_MENU_CLASS}`}
+              className={`fixed z-[300] w-[20rem] max-w-[calc(100vw-1rem)] ${POPOVER_MENU_CLASS}`}
               role="menu"
               aria-label="Model and reasoning"
-              onKeyDown={(event) => handleMenuKeyDown(event, view, setView, close)}
+              onKeyDown={(event) => handleMenuKeyDown(event, view, setView, closeAndFocus)}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >
@@ -196,7 +201,10 @@ export function AgentModelPicker({
                   showOtherModels={showOtherModels}
                   otherModelCount={visible.otherModels.length}
                   onBack={supportsReasoning ? () => setView("root") : undefined}
-                  onSelect={select}
+                  onSelect={(modelId) => {
+                    onSelect(modelId);
+                    closeAndFocus();
+                  }}
                   onSetDefault={onSetDefault}
                   onToggleOtherModels={() => setShowOtherModels((current) => !current)}
                   onClose={close}
@@ -210,7 +218,7 @@ export function AgentModelPicker({
                   onBack={() => setView("root")}
                   onSelect={(level) => {
                     onSelectReasoning(level);
-                    close();
+                    closeAndFocus();
                   }}
                 />
               ) : null}
@@ -265,30 +273,26 @@ function PickerRootRow({
       role="menuitem"
       disabled={disabled}
       onClick={onClick}
-      className="flex h-10 min-w-0 items-center gap-3 rounded-lg px-2.5 text-[length:var(--fs-base)] text-(--fg) transition-colors hover:bg-(--hover) disabled:cursor-default disabled:opacity-55"
+      className="flex h-7 min-w-0 items-center gap-2 rounded-[4px] px-2 text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover) disabled:cursor-default disabled:opacity-55"
     >
-      <span className="w-20 shrink-0 text-left font-medium">{label}</span>
+      <span className="w-16 shrink-0 text-left font-medium">{label}</span>
       <span className="min-w-0 flex-1 truncate text-right text-(--fg)/60">{value}</span>
-      {disabled ? (
-        <span className="w-3.5" />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5 text-(--dim)" />
-      )}
+      {disabled ? <span className="w-3.5" /> : <ChevronRight className="h-3 w-3 text-(--dim)" />}
     </button>
   );
 }
 
 function PickerHeader({ title, onBack }: { title: string; onBack?: () => void }) {
   return (
-    <div className="flex h-9 items-center gap-1 border-b border-(--border) px-1 pb-1">
+    <div className="flex h-7 items-center gap-1 border-b border-(--border) px-0.5 pb-0.5">
       {onBack ? (
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-[4px] text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
           aria-label="Back"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-3 w-3" />
         </button>
       ) : null}
       <span className="px-1 text-[length:var(--fs-sm)] font-medium text-(--dim)">{title}</span>
@@ -328,7 +332,7 @@ function ModelList({
           role="menuitemcheckbox"
           aria-checked={showOtherModels}
           onClick={onToggleOtherModels}
-          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[length:var(--fs-base)] text-(--fg) transition-colors hover:bg-(--hover)"
+          className="mt-1 flex min-h-8 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover)"
         >
           <span className="min-w-0 flex-1">
             <span className="block font-medium">Other models</span>
@@ -339,14 +343,14 @@ function ModelList({
           <span
             aria-hidden="true"
             className={cx(
-              "relative h-5 w-9 shrink-0 rounded-full border border-(--border) bg-(--color-input) transition-colors",
+              "relative h-4 w-7 shrink-0 rounded-full border border-(--border) bg-(--color-input) transition-colors",
               showOtherModels && "border-(--accent) bg-(--accent)",
             )}
           >
             <span
               className={cx(
-                "absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-(--fg) transition-transform",
-                showOtherModels && "translate-x-4",
+                "absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-(--fg) transition-transform",
+                showOtherModels && "translate-x-3",
               )}
             />
           </span>
@@ -372,7 +376,7 @@ function ModelList({
           groups.map((group) => (
             <div key={group.key} className="not-first:mt-1.5">
               {groups.length > 1 ? (
-                <div className="flex h-7 items-center justify-between px-2.5 text-[length:var(--fs-xs)] font-medium text-(--dim)">
+                <div className="flex h-6 items-center justify-between px-2 text-[length:var(--fs-xs)] font-medium text-(--dim)">
                   <span className="truncate">{group.name}</span>
                   <span className="font-mono text-[length:var(--fs-2xs)]">
                     {group.models.length}
@@ -420,12 +424,12 @@ function ReasoningList({
             disabled={disabled}
             onClick={() => onSelect(level)}
             className={cx(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[length:var(--fs-base)] text-(--fg) transition-colors hover:bg-(--hover) disabled:opacity-45",
+              "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover) disabled:opacity-45",
               level === value && "bg-(--color-input)",
             )}
           >
             <span className="flex-1">{REASONING_LABELS[level]}</span>
-            {level === value ? <Check className="h-3.5 w-3.5" /> : null}
+            {level === value ? <Check className="h-3 w-3" /> : null}
           </button>
         ))}
       </div>
@@ -456,9 +460,7 @@ function ModelPickerTrigger({
       onClick={onToggle}
       disabled={disabled}
       className={cx(
-        // Codex: the model control sits at the shared chat size (16px) with
-        // primary-strength text; only the chevron reads dim.
-        "group/model inline-flex !h-[30px] !min-h-[30px] !min-w-0 max-w-full items-center justify-between gap-1 rounded-lg bg-transparent pl-2 pr-1.5 text-[length:var(--fs-base)] whitespace-nowrap text-(--fg)/85 transition-colors hover:bg-(--hover) hover:text-(--fg) active:translate-y-px disabled:opacity-60",
+        "group/model inline-flex !h-7 !min-h-7 !min-w-0 max-w-full items-center justify-between gap-1 rounded-[4px] bg-transparent pl-1.5 pr-1 text-[length:var(--fs-sm)] whitespace-nowrap text-(--fg)/85 transition-colors hover:bg-(--hover) hover:text-(--fg) disabled:opacity-60",
         open && "bg-(--hover) text-(--fg)",
       )}
       title={notRunning ? `${title} is not running — launch it or pick a running model` : title}
@@ -468,7 +470,7 @@ function ModelPickerTrigger({
     >
       <span className="min-w-0 max-w-[180px] truncate text-left">{label}</span>
       {notRunning ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--warn)" /> : null}
-      <ChevronDown className="pointer-events-none h-3.5 w-3.5 shrink-0 text-(--dim)" />
+      <ChevronDown className="pointer-events-none h-3 w-3 shrink-0 text-(--dim)" />
     </button>
   );
 }
@@ -515,7 +517,7 @@ function ModelOption({
   return (
     <div
       className={cx(
-        "flex min-h-8 w-full min-w-0 items-center rounded-lg text-[length:var(--fs-base)] text-(--fg) transition-colors hover:bg-(--hover)",
+        "flex min-h-7 w-full min-w-0 items-center rounded-[4px] text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover)",
         selected && "bg-(--color-input)",
       )}
     >
@@ -524,12 +526,12 @@ function ModelOption({
         role="menuitemradio"
         aria-checked={selected}
         onClick={() => onSelect(model.id)}
-        className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2.5 text-left focus-visible:outline-none active:translate-y-px"
+        className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-[4px] pl-2 text-left focus-visible:outline-none"
       >
         <span className="min-w-0 flex-1 truncate" title={label}>
           {label}
         </span>
-        {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-(--fg)" /> : null}
+        {selected ? <Check className="h-3 w-3 shrink-0 text-(--fg)" /> : null}
       </button>
       {onSetDefault ? (
         <button
@@ -538,11 +540,11 @@ function ModelOption({
           aria-label={isDefault ? `${label} is the default model` : `Set ${label} as default model`}
           title={isDefault ? "Default model" : "Set as default"}
           className={cx(
-            "mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-(--dim) transition-colors hover:bg-(--active) hover:text-(--fg) focus-visible:outline-none",
-            isDefault && "text-(--fg)",
+            "mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-(--dim) transition-colors hover:bg-(--active) hover:text-(--fg) focus-visible:outline-none",
+            isDefault && "bg-(--active) text-(--fg)",
           )}
         >
-          <Pin className={cx("h-3.5 w-3.5", isDefault && "fill-current")} strokeWidth={1.5} />
+          <Pin className={cx("h-3 w-3", isDefault && "fill-current")} strokeWidth={1.5} />
         </button>
       ) : null}
     </div>
@@ -555,10 +557,25 @@ function handleMenuKeyDown(
   setView: (view: PickerView) => void,
   close: () => void,
 ) {
-  if (event.key !== "Escape") return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (view === "root" || view === "models") close();
+    else setView("root");
+    return;
+  }
+  const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(
+    (item) => !item.hasAttribute("disabled"),
+  );
+  if (items.length === 0) return;
+  const currentIndex = items.findIndex((item) => item === document.activeElement);
+  let nextIndex: number | null = null;
+  if (event.key === "ArrowDown") nextIndex = (currentIndex + 1 + items.length) % items.length;
+  if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + items.length) % items.length;
+  if (event.key === "Home") nextIndex = 0;
+  if (event.key === "End") nextIndex = items.length - 1;
+  if (nextIndex === null) return;
   event.preventDefault();
-  if (view === "root" || view === "models") close();
-  else setView("root");
+  items[nextIndex]?.focus();
 }
 
 function modelTriggerLabel(

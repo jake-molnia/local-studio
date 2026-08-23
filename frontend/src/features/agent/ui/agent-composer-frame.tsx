@@ -136,12 +136,12 @@ export function AgentComposerFrame({
     <form
       onSubmit={onSubmit}
       className={cx(
-        "relative z-[100] shrink-0",
+        "agent-composer-form relative z-[100] shrink-0",
         floating
-          ? "bg-transparent p-[calc(var(--space-base)*2)]"
+          ? "bg-transparent p-[calc(var(--space-base)*1.5)]"
           : dense
-            ? "bg-(--agent-bg) px-3 pb-1 pt-1.5"
-            : "bg-transparent px-3 pb-2 pt-0 sm:px-5",
+            ? "bg-(--agent-bg) px-2 pb-0.5 pt-0.5"
+            : "bg-transparent px-2 pb-1.5 pt-0 sm:px-4",
       )}
     >
       {banner ? (
@@ -150,18 +150,22 @@ export function AgentComposerFrame({
           {banner.label}
         </div>
       ) : null}
-      {drawer}
+      {drawer ? (
+        <div className="mx-auto w-full max-w-[calc(var(--composer-w)*0.9)] sm:w-[90%]">
+          {drawer}
+        </div>
+      ) : null}
       <div
         onDragOver={onComposerDragOver}
         onDragLeave={onComposerDragLeave}
         onDrop={onComposerDrop}
         className={cx(
-          "agent-composer-box relative z-10 mx-auto w-full max-w-[calc(var(--composer-w)*0.9)] overflow-visible rounded-[var(--composer-radius)] border border-(--border) bg-(--composer) shadow-[var(--composer-elevation)] backdrop-blur-lg transition-colors [corner-shape:superellipse(1.5)] sm:w-[90%]",
+          "agent-composer-box relative z-10 mx-auto w-full max-w-[calc(var(--composer-w)*0.9)] overflow-visible rounded-[var(--composer-radius-inner)] border border-(--separator) bg-(--composer) shadow-[var(--composer-elevation)] transition-colors sm:w-[90%]",
           composerDragActive && "outline outline-1 outline-(--link)/50",
         )}
       >
         {composerDragActive ? (
-          <div className="px-4 pt-2 text-[length:var(--fs-sm)] text-(--link)">
+          <div className="px-3 pt-1.5 text-[length:var(--fs-xs)] text-(--link)">
             Drop files to attach to the next message.
           </div>
         ) : null}
@@ -171,7 +175,7 @@ export function AgentComposerFrame({
           onRemove={onRemoveLoadedContext}
         />
         {goalMode ? (
-          <div className="flex items-center gap-1.5 px-3 pt-2.5">
+          <div className="flex items-center gap-1.5 px-3 pt-2">
             {/* Themed, not amber-500. A literal Tailwind colour was the one
                 hardcoded hue in the composer chrome and read as foreign on the
                 other ~15 themes; --accent has a bare-:root baseline. */}
@@ -187,7 +191,7 @@ export function AgentComposerFrame({
                 <CloseIcon className="size-3" />
               </button>
             </span>
-            <span className="text-[length:var(--fs-sm)] text-(--fg)/40">
+            <span className="text-[length:var(--fs-xs)] text-(--fg)/40">
               Enter sends this as the session objective
             </span>
           </div>
@@ -245,7 +249,7 @@ export function AgentComposerFrame({
       ) : (
         <div
           aria-hidden="true"
-          className="mx-auto mt-2 h-3 w-full max-w-[calc(var(--composer-w)*0.9)] sm:mt-2.5 sm:h-4 sm:w-[90%]"
+          className="mx-auto mt-1.5 h-2 w-full max-w-[calc(var(--composer-w)*0.9)] sm:mt-2 sm:h-3 sm:w-[90%]"
         />
       )}
     </form>

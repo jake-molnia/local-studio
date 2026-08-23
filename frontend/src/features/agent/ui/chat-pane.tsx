@@ -111,16 +111,7 @@ function downloadTextFile(filename: string, content: string): void {
 
 function EmptyPromptTimeline() {
   return (
-    <div className="flex min-h-0 flex-1 overflow-y-auto bg-(--agent-bg) px-6 pb-10 pt-2">
-      <div className="agent-thread-shell mx-auto flex flex-1">
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-          <p className="max-w-[24ch] text-[clamp(1.45rem,2.6vw,2.1rem)] font-semibold leading-[1.22] tracking-[-0.02em] text-(--fg)/90">
-            A dream is something you build for yourself.
-          </p>
-          <p className="text-[length:var(--fs-xl)] text-(--dim)">Just talk to it.</p>
-        </div>
-      </div>
-    </div>
+    <div className="agent-chat-empty flex min-h-0 flex-1 bg-(--agent-bg)" aria-hidden="true" />
   );
 }
 
@@ -131,9 +122,7 @@ function TimelineFallback() {
 function chatPaneClassName(composerOnly: boolean): string {
   return cx(
     "relative flex min-h-0 min-w-0 flex-1 flex-col",
-    composerOnly
-      ? "bg-transparent"
-      : "bg-(--agent-bg) shadow-[inset_1px_0_rgba(255,255,255,0.015)]",
+    composerOnly ? "bg-transparent" : "bg-(--agent-bg)",
   );
 }
 
@@ -486,7 +475,7 @@ export function ChatPane({
           toggleBrowserTool: onToggleBrowserTool,
           // The command is `/connectors`, so it lands on the tab it names
           // rather than on whichever tab the page happens to open with.
-          openIntegrations: () => router.push("/integrations#connectors"),
+          openIntegrations: () => router.push("/customize#connectors"),
           ...(openTerminalAction ? { openTerminal: openTerminalAction } : {}),
           ...(onForkSession ? { forkSession: onForkSession } : {}),
           ...(canExport ? { exportSession } : {}),
@@ -629,6 +618,7 @@ export function ChatPane({
     <section
       onMouseDownCapture={onFocus}
       data-pane-id={paneId}
+      data-empty-prompt={showEmptyPrompt ? "true" : undefined}
       className={chatPaneClassName(composerOnly)}
     >
       <ChatPaneChrome

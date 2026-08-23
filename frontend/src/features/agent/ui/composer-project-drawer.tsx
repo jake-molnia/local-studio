@@ -150,7 +150,8 @@ export function ComposerProjectDrawer({
       ) : null}
       <section
         data-testid="composer-drawer"
-        className="relative z-0 mx-auto -mb-3 w-[calc(100%_-_26px)] max-w-[calc(var(--composer-w)*0.9_-_26px)] overflow-hidden rounded-[var(--composer-radius-inner)] border border-(--border) bg-(--fg)/[0.022] pb-2 text-[length:var(--fs-xs)] shadow-[var(--composer-elevation-inner)] md:pb-3 md:text-[length:var(--fs-sm)] backdrop-blur-sm [corner-shape:superellipse(1.5)] sm:w-[calc(90%_-_26px)]"
+        data-open={open ? "true" : "false"}
+        className="agent-composer-project-drawer relative z-0 mx-auto w-full max-w-none overflow-hidden rounded-none border-0 bg-transparent pb-0 text-[length:var(--fs-xs)] shadow-none md:text-[length:var(--fs-sm)] sm:w-full"
       >
         {/* Collapsed is a summary, not a void: the branch and its diffstat
             are the thing you check between prompts, so they share the single
