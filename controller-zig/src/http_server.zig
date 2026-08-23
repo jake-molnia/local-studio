@@ -17,6 +17,7 @@ const logs = @import("services/logs.zig");
 const studio_settings = @import("services/studio_settings.zig");
 const storage_service = @import("services/storage.zig");
 const studio_operations = @import("services/studio_operations.zig");
+const model_files = @import("services/model_files.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -210,6 +211,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/models/delete")) {
+        return serveStudioModelMutation(allocator, io, studio, request, .delete);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/studio/models/move")) {
+        return serveStudioModelMutation(allocator, io, studio, request, .move);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
@@ -532,6 +539,57 @@ fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration
         try std.json.Stringify.value(detail, .{}, &output.writer);
         try output.writer.writeByte('}');
         try request.respond(output.writer.buffered(), .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    };
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+const ModelMutation = enum { delete, move };
+
+fn serveStudioModelMutation(allocator: std.mem.Allocator, io: Io, studio: *studio_settings.State, request: *http.Server.Request, mutation: ModelMutation) !bool {
+    const storage = try allocator.alloc(u8, max_settings_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const models_dir = try studio.modelsDirectory(allocator, io);
+    defer allocator.free(models_dir);
+    try studio.lockFiles(io);
+    defer studio.unlockFiles(io);
+    const response = switch (mutation) {
+        .delete => model_files.deletePayload(allocator, io, models_dir, body_writer.buffered()),
+        .move => model_files.movePayload(allocator, io, models_dir, body_writer.buffered()),
+    } catch |failure| {
+        const known: ?struct { []const u8, http.Status } = switch (failure) {
+            error.InvalidPayload => .{ "Invalid JSON body", .bad_request },
+            error.PathRequired => .{ "path is required", .bad_request },
+            error.MovePathsRequired => .{ "source_path and target_root are required", .bad_request },
+            error.PathOutsideModelsDirectory => .{ "path must be inside models_dir", .bad_request },
+            error.SourceOutsideModelsDirectory => .{ "source_path must be inside models_dir", .bad_request },
+            error.TargetOutsideModelsDirectory => .{ "target_root must be inside models_dir", .bad_request },
+            error.ModelPathNotFound => .{ "Model path not found", .not_found },
+            error.SourcePathNotFound => .{ "source_path not found", .not_found },
+            error.TargetPathExists => .{ "Target path already exists", .bad_request },
+            else => null,
+        };
+        const detail = if (known) |value| value[0] else "Internal Server Error";
+        const status = if (known) |value| value[1] else .internal_server_error;
+        var output: Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"detail\":");
+        try std.json.Stringify.value(detail, .{}, &output.writer);
+        try output.writer.writeByte('}');
+        try request.respond(output.writer.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     };
     defer allocator.free(response);

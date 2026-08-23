@@ -7,6 +7,7 @@ const sqlite = @import("../repository/sqlite.zig");
 pub const State = struct {
     allocator: std.mem.Allocator,
     mutex: std.Io.Mutex = .init,
+    files_mutex: std.Io.Mutex = .init,
     models_dir: []u8,
 
     pub fn init(allocator: std.mem.Allocator, models_dir: []const u8) !State {
@@ -22,6 +23,14 @@ pub const State = struct {
         try state.mutex.lock(io);
         defer state.mutex.unlock(io);
         return allocator.dupe(u8, state.models_dir);
+    }
+
+    pub fn lockFiles(state: *State, io: std.Io) !void {
+        try state.files_mutex.lock(io);
+    }
+
+    pub fn unlockFiles(state: *State, io: std.Io) void {
+        state.files_mutex.unlock(io);
     }
 };
 
