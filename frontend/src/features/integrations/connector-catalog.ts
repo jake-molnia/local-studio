@@ -84,11 +84,9 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     company: "Local Studio",
     description: "Run commands and work with files over SSH on another machine.",
     transport: "stdio",
-    command: "node",
-    args: [SSH_SERVER_PLACEHOLDER],
-    envFields: [
-      { key: "SSH_HOST", label: "SSH host", placeholder: "user@machine", secret: false },
-    ],
+    command: SSH_SERVER_PLACEHOLDER,
+    args: ["mcp-ssh"],
+    envFields: [{ key: "SSH_HOST", label: "SSH host", placeholder: "user@machine", secret: false }],
   },
 ];
 

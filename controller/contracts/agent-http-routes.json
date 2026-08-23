@@ -191,6 +191,12 @@
       "streaming": "never"
     },
     {
+      "method": "GET",
+      "path": "/api/agent/connectors/ssh-server-path",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
       "method": "POST",
       "path": "/api/agent/terminal",
       "ownership": "head",
@@ -343,6 +349,12 @@
     {
       "method": "POST",
       "path": "/internal/node/v1/connector-test",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/connectors/ssh-server-path",
       "ownership": "worker",
       "streaming": "never"
     },

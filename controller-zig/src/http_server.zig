@@ -421,6 +421,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/connectors/ssh-server-path")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const response = agent_connectors.sshPathPayload(allocator, io, mode, client, database, node_id) catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal/pty/stream")) {
         const id = try queryParameter(allocator, request.head.target, "id");
         defer if (id) |value| allocator.free(value);
@@ -669,6 +677,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
         const response = agent_connectors.testLocal(allocator, io, configuration, client, database, document) catch |failure| return respondConnectorFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/connectors/ssh-server-path")) {
+        const response = try agent_connectors.sshPathLocal(allocator, io);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
