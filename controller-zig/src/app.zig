@@ -4,6 +4,7 @@ const http_server = @import("http_server.zig");
 const system_info = @import("platform/system_info.zig");
 const rig_node_credentials = @import("repository/rig_node_credentials.zig");
 const rigs = @import("repository/rigs.zig");
+const recipes = @import("repository/recipes.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
@@ -14,6 +15,7 @@ pub const App = struct {
     io: Io,
     config: config_module.Config,
     database: sqlite.Database,
+    recipe_column: recipes.PayloadColumn,
     system: system_info.Snapshot,
     worker_pool: workers.Pool,
     shutdown: shutdown_module.Shutdown,
@@ -26,6 +28,7 @@ pub const App = struct {
         if (!try database.quickCheck()) return error.DatabaseIntegrityCheckFailed;
         try rigs.initialize(&database);
         try rig_node_credentials.initialize(&database);
+        const recipe_column = try recipes.initialize(&database);
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});
 
         var system = try system_info.detect(allocator);
@@ -40,6 +43,7 @@ pub const App = struct {
             .io = io,
             .config = config,
             .database = database,
+            .recipe_column = recipe_column,
             .system = system,
             .worker_pool = worker_pool,
             .shutdown = shutdown,
@@ -58,7 +62,7 @@ pub const App = struct {
     }
 
     pub fn run(app: *App) !void {
-        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, &app.system, &app.worker_pool, &app.shutdown });
+        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, app.recipe_column, &app.system, &app.worker_pool, &app.shutdown });
         defer server_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
@@ -68,8 +72,8 @@ pub const App = struct {
     }
 };
 
-fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *workers.Pool, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
-    server.run(database, system, worker_pool) catch |failure| switch (failure) {
+fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *workers.Pool, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
+    server.run(database, recipe_column, system, worker_pool) catch |failure| switch (failure) {
         error.Canceled => return error.Canceled,
         else => std.log.err("controller server stopped: {t}", .{failure}),
     };

@@ -1,3 +1,4 @@
+const std = @import("std");
 const config = @import("config.zig");
 const route_registry = @import("route_registry.zig");
 
@@ -6,6 +7,11 @@ pub const Disposition = enum {
     proxy,
     reject,
 };
+
+pub fn routeDisposition(mode: config.Mode, route: route_registry.Route) Disposition {
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/models")) return .local;
+    return disposition(mode, route.ownership);
+}
 
 pub fn disposition(mode: config.Mode, ownership: route_registry.Ownership) Disposition {
     return switch (mode) {

@@ -5,6 +5,8 @@ const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
 const rig_service = @import("services/rigs.zig");
 const worker_service = @import("services/workers.zig");
+const model_service = @import("services/models.zig");
+const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
@@ -56,7 +58,7 @@ pub const HttpServer = struct {
         server.client.deinit();
     }
 
-    pub fn run(server: *HttpServer, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool) !void {
+    pub fn run(server: *HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool) !void {
         var group: Io.Group = .init;
         defer group.cancel(server.io);
         while (!shutdown.isRequested()) {
@@ -68,7 +70,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, recipe_column, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -76,7 +78,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -98,7 +100,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *ht
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, client, database, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, client, database, recipe_column, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -115,7 +117,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
@@ -124,7 +126,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
         return request.head.keep_alive;
     };
 
-    switch (topology.disposition(mode, route.ownership)) {
+    switch (topology.routeDisposition(mode, route)) {
         .local => {},
         .proxy => {
             return try serveWorkerProxy(allocator, io, client, database, request);
@@ -162,6 +164,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
+        defer allocator.free(response);
+        try request.respond(response, .{
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/models")) {
+        const response = try model_service.localCatalogPayload(allocator, io, database, recipe_column);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
