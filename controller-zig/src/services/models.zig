@@ -51,6 +51,17 @@ pub fn resolveRequestedModel(allocator: std.mem.Allocator, io: std.Io, database:
     return .{ .allocator = allocator, .managed = false, .active = false, .active_model = active_model };
 }
 
+pub fn activeModelId(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn, llm_instance_path: []const u8) !?[]u8 {
+    var documents = documents: {
+        try database.lock(io);
+        defer database.unlock(io);
+        break :documents try recipes.list(allocator, database, column);
+    };
+    defer documents.deinit();
+    const index = activeRecipeIndex(allocator, io, documents.items(), llm_instance_path) orelse return null;
+    return try modelIdFromDocument(allocator, documents.items()[index]);
+}
+
 fn modelIdFromDocument(allocator: std.mem.Allocator, document: []const u8) !?[]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return null;
     defer parsed.deinit();

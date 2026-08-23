@@ -6,6 +6,7 @@ const route_registry = @import("route_registry.zig");
 const rig_service = @import("services/rigs.zig");
 const worker_service = @import("services/workers.zig");
 const model_service = @import("services/models.zig");
+const tokenization_service = @import("services/tokenization.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -189,6 +190,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/messages")) {
         return try serveLocalPassthrough(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/count-tokens")) {
+        return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .count);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/tokenize-chat-completions")) {
+        return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .chat);
     }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
@@ -415,6 +422,60 @@ fn respondInvalidProtocolBody(request: *http.Server.Request, protocol: LocalProt
         .messages => "{\"detail\":\"Invalid JSON request body\"}",
     };
     try request.respond(body, .{
+        .status = .bad_request,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+    return request.head.keep_alive;
+}
+
+const TokenizationProtocol = enum {
+    count,
+    chat,
+};
+
+fn serveTokenization(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: TokenizationProtocol) !bool {
+    const storage = try allocator.alloc(u8, max_chat_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body_writer.buffered(), .{}) catch return try respondInvalidPayload(request);
+    defer parsed.deinit();
+    if (parsed.value != .object) return try respondInvalidPayload(request);
+    const valid = switch (protocol) {
+        .count => tokenization_service.validCountRequest(parsed.value.object),
+        .chat => tokenization_service.validChatRequest(parsed.value.object),
+    };
+    if (!valid) return try respondInvalidPayload(request);
+
+    const active_model = try model_service.activeModelId(allocator, io, database, recipe_column, llm_instance_path) orelse {
+        const empty = switch (protocol) {
+            .count => "{\"error\":\"No model running\",\"num_tokens\":0}",
+            .chat => "{\"error\":\"No model running\",\"input_tokens\":0}",
+        };
+        try request.respond(empty, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    };
+    defer allocator.free(active_model);
+    const payload = switch (protocol) {
+        .count => try tokenization_service.countPayload(allocator, client, inference_origin, active_model, parsed.value.object),
+        .chat => try tokenization_service.chatPayload(allocator, client, inference_origin, active_model, parsed.value.object),
+    };
+    defer allocator.free(payload);
+    try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn respondInvalidPayload(request: *http.Server.Request) !bool {
+    try request.respond("{\"detail\":\"Invalid payload\"}", .{
         .status = .bad_request,
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
