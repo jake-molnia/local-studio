@@ -231,7 +231,8 @@ export function AgentModelPicker({
           disabled={disabled}
           open={open}
           notRunning={selectedModelNotRunning}
-          onToggle={() => {
+          onToggle={(event) => {
+            setOpenSource(event.detail > 0 ? "pointer" : "keyboard");
             if (disabled) return;
             if (open && view === "inspector") close();
             else {
@@ -542,7 +543,7 @@ function ModelPickerTrigger({
   disabled: boolean;
   open: boolean;
   notRunning: boolean;
-  onToggle: () => void;
+  onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
