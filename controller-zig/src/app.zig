@@ -11,19 +11,18 @@ const Io = std.Io;
 pub const App = struct {
     io: Io,
     config: config_module.Config,
-    database: ?sqlite.Database,
+    database: sqlite.Database,
     system: system_info.Snapshot,
     shutdown: shutdown_module.Shutdown,
     server: http_server.HttpServer,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: config_module.Config) !App {
-        var database: ?sqlite.Database = if (config.db_path) |path| try sqlite.Database.open(allocator, path) else null;
-        errdefer if (database) |*opened| opened.deinit();
-        if (database) |*opened| {
-            if (!try opened.quickCheck()) return error.DatabaseIntegrityCheckFailed;
-            try rigs.initialize(opened);
-            std.log.info("SQLite {s} compatibility database opened", .{opened.version()});
-        }
+        _ = try std.Io.Dir.cwd().createDirPathStatus(io, config.data_dir, @enumFromInt(0o700));
+        var database = try sqlite.Database.open(allocator, config.db_path);
+        errdefer database.deinit();
+        if (!try database.quickCheck()) return error.DatabaseIntegrityCheckFailed;
+        try rigs.initialize(&database);
+        std.log.info("SQLite {s} compatibility database opened", .{database.version()});
 
         var system = try system_info.detect(allocator);
         errdefer system.deinit();
@@ -45,7 +44,8 @@ pub const App = struct {
         app.server.deinit();
         app.shutdown.deinit();
         app.system.deinit();
-        if (app.database) |*database| database.deinit();
+        app.database.deinit();
+        app.config.deinit();
         app.* = undefined;
     }
 

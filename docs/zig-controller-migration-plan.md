@@ -34,6 +34,8 @@ Completed foundation evidence:
 - The native binary builds on macOS arm64.
 - The binary cross-compiles to Linux x86_64 and Linux arm64.
 - `head`, `worker`, and `standalone` configuration values parse from `LOCAL_STUDIO_CONTROLLER_MODE`.
+- Configuration owns all environment and command-line strings for the process lifetime and resolves stable data, database, model, and inference paths before application startup.
+- Overriding only `LOCAL_STUDIO_DATA_DIR` derives `<data_dir>/controller.db`; a new data directory is created with mode `0700` and its database with mode `0600`.
 - `App.init` owns database, shutdown notification, HTTP client, and HTTP server resources with partial-initialization unwind and reverse-order teardown.
 - Host and port parse from the existing environment variables.
 - `/health` returns `{"status":"ok"}`.
