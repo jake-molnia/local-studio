@@ -409,9 +409,9 @@ function ProviderDrawer({
 
 type ActiveLogin = { jobId: string; providerId: string; providerName: string };
 
-export function ModelProvidersSection() {
+export function ModelProvidersSection({ searchQuery }: { searchQuery?: string } = {}) {
   const [providers, setProviders] = useState<ProviderView[] | null>(null);
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
   const [active, setActive] = useState<ActiveLogin | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderView | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -496,6 +496,7 @@ export function ModelProvidersSection() {
     refresh();
   }, [refresh]);
 
+  const query = searchQuery ?? localQuery;
   const visibleProviders = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return (providers ?? [])
@@ -521,12 +522,14 @@ export function ModelProvidersSection() {
         description="Model companies available through account sign-in or API credentials."
         actions={
           <div className="flex items-center gap-2">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder="Search model companies"
-              className="w-56"
-            />
+            {searchQuery === undefined ? (
+              <SearchInput
+                value={query}
+                onChange={setLocalQuery}
+                placeholder="Search model companies"
+                className="w-56"
+              />
+            ) : null}
             <StatusText tone={connectedCount ? "ok" : providers ? "dim" : "info"}>
               {providers
                 ? `${connectedCount} connected · ${visibleProviders.length} shown`

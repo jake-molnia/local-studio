@@ -209,11 +209,11 @@ function ConnectorRow({
 
 type Editing = { draft: ConnectorDraft; mode: "create" | "edit"; secretKeys: readonly string[] };
 
-export function ConnectorsSection() {
+export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}) {
   const [connectors, setConnectors] = useState<readonly ConnectorView[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [managed, setManaged] = useState<ConnectorView | null>(null);
   const [oauthEntry, setOauthEntry] = useState<CatalogEntry | null>(null);
@@ -227,7 +227,7 @@ export function ConnectorsSection() {
         setLoaded(true);
         setRefreshing(false);
       });
-  }, []);
+  }, [setConnectors]);
 
   useMountSubscription(() => {
     refresh();
@@ -242,9 +242,7 @@ export function ConnectorsSection() {
     // a row already exists: the row is an artifact of connecting, and the only
     // credential decision it holds — the grant — is managed there, never in
     // the env-field editor.
-    const oauthCatalog = CONNECTOR_CATALOG.find(
-      (entry) => entry.auth && entry.id === connector.id,
-    );
+    const oauthCatalog = CONNECTOR_CATALOG.find((entry) => entry.auth && entry.id === connector.id);
     if (oauthCatalog) {
       setOauthEntry(oauthCatalog);
       return;
@@ -277,6 +275,7 @@ export function ConnectorsSection() {
       );
   };
 
+  const query = searchQuery ?? localQuery;
   const normalized = query.trim().toLowerCase();
   const visibleConnectors = useMemo(
     () =>
@@ -303,12 +302,14 @@ export function ConnectorsSection() {
         description="Programs and endpoints that hand the model extra tools. Each one runs on this machine."
         actions={
           <div className="flex items-center gap-2">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder="Search servers"
-              className="w-56"
-            />
+            {searchQuery === undefined ? (
+              <SearchInput
+                value={query}
+                onChange={setLocalQuery}
+                placeholder="Search servers"
+                className="w-56"
+              />
+            ) : null}
             <StatusText tone={loaded ? "ok" : "dim"}>
               {loaded ? `${visibleConnectors.length} registered` : "reading"}
             </StatusText>
@@ -413,7 +414,11 @@ export function ConnectorsSection() {
                           }
                         >
                           {entry.auth ? (
-                            installed ? "Open" : "Connect"
+                            installed ? (
+                              "Open"
+                            ) : (
+                              "Connect"
+                            )
                           ) : installed ? (
                             "Open"
                           ) : (

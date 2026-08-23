@@ -113,10 +113,10 @@ function SkillDrawer({
   );
 }
 
-export function SkillsSection() {
+export function SkillsSection({ searchQuery }: { searchQuery?: string } = {}) {
   const [skills, setSkills] = useState<readonly Skill[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
   const [selected, setSelected] = useState<Skill | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -144,6 +144,7 @@ export function SkillsSection() {
     loadSkills();
   }, [loadSkills]);
 
+  const query = searchQuery ?? localQuery;
   const visibleSkills = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return skills;
@@ -177,12 +178,14 @@ export function SkillsSection() {
         description="Reusable instruction sets discovered across Local Studio, Codex, Claude, Pi, Factory, and OpenCode."
         actions={
           <div className="flex items-center gap-2">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder="Search skills"
-              className="w-56"
-            />
+            {searchQuery === undefined ? (
+              <SearchInput
+                value={query}
+                onChange={setLocalQuery}
+                placeholder="Search skills"
+                className="w-56"
+              />
+            ) : null}
             <StatusText tone={error ? "warn" : loaded ? "ok" : "dim"}>
               {loaded ? `${visibleSkills.length} of ${skills.length}` : "discovering"}
             </StatusText>

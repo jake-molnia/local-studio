@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Schema } from "effect";
 import {
   ConnectorGrantSchema,
@@ -58,7 +58,7 @@ function toolSummary(grant: ConnectorGrant): string {
   return grant.tools.length === 1 ? "1 tool" : `${grant.tools.length} tools`;
 }
 
-export function ConnectorAccessSection() {
+export function ConnectorAccessSection({ searchQuery = "" }: { searchQuery?: string } = {}) {
   const [grants, setGrants] = useState<ConnectorGrant[]>([]);
   const [connectors, setConnectors] = useState<ConnectorGrantTarget[]>([]);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
@@ -152,6 +152,16 @@ export function ConnectorAccessSection() {
   const connectorLabel = (connectorId: string) =>
     connectors.find((entry) => entry.id === connectorId)?.name ?? connectorId;
 
+  const visibleGrants = useMemo(() => {
+    const normalized = searchQuery.trim().toLowerCase();
+    if (!normalized) return grants;
+    return grants.filter((grant) =>
+      `${connectorLabel(grant.connectorId)} ${grant.connectorId} ${modelLabel(grant.modelId)}`
+        .toLowerCase()
+        .includes(normalized),
+    );
+  }, [connectors, grants, models, searchQuery]);
+
   return (
     <>
       {error ? (
@@ -175,7 +185,7 @@ export function ConnectorAccessSection() {
           <TableSkeleton columns={GRANT_COLUMNS} rows={2} minWidthClass={GRANT_MIN_WIDTH} />
         ) : (
           <div className="space-y-4">
-            {grants.length ? (
+            {visibleGrants.length ? (
               <TableFrame minWidthClass={GRANT_MIN_WIDTH}>
                 <thead>
                   <tr>
@@ -187,7 +197,7 @@ export function ConnectorAccessSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {grants.map((grant) => (
+                  {visibleGrants.map((grant) => (
                     <DataRow key={grantKey(grant)} ariaLabel={connectorLabel(grant.connectorId)}>
                       <IdentityCell
                         label={connectorLabel(grant.connectorId)}
@@ -221,7 +231,11 @@ export function ConnectorAccessSection() {
               </TableFrame>
             ) : (
               <TableNotice
-                title="No model can reach a connector"
+                title={
+                  grants.length
+                    ? "No access rule matches this search"
+                    : "No model can reach a connector"
+                }
                 body="Every connector tool is denied until a grant names the model that may call it."
               />
             )}
