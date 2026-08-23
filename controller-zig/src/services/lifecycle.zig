@@ -191,6 +191,54 @@ pub const Supervisor = struct {
         return try std.fmt.allocPrint(supervisor.allocator, "{{\"instances\":[{{\"record\":{s},\"state\":\"{s}\"}}]}}", .{ document, state });
     }
 
+    pub fn statusPayload(supervisor: *Supervisor, database: *sqlite.Database, recipe_column: recipe_repository.PayloadColumn, inference_port: u16, default_trust_remote_code: bool) ![]u8 {
+        try supervisor.mutex.lock(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
+        const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return try emptyStatusPayload(supervisor.allocator, inference_port);
+        var record = record_value;
+        defer record.deinit();
+        if (record.process == null) {
+            const Payload = struct {
+                running: bool = false,
+                process: ?u8 = null,
+                inference_port: u16,
+                launching: []const u8,
+                launch_failures: []const std.json.Value = &.{},
+            };
+            return try stringifyOwned(supervisor.allocator, Payload{
+                .inference_port = inference_port,
+                .launching = record.recipe_id,
+            });
+        }
+        if (!processes.owns(supervisor.allocator, supervisor.io, &record)) return try emptyStatusPayload(supervisor.allocator, inference_port);
+        var metadata = try recipeMetadata(supervisor.allocator, supervisor.io, database, recipe_column, record.recipe_id, default_trust_remote_code);
+        defer metadata.deinit();
+        const Process = struct {
+            pid: i32,
+            backend: []const u8,
+            model_path: ?[]const u8,
+            port: u16,
+            served_model_name: ?[]const u8,
+        };
+        const Payload = struct {
+            running: bool = true,
+            process: Process,
+            inference_port: u16,
+            launching: ?u8 = null,
+            launch_failures: []const std.json.Value = &.{},
+        };
+        return try stringifyOwned(supervisor.allocator, Payload{
+            .process = .{
+                .pid = record.process.?.pid,
+                .backend = record.engine,
+                .model_path = metadata.model_path,
+                .port = record.port,
+                .served_model_name = metadata.served_model_name,
+            },
+            .inference_port = inference_port,
+        });
+    }
+
     pub fn stopNamed(supervisor: *Supervisor, name: []const u8) !bool {
         if (!std.mem.eql(u8, name, "llm")) return false;
         return supervisor.evict();
@@ -284,6 +332,62 @@ fn healthy(allocator: std.mem.Allocator, io: Io, client: *http.Client, port: u16
 
 fn healthPath(engine: []const u8) []const u8 {
     return if (std.mem.eql(u8, engine, "mlx")) "/v1/models" else "/health";
+}
+
+const RecipeMetadata = struct {
+    allocator: std.mem.Allocator,
+    model_path: ?[]u8 = null,
+    served_model_name: ?[]u8 = null,
+
+    fn deinit(metadata: *RecipeMetadata) void {
+        if (metadata.model_path) |value| metadata.allocator.free(value);
+        if (metadata.served_model_name) |value| metadata.allocator.free(value);
+        metadata.* = undefined;
+    }
+};
+
+fn recipeMetadata(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, recipe_column: recipe_repository.PayloadColumn, recipe_id: []const u8, default_trust_remote_code: bool) !RecipeMetadata {
+    const document = recipes.detailPayload(allocator, io, database, recipe_column, recipe_id, default_trust_remote_code) catch return .{ .allocator = allocator };
+    const recipe_document = document orelse return .{ .allocator = allocator };
+    defer allocator.free(recipe_document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, recipe_document, .{}) catch return .{ .allocator = allocator };
+    defer parsed.deinit();
+    if (parsed.value != .object) return .{ .allocator = allocator };
+    const model_path = optionalString(parsed.value.object, "model_path");
+    const served_model_name = optionalString(parsed.value.object, "served_model_name");
+    const owned_model_path = if (model_path) |value| try allocator.dupe(u8, value) else null;
+    errdefer if (owned_model_path) |value| allocator.free(value);
+    const owned_served_model_name = if (served_model_name) |value| try allocator.dupe(u8, value) else null;
+    return .{
+        .allocator = allocator,
+        .model_path = owned_model_path,
+        .served_model_name = owned_served_model_name,
+    };
+}
+
+fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
+    const value = object.get(name) orelse return null;
+    if (value == .null) return null;
+    if (value != .string or value.string.len == 0) return null;
+    return value.string;
+}
+
+fn emptyStatusPayload(allocator: std.mem.Allocator, inference_port: u16) ![]u8 {
+    const Payload = struct {
+        running: bool = false,
+        process: ?u8 = null,
+        inference_port: u16,
+        launching: ?u8 = null,
+        launch_failures: []const std.json.Value = &.{},
+    };
+    return stringifyOwned(allocator, Payload{ .inference_port = inference_port });
+}
+
+fn stringifyOwned(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try std.json.Stringify.value(value, .{}, &output.writer);
+    return try output.toOwnedSlice();
 }
 
 fn healthTimeout(io: Io) Io.Cancelable!void {
