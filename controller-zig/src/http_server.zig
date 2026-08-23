@@ -29,6 +29,8 @@ const download_manager = @import("services/download_manager.zig");
 const provider_service = @import("services/providers.zig");
 const provider_catalog = @import("services/provider_catalog.zig");
 const provider_routing = @import("services/provider_routing.zig");
+const provider_gateway = @import("services/provider_gateway.zig");
+const openai_protocol = @import("services/openai_protocol.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -1321,8 +1323,18 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     if (provider_routing.resolve(snapshot.providers, model_id)) |provider_route| {
         const rewritten = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
         defer allocator.free(rewritten);
-        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
-        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten, &captured, request, accept, false) catch return false;
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        const requires_translation = switch (provider_route.provider.protocol) {
+            .auto => false,
+            .chat_completions => public_protocol != .chat_completions,
+            .responses => public_protocol != .responses,
+        };
+        if (requires_translation) {
+            provider_gateway.serveTranslated(allocator, client, provider_route.provider, public_protocol, rewritten, requested_stream, request) catch return false;
+        } else {
+            reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten, &captured, request, if (requested_stream) "text/event-stream" else "application/json", false) catch return false;
+        }
         return false;
     }
 
@@ -1410,8 +1422,12 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
     if (provider_routing.resolve(snapshot.providers, requested_provider_model)) |provider_route| {
         const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
         defer allocator.free(rewritten_provider);
-        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
-        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, accept, false) catch return false;
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        if (provider_route.provider.protocol == .responses) {
+            provider_gateway.serveTranslated(allocator, client, provider_route.provider, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+        } else {
+            reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, if (requested_stream) "text/event-stream" else "application/json", false) catch return false;
+        }
         return false;
     }
 
@@ -1484,8 +1500,12 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
     if (provider_routing.resolve(snapshot.providers, requested_model)) |provider_route| {
         const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
         defer allocator.free(rewritten_provider);
-        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
-        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, accept, protocol == .messages) catch return false;
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        if (protocol == .responses and provider_route.provider.protocol == .chat_completions) {
+            provider_gateway.serveTranslated(allocator, client, provider_route.provider, .responses, rewritten_provider, requested_stream, request) catch return false;
+        } else {
+            reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, if (requested_stream) "text/event-stream" else "application/json", protocol == .messages) catch return false;
+        }
         return false;
     }
 

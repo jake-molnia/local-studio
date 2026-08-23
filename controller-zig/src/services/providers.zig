@@ -24,6 +24,7 @@ pub fn createPayload(allocator: std.mem.Allocator, io: std.Io, state: *studio_se
     if (api_key_value != null and api_key_value.? != .string) return error.InvalidProviderPayload;
     const enabled_value = object.get("enabled");
     if (enabled_value != null and enabled_value.? != .bool) return error.InvalidProviderPayload;
+    const protocol = try optionalProtocol(object, "protocol") orelse .auto;
     const id_trimmed = requiredTrimmed(raw_id) orelse return error.ProviderIdRequired;
     const name = requiredTrimmed(raw_name) orelse return error.ProviderNameRequired;
     const base_url = requiredTrimmed(raw_base_url) orelse return error.ProviderBaseUrlRequired;
@@ -35,7 +36,7 @@ pub fn createPayload(allocator: std.mem.Allocator, io: std.Io, state: *studio_se
     var snapshot = try provider_settings.load(allocator, io, data_dir);
     defer snapshot.deinit();
     for (snapshot.providers) |provider| if (std.mem.eql(u8, provider.id, id)) return error.ProviderExists;
-    var provider = try ownedProvider(allocator, id, name, base_url, api_key, if (enabled_value) |value| value.bool else true);
+    var provider = try ownedProvider(allocator, id, name, base_url, api_key, if (enabled_value) |value| value.bool else true, protocol);
     var provider_transferred = false;
     defer if (!provider_transferred) provider.deinit();
     const previous_len = snapshot.providers.len;
@@ -56,6 +57,7 @@ pub fn updatePayload(allocator: std.mem.Allocator, io: std.Io, state: *studio_se
     const api_key_value = try optionalString(object, "api_key");
     const enabled_value = object.get("enabled");
     if (enabled_value != null and enabled_value.? != .bool) return error.InvalidProviderPayload;
+    const protocol = try optionalProtocol(object, "protocol");
     const name = if (name_value) |value| requiredTrimmed(value) orelse return error.ProviderNameRequired else null;
     const base_url = if (base_url_value) |value| requiredTrimmed(value) orelse return error.ProviderBaseUrlRequired else null;
     const api_key = if (api_key_value) |value| std.mem.trim(u8, value, " \t\r\n") else null;
@@ -69,6 +71,7 @@ pub fn updatePayload(allocator: std.mem.Allocator, io: std.Io, state: *studio_se
     if (base_url) |value| try replaceString(allocator, &current.base_url, value);
     if (api_key) |value| try replaceString(allocator, &current.api_key, value);
     if (enabled_value) |value| current.enabled = value.bool;
+    if (protocol) |value| current.protocol = value;
     try provider_settings.replace(allocator, io, data_dir, snapshot.providers);
     return mutationPayload(allocator, current);
 }
@@ -124,10 +127,10 @@ fn writeView(writer: *std.Io.Writer, provider: *const provider_settings.Provider
     try std.json.Stringify.value(provider.name, .{}, writer);
     try writer.writeAll(",\"base_url\":");
     try std.json.Stringify.value(provider.base_url, .{}, writer);
-    try writer.print(",\"enabled\":{},\"has_api_key\":{}}}", .{ provider.enabled, provider.api_key.len > 0 });
+    try writer.print(",\"enabled\":{},\"has_api_key\":{},\"protocol\":\"{t}\"}}", .{ provider.enabled, provider.api_key.len > 0, provider.protocol });
 }
 
-fn ownedProvider(allocator: std.mem.Allocator, id: []const u8, name: []const u8, base_url: []const u8, api_key: []const u8, enabled: bool) !provider_settings.Provider {
+fn ownedProvider(allocator: std.mem.Allocator, id: []const u8, name: []const u8, base_url: []const u8, api_key: []const u8, enabled: bool, protocol: provider_settings.Protocol) !provider_settings.Provider {
     const id_copy = try allocator.dupe(u8, id);
     errdefer allocator.free(id_copy);
     const name_copy = try allocator.dupe(u8, name);
@@ -135,7 +138,7 @@ fn ownedProvider(allocator: std.mem.Allocator, id: []const u8, name: []const u8,
     const base_url_copy = try allocator.dupe(u8, base_url);
     errdefer allocator.free(base_url_copy);
     const api_key_copy = try allocator.dupe(u8, api_key);
-    return .{ .allocator = allocator, .id = id_copy, .name = name_copy, .base_url = base_url_copy, .api_key = api_key_copy, .enabled = enabled };
+    return .{ .allocator = allocator, .id = id_copy, .name = name_copy, .base_url = base_url_copy, .api_key = api_key_copy, .enabled = enabled, .protocol = protocol };
 }
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
@@ -148,6 +151,12 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) !?[]const u8 {
     const value = object.get(name) orelse return null;
     if (value != .string or value.string.len > max_field_bytes) return error.InvalidProviderPayload;
     return value.string;
+}
+
+fn optionalProtocol(object: std.json.ObjectMap, name: []const u8) !?provider_settings.Protocol {
+    const value = object.get(name) orelse return null;
+    if (value != .string) return error.InvalidProviderPayload;
+    return provider_settings.Protocol.parse(value.string) orelse error.InvalidProviderPayload;
 }
 
 fn requiredTrimmed(value: []const u8) ?[]const u8 {

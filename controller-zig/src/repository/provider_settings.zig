@@ -5,6 +5,16 @@ const max_document_bytes = 1024 * 1024;
 const max_providers = 1024;
 const max_field_bytes = 16 * 1024;
 
+pub const Protocol = enum {
+    auto,
+    chat_completions,
+    responses,
+
+    pub fn parse(value: []const u8) ?Protocol {
+        return std.meta.stringToEnum(Protocol, value);
+    }
+};
+
 pub const Provider = struct {
     allocator: std.mem.Allocator,
     id: []u8,
@@ -12,6 +22,7 @@ pub const Provider = struct {
     base_url: []u8,
     api_key: []u8,
     enabled: bool,
+    protocol: Protocol,
 
     pub fn clone(provider: Provider, allocator: std.mem.Allocator) !Provider {
         const id = try allocator.dupe(u8, provider.id);
@@ -21,7 +32,7 @@ pub const Provider = struct {
         const base_url = try allocator.dupe(u8, provider.base_url);
         errdefer allocator.free(base_url);
         const api_key = try allocator.dupe(u8, provider.api_key);
-        return .{ .allocator = allocator, .id = id, .name = name, .base_url = base_url, .api_key = api_key, .enabled = provider.enabled };
+        return .{ .allocator = allocator, .id = id, .name = name, .base_url = base_url, .api_key = api_key, .enabled = provider.enabled, .protocol = provider.protocol };
     }
 
     pub fn deinit(provider: *Provider) void {
@@ -94,6 +105,7 @@ pub fn replace(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, p
         try object.put(storage, "base_url", .{ .string = try storage.dupe(u8, provider.base_url) });
         try object.put(storage, "api_key", .{ .string = try storage.dupe(u8, provider.api_key) });
         try object.put(storage, "enabled", .{ .bool = provider.enabled });
+        try object.put(storage, "protocol", .{ .string = @tagName(provider.protocol) });
         try array.append(.{ .object = object });
     }
     try parsed.value.object.put(storage, "providers", .{ .array = array });
@@ -123,6 +135,10 @@ fn decode(allocator: std.mem.Allocator, value: std.json.Value) !?Provider {
     const api_key = validString(value.object.get("api_key")) orelse return null;
     const enabled_value = value.object.get("enabled") orelse return null;
     if (enabled_value != .bool) return null;
+    const protocol = if (value.object.get("protocol")) |protocol_value|
+        if (protocol_value == .string) Protocol.parse(protocol_value.string) orelse return null else return null
+    else
+        .auto;
     const id_copy = try allocator.dupe(u8, id);
     errdefer allocator.free(id_copy);
     const name_copy = try allocator.dupe(u8, name);
@@ -130,7 +146,7 @@ fn decode(allocator: std.mem.Allocator, value: std.json.Value) !?Provider {
     const base_url_copy = try allocator.dupe(u8, base_url);
     errdefer allocator.free(base_url_copy);
     const api_key_copy = try allocator.dupe(u8, api_key);
-    return .{ .allocator = allocator, .id = id_copy, .name = name_copy, .base_url = base_url_copy, .api_key = api_key_copy, .enabled = enabled_value.bool };
+    return .{ .allocator = allocator, .id = id_copy, .name = name_copy, .base_url = base_url_copy, .api_key = api_key_copy, .enabled = enabled_value.bool, .protocol = protocol };
 }
 
 fn validate(provider: Provider) !void {

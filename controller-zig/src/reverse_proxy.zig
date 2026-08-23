@@ -6,6 +6,7 @@ const Forwarding = struct {
     extra_request_headers: []const http.Header = &.{},
     strip_credentials: bool = false,
     worker_id: ?[]const u8 = null,
+    exact_upstream: bool = false,
 };
 
 pub const CapturedRequest = struct {
@@ -162,11 +163,14 @@ pub fn serveProviderBuffered(allocator: std.mem.Allocator, client: *http.Client,
         headers[header_count] = .{ .name = "Accept", .value = value };
         header_count += 1;
     }
+    const target = try providerTarget(allocator, upstream, captured.target);
+    defer allocator.free(target);
     var commitment: ResponseCommitment = .pending;
     var request_body_state: RequestBodyState = .untouched;
-    proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
+    proxyAttempt(client, target, request, &commitment, &request_body_state, .{
         .extra_request_headers = headers[0..header_count],
         .strip_credentials = true,
+        .exact_upstream = true,
     }, payload, captured) catch |failure| {
         if (!commitment.canRetry()) return failure;
         try respondBadGateway(request);
@@ -174,7 +178,7 @@ pub fn serveProviderBuffered(allocator: std.mem.Allocator, client: *http.Client,
 }
 
 fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding, buffered_body: ?[]const u8, captured: ?*const CapturedRequest) !void {
-    const uri = try uriForTarget(upstream, if (captured) |metadata| metadata.target else request.head.target);
+    const uri = if (forwarding.exact_upstream) try std.Uri.parse(upstream) else try uriForTarget(upstream, if (captured) |metadata| metadata.target else request.head.target);
     var request_headers: [64]http.Header = undefined;
     const request_header_count = if (captured) |metadata|
         try collectCapturedHeaders(metadata, &request_headers, forwarding)
@@ -236,6 +240,12 @@ fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Serve
         if (bytes_forwarded != content_length) return error.UpstreamBodyTruncated;
     }
     try downstream_response.end();
+}
+
+fn providerTarget(allocator: std.mem.Allocator, upstream: []const u8, target: []const u8) ![]u8 {
+    const base = std.mem.trimEnd(u8, std.mem.trim(u8, upstream, " \t\r\n"), "/");
+    if (base.len == 0) return error.InvalidProviderOrigin;
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, std.mem.trimStart(u8, target, "/") });
 }
 
 fn collectCapturedHeaders(captured: *const CapturedRequest, output: *[64]http.Header, forwarding: Forwarding) !usize {
