@@ -23,6 +23,9 @@ pub const Config = struct {
     llm_instance_path: []const u8,
     models_dir: []const u8,
     api_key: ?[]const u8,
+    sglang_python: ?[]const u8,
+    llama_bin: ?[]const u8,
+    mlx_python: ?[]const u8,
     environment: *const std.process.Environ.Map,
     default_trust_remote_code: bool,
     spike_upstream: ?[]const u8,
@@ -68,6 +71,9 @@ pub const Config = struct {
         const inference_origin = try std.fmt.allocPrint(allocator, "http://{s}:{d}", .{ inference_host, inference_port });
         const models_dir = try absolutePath(allocator, cwd, models_value);
         const api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY"));
+        const sglang_python = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_SGLANG_PYTHON"));
+        const llama_bin = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_LLAMA_BIN"));
+        const mlx_python = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_MLX_PYTHON"));
         const spike_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_UPSTREAM"));
         const spike_fallback_upstream = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_ZIG_SPIKE_FALLBACK_UPSTREAM"));
 
@@ -84,6 +90,9 @@ pub const Config = struct {
             .llm_instance_path = llm_instance_path,
             .models_dir = models_dir,
             .api_key = api_key,
+            .sglang_python = sglang_python,
+            .llama_bin = llama_bin,
+            .mlx_python = mlx_python,
             .environment = init.environ_map,
             .default_trust_remote_code = !std.mem.eql(u8, init.environ_map.get("LOCAL_STUDIO_DEFAULT_TRUST_REMOTE_CODE") orelse "true", "false"),
             .spike_upstream = spike_upstream,

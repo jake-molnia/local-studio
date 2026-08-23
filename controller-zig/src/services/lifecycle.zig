@@ -249,6 +249,15 @@ pub const Supervisor = struct {
         return supervisor.cancelLaunch();
     }
 
+    pub fn isRunning(supervisor: *Supervisor) !bool {
+        try supervisor.mutex.lock(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
+        const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return false;
+        var record = record_value;
+        defer record.deinit();
+        return processes.owns(supervisor.allocator, supervisor.io, &record);
+    }
+
     pub fn run(supervisor: *Supervisor) Io.Cancelable!void {
         while (true) {
             supervisor.superviseOnce() catch |failure| switch (failure) {

@@ -9,6 +9,7 @@ const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
 const lifecycle = @import("services/lifecycle.zig");
+const runtime_info = @import("services/runtime_info.zig");
 
 const Io = std.Io;
 
@@ -20,6 +21,7 @@ pub const App = struct {
     system: system_info.Snapshot,
     worker_pool: workers.Pool,
     supervisor: lifecycle.Supervisor,
+    runtime_cache: runtime_info.Cache,
     shutdown: shutdown_module.Shutdown,
     server: http_server.HttpServer,
 
@@ -42,6 +44,8 @@ pub const App = struct {
         errdefer worker_pool.deinit();
         var supervisor = lifecycle.Supervisor.init(allocator, io, config.data_dir, config.llm_instance_path);
         errdefer supervisor.deinit();
+        var runtime_cache = runtime_info.Cache.init(allocator, io);
+        errdefer runtime_cache.deinit();
         const server = try http_server.HttpServer.init(allocator, io, config);
         return .{
             .io = io,
@@ -51,6 +55,7 @@ pub const App = struct {
             .system = system,
             .worker_pool = worker_pool,
             .supervisor = supervisor,
+            .runtime_cache = runtime_cache,
             .shutdown = shutdown,
             .server = server,
         };
@@ -62,6 +67,7 @@ pub const App = struct {
         app.system.deinit();
         app.worker_pool.deinit();
         app.supervisor.deinit();
+        app.runtime_cache.deinit();
         app.database.deinit();
         app.config.deinit();
         app.* = undefined;
@@ -72,7 +78,7 @@ pub const App = struct {
         defer supervisor_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
-        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, app.recipe_column, &app.system, &app.worker_pool, &app.supervisor, &app.shutdown });
+        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, app.recipe_column, &app.system, &app.worker_pool, &app.supervisor, &app.runtime_cache, &app.shutdown });
         defer server_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
@@ -87,8 +93,8 @@ fn runSupervisor(supervisor: *lifecycle.Supervisor) Io.Cancelable!void {
     return supervisor.run();
 }
 
-fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *workers.Pool, supervisor: *lifecycle.Supervisor, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
-    server.run(database, recipe_column, system, worker_pool, supervisor) catch |failure| switch (failure) {
+fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *workers.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
+    server.run(database, recipe_column, system, worker_pool, supervisor, runtime_cache) catch |failure| switch (failure) {
         error.Canceled => return error.Canceled,
         else => std.log.err("controller server stopped: {t}", .{failure}),
     };
