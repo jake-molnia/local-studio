@@ -23,7 +23,7 @@ export function ControlPanel(props: DashboardLayoutProps) {
   const { currentProcess, currentRecipe, metrics, gpus, recipes } = props;
 
   return (
-    <div className="mx-auto w-full max-w-[86rem] px-1 pt-2">
+    <div className="mx-auto w-full max-w-[86rem] px-1 pt-1">
       <ControllerMatrix />
       <StatusSection
         currentProcess={currentProcess}
@@ -66,14 +66,14 @@ function ControllerMatrix() {
   const { rows, activeUrl, visible } = useControllerMatrixStore();
   if (!visible) return null;
   return (
-    <section className="mb-3 border-b border-(--separator) pb-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <section className="mb-2 border-b border-(--separator) pb-2">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
         <div className="text-[length:var(--fs-sm)] font-medium text-(--hl2)">controllers live</div>
         <div className="text-[length:var(--fs-xs)] text-(--dim)/70">
           {rows.filter((row) => row.online).length}/{rows.length} online
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-1">
         {rows.map((controller) => (
           <ControllerTab
             key={controller.url}

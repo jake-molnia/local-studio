@@ -25,11 +25,12 @@ export function RuntimeStrip({
   const backends = runtimeSummary ? backendFacts(runtimeSummary) : [];
   const platform = runtimeSummary ? platformFact(runtimeSummary) : null;
   const degraded = (services ?? []).filter((service) => service.status !== "ok");
-  const hasAnything = backends.length > 0 || platform || lease?.holder || (services ?? []).length > 0;
+  const hasAnything =
+    backends.length > 0 || platform || lease?.holder || (services ?? []).length > 0;
   if (!hasAnything) return null;
 
   return (
-    <section className="mt-4 border-t border-(--separator) px-2 pt-2.5 pb-1">
+    <section className="mt-3 border-t border-(--separator) px-2 pt-2 pb-1">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[length:var(--fs-xs)] text-(--dim)/75">
         {backends.map((fact) => (
           <Fact key={fact.label} label={fact.label} value={fact.value} title={fact.title} />
@@ -38,7 +39,9 @@ export function RuntimeStrip({
         {lease?.holder ? (
           <Fact
             label="lease"
-            value={lease.since ? `${lease.holder} · ${formatRelativeTime(lease.since)}` : lease.holder}
+            value={
+              lease.since ? `${lease.holder} · ${formatRelativeTime(lease.since)}` : lease.holder
+            }
             title="Which host currently owns the right to launch models"
           />
         ) : null}

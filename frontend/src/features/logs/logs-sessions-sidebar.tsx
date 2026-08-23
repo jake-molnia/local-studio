@@ -48,20 +48,20 @@ export function LogsSessionsSidebar({
           onSelectSession(session.id);
         }
       }}
-      className={`w-full text-left p-3 border-b border-(--separator) transition-colors group cursor-pointer ${
+      className={`w-full cursor-pointer border-b border-(--separator) px-2.5 py-2 text-left transition-colors group ${
         selectedSession === session.id ? "bg-(--surface)" : "hover:bg-(--hover)"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="text-[length:var(--fs-md)] font-medium text-(--fg) truncate">
+          <div className="truncate text-[length:var(--fs-sm)] font-medium text-(--fg)">
             {session.model || session.id}
           </div>
-          <div className="text-[length:var(--fs-sm)] text-(--dim) mt-1">
+          <div className="mt-0.5 text-[length:var(--fs-xs)] text-(--dim)">
             {formatDateTime(session.created_at)}
           </div>
           {session.backend && (
-            <StatusPill tone="info" variant="badge" className="mt-1.5">
+            <StatusPill tone="info" variant="badge" className="mt-1">
               {session.backend}
             </StatusPill>
           )}
@@ -88,23 +88,23 @@ export function LogsSessionsSidebar({
    * to render this markup twice, which is how the two copies drifted apart. */
   const renderPanel = (collapseAction?: ReactNode) => (
     <>
-      <div className="p-4 border-b border-(--border)">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-[length:var(--fs-base)] font-medium text-(--dim)">Log Sessions</h1>
+      <div className="border-b border-(--border) px-2.5 py-2">
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-[length:var(--fs-sm)] font-medium text-(--dim)">Log Sessions</h1>
           {collapseAction}
         </div>
         <SearchInput value={filter} onChange={onFilterChange} placeholder="Filter..." />
       </div>
       <div className="flex-1 overflow-y-auto">
         {filteredSessions.length === 0 ? (
-          <div className="p-4 text-center text-(--dim) text-[length:var(--fs-md)]">
+          <div className="p-3 text-center text-[length:var(--fs-sm)] text-(--dim)">
             No log files found
           </div>
         ) : (
           filteredSessions.map(renderSessionRow)
         )}
       </div>
-      <div className="p-3 border-t border-(--border) text-[length:var(--fs-sm)] text-(--dim)">
+      <div className="border-t border-(--border) px-2.5 py-2 text-[length:var(--fs-xs)] text-(--dim)">
         {countLabel} {countNoun}
       </div>
     </>
@@ -112,13 +112,13 @@ export function LogsSessionsSidebar({
 
   return (
     <>
-      <div className="w-72 border-r border-(--border) flex-col bg-(--surface) shrink-0 hidden md:flex">
+      <div className="hidden w-56 shrink-0 flex-col border-r border-(--border) bg-(--surface) md:flex">
         {renderPanel()}
       </div>
 
       {sidebarOpen ? (
         <DrawerOverlay side="left" onClose={() => onSidebarToggle(false)} className="md:hidden">
-          <Drawer side="left" width={288} className="h-full bg-(--surface)">
+          <Drawer side="left" width={256} className="h-full bg-(--surface)">
             {renderPanel(
               <Button variant="icon" size="sm" onClick={() => onSidebarToggle(false)}>
                 <ChevronLeft className="h-4 w-4 text-(--dim)" />

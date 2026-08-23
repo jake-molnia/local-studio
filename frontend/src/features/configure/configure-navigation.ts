@@ -54,5 +54,5 @@ export function configureSectionFromHash(hash: string): ConfigureSectionId | nul
  */
 export function configureSectionRedirect(hash: string): string | null {
   const section = hash.replace(/^#/, "").trim().toLowerCase();
-  return section === "integrations" ? "/integrations#connectors" : null;
+  return section === "integrations" ? "/customize#connectors" : null;
 }

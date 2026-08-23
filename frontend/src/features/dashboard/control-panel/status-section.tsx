@@ -59,7 +59,7 @@ export function StatusSection({
   const trendData = useMetricSamples(view.sampleInput);
 
   return (
-    <section className="px-2 pt-2 pb-5">
+    <section className="px-2 pt-1 pb-3">
       <StatusHeader
         backend={view.backend}
         benchmarking={benchmarking}
