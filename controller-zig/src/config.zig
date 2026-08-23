@@ -74,6 +74,7 @@ pub const Config = struct {
         defer persisted.deinit();
         const models_dir = try absolutePath(allocator, cwd, persisted.models_dir orelse models_value);
         const api_key = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_API_KEY"));
+        if (api_key == null and !loopbackHost(host)) return error.ApiKeyRequiredForRemoteHost;
         const sglang_python = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_SGLANG_PYTHON"));
         const llama_bin = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_LLAMA_BIN"));
         const mlx_python = try optionalOwned(allocator, init.environ_map.get("LOCAL_STUDIO_MLX_PYTHON"));
@@ -119,6 +120,10 @@ fn absolutePath(allocator: std.mem.Allocator, cwd: []const u8, value: []const u8
 fn optionalOwned(allocator: std.mem.Allocator, value: ?[]const u8) !?[]const u8 {
     const candidate = std.mem.trim(u8, value orelse return null, " \t\r\n");
     return if (candidate.len == 0) null else try allocator.dupe(u8, candidate);
+}
+
+fn loopbackHost(host: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(host, "localhost") or std.mem.eql(u8, host, "127.0.0.1") or std.mem.eql(u8, host, "::1");
 }
 
 fn parsePort(value: []const u8) !u16 {

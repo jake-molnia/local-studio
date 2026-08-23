@@ -147,6 +147,32 @@ pub fn serveLocalBuffered(client: *http.Client, upstream: []const u8, payload: [
     };
 }
 
+pub fn serveProviderBuffered(allocator: std.mem.Allocator, client: *http.Client, upstream: []const u8, api_key: []const u8, payload: []const u8, captured: *const CapturedRequest, request: *http.Server.Request, accept: ?[]const u8, include_x_api_key: bool) !void {
+    const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_key});
+    defer allocator.free(authorization);
+    var headers: [4]http.Header = undefined;
+    headers[0] = .{ .name = "Content-Type", .value = "application/json" };
+    headers[1] = .{ .name = "Authorization", .value = authorization };
+    var header_count: usize = 2;
+    if (include_x_api_key) {
+        headers[header_count] = .{ .name = "X-Api-Key", .value = api_key };
+        header_count += 1;
+    }
+    if (accept) |value| {
+        headers[header_count] = .{ .name = "Accept", .value = value };
+        header_count += 1;
+    }
+    var commitment: ResponseCommitment = .pending;
+    var request_body_state: RequestBodyState = .untouched;
+    proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
+        .extra_request_headers = headers[0..header_count],
+        .strip_credentials = true,
+    }, payload, captured) catch |failure| {
+        if (!commitment.canRetry()) return failure;
+        try respondBadGateway(request);
+    };
+}
+
 fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding, buffered_body: ?[]const u8, captured: ?*const CapturedRequest) !void {
     const uri = try uriForTarget(upstream, if (captured) |metadata| metadata.target else request.head.target);
     var request_headers: [64]http.Header = undefined;

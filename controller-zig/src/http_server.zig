@@ -28,6 +28,8 @@ const huggingface_models = @import("services/huggingface_models.zig");
 const download_manager = @import("services/download_manager.zig");
 const provider_service = @import("services/providers.zig");
 const provider_catalog = @import("services/provider_catalog.zig");
+const provider_routing = @import("services/provider_routing.zig");
+const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
 const recipes = @import("repository/recipes.zig");
@@ -177,6 +179,17 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         });
         return request.head.keep_alive;
     };
+
+    if (!std.mem.eql(u8, route.path, "/health") and !request_auth.authorized(request, configuration.api_key)) {
+        try request.respond("{\"detail\":\"Unauthorized\"}", .{
+            .status = .unauthorized,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "application/json" },
+                .{ .name = "WWW-Authenticate", .value = "Bearer realm=\"local-studio-controller\"" },
+            },
+        });
+        return request.head.keep_alive;
+    }
 
     switch (topology.routeDisposition(mode, route)) {
         .local => {},
@@ -501,7 +514,13 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveRuntimeJobCreate(allocator, configuration, runtime_jobs, runtime_cache, request, backend, true);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
-        const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
+        const worker_response = try worker_service.modelCatalogPayload(allocator, io, client, database);
+        defer allocator.free(worker_response);
+        var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+        defer snapshot.deinit();
+        const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+        defer allocator.free(provider_response);
+        const response = try provider_routing.mergedModelCatalog(allocator, worker_response, provider_response);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -517,16 +536,19 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
-        return try serveHeadChat(allocator, io, client, database, worker_pool, request);
+        return try serveHeadInference(allocator, io, configuration, studio, client, database, worker_pool, request);
+    }
+    if (mode == .head and std.mem.eql(u8, route.path, "/v1/responses")) {
+        return try serveHeadInference(allocator, io, configuration, studio, client, database, worker_pool, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
-        return try serveLocalChat(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin);
+        return try serveLocalChat(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/responses")) {
-        return try serveLocalPassthrough(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .responses);
+        return try serveLocalPassthrough(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin, .responses);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/messages")) {
-        return try serveLocalPassthrough(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
+        return try serveLocalPassthrough(allocator, io, configuration, studio, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/count-tokens")) {
         return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .count);
@@ -1263,16 +1285,7 @@ fn serveRuntimeConfigHelp(allocator: std.mem.Allocator, io: Io, configuration: *
     return request.head.keep_alive;
 }
 
-fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, worker_pool: *worker_service.Pool, request: *http.Server.Request) !bool {
-    if (!worker_pool.tryAcquireInference()) {
-        try request.respond("{\"detail\":\"Inference request capacity is exhausted\"}", .{
-            .status = .service_unavailable,
-            .keep_alive = false,
-            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
-        });
-        return false;
-    }
-    defer worker_pool.releaseInference();
+fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, worker_pool: *worker_service.Pool, request: *http.Server.Request) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1302,6 +1315,26 @@ fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, dat
     if (model_value != .string) return try respondModelRequired(request);
     const model_id = std.mem.trim(u8, model_value.string, " \t\r\n");
     if (model_id.len == 0) return try respondModelRequired(request);
+
+    var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+    defer snapshot.deinit();
+    if (provider_routing.resolve(snapshot.providers, model_id)) |provider_route| {
+        const rewritten = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
+        defer allocator.free(rewritten);
+        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
+        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten, &captured, request, accept, false) catch return false;
+        return false;
+    }
+
+    if (!worker_pool.tryAcquireInference()) {
+        try request.respond("{\"detail\":\"Inference request capacity is exhausted\"}", .{
+            .status = .service_unavailable,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    }
+    defer worker_pool.releaseInference();
 
     var worker = worker_service.selectServing(allocator, io, client, database, worker_pool, model_id, null) catch null orelse {
         return try respondModelNotRunning(allocator, request, null, model_id);
@@ -1338,7 +1371,7 @@ fn serveHeadChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, dat
     return false;
 }
 
-fn serveLocalChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8) !bool {
+fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1371,6 +1404,17 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, da
         return request.head.keep_alive;
     }
 
+    const requested_provider_model = if (parsed.value.object.get("model")) |value| if (value == .string) std.mem.trim(u8, value.string, " \t\r\n") else "" else "";
+    var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+    defer snapshot.deinit();
+    if (provider_routing.resolve(snapshot.providers, requested_provider_model)) |provider_route| {
+        const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
+        defer allocator.free(rewritten_provider);
+        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
+        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, accept, false) catch return false;
+        return false;
+    }
+
     var rewritten: ?[]u8 = null;
     defer if (rewritten) |payload| allocator.free(payload);
     if (parsed.value.object.get("model")) |model_value| {
@@ -1401,7 +1445,7 @@ const LocalProtocol = enum {
     messages,
 };
 
-fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: LocalProtocol) !bool {
+fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: LocalProtocol) !bool {
     var captured = try reverse_proxy.captureRequest(allocator, request);
     defer captured.deinit();
     const storage = try allocator.alloc(u8, max_chat_request_bytes);
@@ -1433,6 +1477,16 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, client: *http.Cli
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
+    }
+
+    var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+    defer snapshot.deinit();
+    if (provider_routing.resolve(snapshot.providers, requested_model)) |provider_route| {
+        const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
+        defer allocator.free(rewritten_provider);
+        const accept: ?[]const u8 = if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json";
+        reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, accept, protocol == .messages) catch return false;
+        return false;
     }
 
     var rewritten: ?[]u8 = null;
