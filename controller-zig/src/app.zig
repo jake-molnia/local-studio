@@ -6,6 +6,7 @@ const controller_settings = @import("repository/controller_settings.zig");
 const rig_node_credentials = @import("repository/rig_node_credentials.zig");
 const rigs = @import("repository/rigs.zig");
 const recipes = @import("repository/recipes.zig");
+const peak_metrics = @import("repository/peak_metrics.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
@@ -34,6 +35,7 @@ pub const App = struct {
         try rigs.initialize(&database);
         try rig_node_credentials.initialize(&database);
         try controller_settings.initialize(&database);
+        try peak_metrics.initialize(&database);
         const recipe_column = try recipes.initialize(&database);
         std.log.info("SQLite {s} compatibility database opened", .{database.version()});
 

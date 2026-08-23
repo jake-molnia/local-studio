@@ -22,7 +22,9 @@ const model_index = @import("services/model_index.zig");
 const studio_models = @import("services/studio_models.zig");
 const runtime_routes = @import("services/runtime_routes.zig");
 const vram_calculator = @import("services/vram_calculator.zig");
+const benchmark_service = @import("services/benchmark.zig");
 const recipes = @import("repository/recipes.zig");
+const peak_metrics = @import("repository/peak_metrics.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
@@ -221,6 +223,47 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/vram-calculator")) {
         return serveVramCalculator(allocator, io, configuration, system, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/peak-metrics")) {
+        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        defer if (model_id) |value| allocator.free(value);
+        const response = response: {
+            try database.lock(io);
+            defer database.unlock(io);
+            if (model_id) |value| {
+                if (value.len > 0) break :response (try peak_metrics.onePayload(allocator, database, value)) orelse try allocator.dupe(u8, "{\"error\":\"No metrics for this model\"}");
+            }
+            break :response try peak_metrics.allPayload(allocator, database);
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/benchmark")) {
+        const prompt_value = try queryParameter(allocator, request.head.target, "prompt_tokens");
+        defer if (prompt_value) |value| allocator.free(value);
+        const prompt_tokens = if (prompt_value) |value| std.fmt.parseInt(usize, value, 10) catch 0 else 1000;
+        if (prompt_tokens < 1 or prompt_tokens > 100_000) {
+            try request.respond("{\"detail\":\"Invalid benchmark query\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        }
+        const response = benchmark_service.payload(allocator, io, client, database, recipe_column, llm_instance_path, inference_origin, default_trust_remote_code, prompt_tokens) catch |failure| {
+            const detail: []const u8 = switch (failure) {
+                error.BenchmarkRequestFailed => "Benchmark request failed",
+                error.InvalidBenchmarkResponse => "Invalid benchmark response",
+                else => return failure,
+            };
+            var output: Io.Writer.Allocating = .init(allocator);
+            defer output.deinit();
+            try output.writer.writeAll("{\"detail\":");
+            try std.json.Stringify.value(detail, .{}, &output.writer);
+            try output.writer.writeByte('}');
+            try request.respond(output.writer.buffered(), .{ .status = .service_unavailable, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/models/delete")) {
         return serveStudioModelMutation(allocator, io, studio, request, .delete);
@@ -1170,6 +1213,26 @@ fn queryUnsigned(target: []const u8, expected_name: []const u8) ?u64 {
         const separator = std.mem.findScalar(u8, parameter, '=') orelse continue;
         if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
         return std.fmt.parseInt(u64, parameter[separator + 1 ..], 10) catch null;
+    }
+    return null;
+}
+
+fn queryParameter(allocator: std.mem.Allocator, target: []const u8, expected_name: []const u8) !?[]u8 {
+    const query_start = std.mem.findScalar(u8, target, '?') orelse return null;
+    var parameters = std.mem.splitScalar(u8, target[query_start + 1 ..], '&');
+    while (parameters.next()) |parameter| {
+        const separator = std.mem.findScalar(u8, parameter, '=') orelse {
+            if (std.mem.eql(u8, parameter, expected_name)) return @as(?[]u8, try allocator.dupe(u8, ""));
+            continue;
+        };
+        if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
+        const encoded = parameter[separator + 1 ..];
+        const storage = try allocator.dupe(u8, encoded);
+        defer allocator.free(storage);
+        for (storage) |*character| if (character.* == '+') {
+            character.* = ' ';
+        };
+        return @as(?[]u8, try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage)));
     }
     return null;
 }
