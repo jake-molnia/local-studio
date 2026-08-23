@@ -1,5 +1,6 @@
 const std = @import("std");
 const config_module = @import("../config.zig");
+const head_connections = @import("../repository/head_connection.zig");
 
 const Io = std.Io;
 
@@ -9,52 +10,72 @@ pub const Config = struct {
     mode: config_module.Mode,
     environment: *const std.process.Environ.Map,
     agent_dir: []u8,
-    head_base_url: ?[]u8,
-    head_api_key: ?[]u8,
+    data_dir: []u8,
+    local_base_url: ?[]u8,
+    local_api_key: ?[]u8,
+    environment_base_url: ?[]u8,
+    environment_api_key: ?[]u8,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config_module.Config) !Config {
         const agent_dir = try std.fs.path.join(allocator, &.{ configuration.data_dir, "harness", "pi", "config" });
         errdefer allocator.free(agent_dir);
+        const data_dir = try allocator.dupe(u8, configuration.data_dir);
+        errdefer allocator.free(data_dir);
         const configured_url = configuration.environment.get("LOCAL_STUDIO_HEAD_URL");
-        const base_url = if (configuration.mode == .standalone)
-            try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}/v1", .{configuration.port})
-        else if (configured_url) |value|
+        const environment_base_url = if (configured_url) |value|
             try normalizeBaseUrl(allocator, value)
-        else
-            null;
-        errdefer if (base_url) |value| allocator.free(value);
+        else null;
+        errdefer if (environment_base_url) |value| allocator.free(value);
         const configured_key = configuration.environment.get("LOCAL_STUDIO_HEAD_API_KEY");
-        const key = if (configured_key) |value|
+        const environment_api_key = if (configured_key) |value|
             try optionalOwned(allocator, value)
-        else if (configuration.mode == .standalone)
+        else null;
+        errdefer if (environment_api_key) |value| allocator.free(value);
+        const local_base_url = if (configuration.mode == .standalone)
+            try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}/v1", .{configuration.port})
+        else null;
+        errdefer if (local_base_url) |value| allocator.free(value);
+        const local_api_key = if (configuration.mode == .standalone)
             try allocator.dupe(u8, configuration.api_key orelse "local-studio")
-        else
-            null;
+        else null;
         return .{
             .allocator = allocator,
             .io = io,
             .mode = configuration.mode,
             .environment = configuration.environment,
             .agent_dir = agent_dir,
-            .head_base_url = base_url,
-            .head_api_key = key,
+            .data_dir = data_dir,
+            .local_base_url = local_base_url,
+            .local_api_key = local_api_key,
+            .environment_base_url = environment_base_url,
+            .environment_api_key = environment_api_key,
         };
     }
 
     pub fn deinit(configuration: *Config) void {
         configuration.allocator.free(configuration.agent_dir);
-        if (configuration.head_base_url) |value| configuration.allocator.free(value);
-        if (configuration.head_api_key) |value| configuration.allocator.free(value);
+        configuration.allocator.free(configuration.data_dir);
+        if (configuration.local_base_url) |value| configuration.allocator.free(value);
+        if (configuration.local_api_key) |value| configuration.allocator.free(value);
+        if (configuration.environment_base_url) |value| configuration.allocator.free(value);
+        if (configuration.environment_api_key) |value| configuration.allocator.free(value);
         configuration.* = undefined;
     }
 
     pub fn available(configuration: *const Config) bool {
-        return configuration.mode == .standalone or (configuration.head_base_url != null and configuration.head_api_key != null);
+        if (configuration.local_base_url != null or configuration.environment_base_url != null) return true;
+        var connection = head_connections.load(configuration.allocator, configuration.io, configuration.data_dir) catch return false;
+        defer if (connection) |*value| value.deinit();
+        return connection != null;
     }
 
     pub fn prepare(configuration: *const Config, model_id: []const u8) !Route {
-        const base_url = configuration.head_base_url orelse return error.HeadEndpointRequired;
-        const api_key = configuration.head_api_key orelse return error.HeadCredentialRequired;
+        var connection = try head_connections.load(configuration.allocator, configuration.io, configuration.data_dir);
+        defer if (connection) |*value| value.deinit();
+        const persisted_base_url = if (connection) |value| try normalizeBaseUrl(configuration.allocator, value.url) else null;
+        defer if (persisted_base_url) |value| configuration.allocator.free(value);
+        const base_url = configuration.environment_base_url orelse persisted_base_url orelse configuration.local_base_url orelse return error.HeadEndpointRequired;
+        const api_key = configuration.environment_api_key orelse if (connection) |value| value.api_key else configuration.local_api_key orelse return error.HeadCredentialRequired;
         if (model_id.len == 0 or model_id.len > 512) return error.InvalidHeadModelId;
         _ = try Io.Dir.cwd().createDirPathStatus(configuration.io, configuration.agent_dir, @enumFromInt(0o700));
         const models_path = try std.fs.path.join(configuration.allocator, &.{ configuration.agent_dir, "models.json" });

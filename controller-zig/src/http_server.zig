@@ -38,6 +38,7 @@ const harness_runtime = @import("services/harness_runtime.zig");
 const agent_coordinator = @import("services/agent_coordinator.zig");
 const agent_sessions = @import("services/agent_sessions.zig");
 const automations = @import("services/automations.zig");
+const head_connection = @import("services/head_connection.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -237,6 +238,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = try agent_coordinator.setupPayload(allocator, io, mode, database, harness);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/head-connection")) {
+        const response = switch (request.head.method) {
+            .GET => head_connection.payload(allocator, io, configuration.data_dir),
+            .DELETE => head_connection.deletePayload(allocator, io, configuration.data_dir),
+            .PUT => update: {
+                const document = try readBoundedAgentBody(allocator, request) orelse return false;
+                defer allocator.free(document);
+                break :update head_connection.updatePayload(allocator, io, configuration.data_dir, document);
+            },
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondHeadConnectionFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/automations")) {
@@ -1443,6 +1460,21 @@ fn respondAutomationFailure(request: *http.Server.Request, failure: anyerror) !b
         error.InvalidAutomationStatus => "Invalid automation status",
         error.InvalidAutomationPayload => "Invalid JSON body",
         error.InvalidAutomationRecord => "Stored automation data is invalid",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondHeadConnectionFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.InvalidHeadConnection, error.HeadUrlRequired, error.InvalidHeadUrl => .bad_request,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.InvalidHeadConnection => "Invalid Head connection payload",
+        error.HeadUrlRequired => "url is required",
+        error.InvalidHeadUrl => "Head URL must use HTTP or HTTPS",
+        error.HeadConnectionWriteFailed => "Head connection could not be persisted",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
