@@ -36,6 +36,8 @@ import {
   HEAD_CONNECTION_CHANGED_EVENT,
 } from "@/lib/api/head-controller";
 
+const HEAD_OWNED_PROVIDER_IDS = new Set(["openai-codex", "cursor"]);
+
 function decodeProviders(input: unknown): ProvidersResponse {
   const providers = (input as { providers?: unknown })?.providers;
   if (!Array.isArray(providers)) throw new Error("Malformed providers response");
@@ -433,7 +435,10 @@ export function ModelProvidersSection() {
         const controllerIds = new Set(controllerProviders.providers.map((provider) => provider.id));
         const list = [
           ...controllerProviders.providers,
-          ...agentProviders.providers.filter((provider) => !controllerIds.has(provider.id)),
+          ...agentProviders.providers.filter(
+            (provider) =>
+              !HEAD_OWNED_PROVIDER_IDS.has(provider.id) && !controllerIds.has(provider.id),
+          ),
         ];
         setProviders(list);
         setSelectedProvider((current) =>
