@@ -36,6 +36,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/models",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/models",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/head-connection",
       "ownership": "worker",
       "streaming": "never"

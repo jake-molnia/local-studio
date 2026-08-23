@@ -10,6 +10,8 @@ pub const routes = [_]http_routes.Route{
     .{ .method = .GET, .path = "/api/agent/runtime/status", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/runtime/events", .ownership = .head, .streaming = .always },
     .{ .method = .GET, .path = "/api/agent/setup-checks", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/api/agent/models", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/models", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },
     .{ .method = .PUT, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/head-connection", .ownership = .worker, .streaming = .never },

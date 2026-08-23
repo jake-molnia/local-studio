@@ -40,6 +40,7 @@ const agent_sessions = @import("services/agent_sessions.zig");
 const automations = @import("services/automations.zig");
 const head_connection = @import("services/head_connection.zig");
 const agent_enrollments = @import("services/agent_enrollments.zig");
+const agent_models = @import("services/agent_models.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -237,6 +238,16 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/api/agent/setup-checks")) {
         const response = try agent_coordinator.setupPayload(allocator, io, mode, database, harness);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/models")) {
+        if (request.head.method == .POST) {
+            const document = try readBoundedAgentBody(allocator, request) orelse return false;
+            allocator.free(document);
+        }
+        const response = agent_models.payload(allocator, io, configuration, client) catch |failure| return respondDownloadError(request, .bad_gateway, @errorName(failure));
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
