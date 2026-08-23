@@ -274,7 +274,9 @@ export function WorkbenchTabStrip() {
     const tab = orderedTabs[boundedIndex];
     if (!tab) return;
     activateTab(tab);
-    tabElementsRef.current.get(tab.id)?.focus();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => tabElementsRef.current.get(tab.id)?.focus());
+    });
   };
 
   useMountSubscription(() => {
