@@ -3,6 +3,13 @@ const std = @import("std");
 const Io = std.Io;
 const max_frame_bytes = 4 * 1024 * 1024;
 const http = std.http;
+const modern_protocol = "2026-07-28";
+const legacy_protocol = "2025-06-18";
+
+const Era = enum {
+    modern,
+    legacy,
+};
 
 pub const Operation = union(enum) {
     tools,
@@ -40,61 +47,175 @@ pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const st
     defer child.kill(io);
     var connection = Connection{ .allocator = allocator, .io = io, .child = &child };
     defer connection.deinit();
-    const initialized = try connection.request(1,
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"local-studio\",\"version\":\"2.1.0\"}}}",
-    );
-    allocator.free(initialized);
-    try connection.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
-    switch (operation) {
-        .tools => return connection.request(2, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}"),
-        .call => |call| {
-            var request: Io.Writer.Allocating = .init(allocator);
-            defer request.deinit();
-            try request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":");
-            try std.json.Stringify.value(call.name, .{}, &request.writer);
-            try request.writer.writeAll(",\"arguments\":");
-            try std.json.Stringify.value(call.arguments, .{}, &request.writer);
-            try request.writer.writeAll("}}");
-            return connection.request(3, request.writer.buffered());
-        },
-    }
+    const era = try discoverStdio(allocator, &connection);
+    const request_id: i64 = if (era == .modern) 2 else 3;
+    const document = try operationDocument(allocator, era, request_id, operation);
+    defer allocator.free(document);
+    return connection.request(request_id, document);
 }
 
 pub fn executeHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, operation: Operation) ![]u8 {
     const url = stringField(connector, "url") orelse return error.ConnectorUrlRequired;
-    var initialized = try postHttp(allocator, io, client, connector, url, null,
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"local-studio\",\"version\":\"2.1.0\"}}}",
+    var discovery = try discoverHttp(allocator, io, client, connector, url);
+    defer discovery.deinit();
+    const request_id: i64 = if (discovery.era == .modern) 2 else 3;
+    const document = try operationDocument(allocator, discovery.era, request_id, operation);
+    defer allocator.free(document);
+    const method: []const u8 = switch (operation) {
+        .tools => "tools/list",
+        .call => "tools/call",
+    };
+    const name: ?[]const u8 = switch (operation) {
+        .tools => null,
+        .call => |call| call.name,
+    };
+    var response = try postHttp(allocator, io, client, connector, url, discovery.era, discovery.session_id, method, name, document);
+    defer response.deinit();
+    try requireHttpSuccess(response.status);
+    return rpcResult(allocator, response.body, request_id);
+}
+
+const Discovery = struct {
+    allocator: std.mem.Allocator,
+    era: Era,
+    session_id: ?[]u8 = null,
+
+    fn deinit(discovery: *Discovery) void {
+        if (discovery.session_id) |value| discovery.allocator.free(value);
+        discovery.* = undefined;
+    }
+};
+
+fn discoverStdio(allocator: std.mem.Allocator, connection: *Connection) !Era {
+    const discovery_document = try modernDocument(allocator, 1, "server/discover", null, null);
+    defer allocator.free(discovery_document);
+    const discovered = connection.request(1, discovery_document) catch |failure| switch (failure) {
+        error.ModernMcpUnsupported => return initializeLegacyStdio(allocator, connection),
+        else => return failure,
+    };
+    defer allocator.free(discovered);
+    if (!try supportsModern(allocator, discovered)) return initializeLegacyStdio(allocator, connection);
+    return .modern;
+}
+
+fn initializeLegacyStdio(allocator: std.mem.Allocator, connection: *Connection) !Era {
+    const initialized = try connection.request(
+        2,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"local-studio\",\"version\":\"2.1.0\"}}}",
+    );
+    allocator.free(initialized);
+    try connection.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    return .legacy;
+}
+
+fn discoverHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8) !Discovery {
+    const discovery_document = try modernDocument(allocator, 1, "server/discover", null, null);
+    defer allocator.free(discovery_document);
+    var response = try postHttp(allocator, io, client, connector, url, .modern, null, "server/discover", null, discovery_document);
+    defer response.deinit();
+    if (response.status >= 200 and response.status < 300) {
+        const discovered = rpcResult(allocator, response.body, 1) catch |failure| switch (failure) {
+            error.ModernMcpUnsupported => return initializeLegacyHttp(allocator, io, client, connector, url),
+            else => return failure,
+        };
+        defer allocator.free(discovered);
+        if (try supportsModern(allocator, discovered)) return .{ .allocator = allocator, .era = .modern };
+        return initializeLegacyHttp(allocator, io, client, connector, url);
+    }
+    if (response.status == 400 and modernRejected(allocator, response.body, 1)) return initializeLegacyHttp(allocator, io, client, connector, url);
+    return error.McpHttpRejected;
+}
+
+fn initializeLegacyHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8) !Discovery {
+    var initialized = try postHttp(
+        allocator,
+        io,
+        client,
+        connector,
+        url,
+        .legacy,
+        null,
+        "initialize",
+        null,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"local-studio\",\"version\":\"2.1.0\"}}}",
     );
     defer initialized.deinit();
-    const initialized_result = try rpcResult(allocator, initialized.body, 1);
+    try requireHttpSuccess(initialized.status);
+    const initialized_result = try rpcResult(allocator, initialized.body, 2);
     allocator.free(initialized_result);
-    var notification = try postHttp(allocator, io, client, connector, url, initialized.session_id, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
-    notification.deinit();
+    var notification = try postHttp(allocator, io, client, connector, url, .legacy, initialized.session_id, "notifications/initialized", null, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    defer notification.deinit();
+    try requireHttpSuccess(notification.status);
+    return .{
+        .allocator = allocator,
+        .era = .legacy,
+        .session_id = if (initialized.session_id) |value| try allocator.dupe(u8, value) else null,
+    };
+}
+
+fn operationDocument(allocator: std.mem.Allocator, era: Era, id: i64, operation: Operation) ![]u8 {
+    if (era == .modern) return switch (operation) {
+        .tools => modernDocument(allocator, id, "tools/list", null, null),
+        .call => |call| modernDocument(allocator, id, "tools/call", call.name, call.arguments),
+    };
+    var request: Io.Writer.Allocating = .init(allocator);
+    errdefer request.deinit();
     switch (operation) {
-        .tools => {
-            var response = try postHttp(allocator, io, client, connector, url, initialized.session_id, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
-            defer response.deinit();
-            return rpcResult(allocator, response.body, 2);
-        },
+        .tools => try request.writer.print("{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"tools/list\",\"params\":{{}}}}", .{id}),
         .call => |call| {
-            var request: Io.Writer.Allocating = .init(allocator);
-            defer request.deinit();
-            try request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":");
+            try request.writer.print("{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"tools/call\",\"params\":{{\"name\":", .{id});
             try std.json.Stringify.value(call.name, .{}, &request.writer);
             try request.writer.writeAll(",\"arguments\":");
             try std.json.Stringify.value(call.arguments, .{}, &request.writer);
             try request.writer.writeAll("}}");
-            var response = try postHttp(allocator, io, client, connector, url, initialized.session_id, request.writer.buffered());
-            defer response.deinit();
-            return rpcResult(allocator, response.body, 3);
         },
     }
+    return request.toOwnedSlice();
+}
+
+fn modernDocument(allocator: std.mem.Allocator, id: i64, method: []const u8, name: ?[]const u8, arguments: ?std.json.Value) ![]u8 {
+    var request: Io.Writer.Allocating = .init(allocator);
+    errdefer request.deinit();
+    try request.writer.print("{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":", .{id});
+    try std.json.Stringify.value(method, .{}, &request.writer);
+    try request.writer.writeAll(",\"params\":{");
+    if (name) |value| {
+        const argument_value = arguments orelse return error.InvalidMcpRequest;
+        try request.writer.writeAll("\"name\":");
+        try std.json.Stringify.value(value, .{}, &request.writer);
+        try request.writer.writeAll(",\"arguments\":");
+        try std.json.Stringify.value(argument_value, .{}, &request.writer);
+        try request.writer.writeByte(',');
+    }
+    try request.writer.writeAll("\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"local-studio\",\"version\":\"2.1.0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}}}");
+    return request.toOwnedSlice();
+}
+
+fn supportsModern(allocator: std.mem.Allocator, document: []const u8) !bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidMcpResponse;
+    const versions = parsed.value.object.get("supportedVersions") orelse return error.InvalidMcpResponse;
+    if (versions != .array) return error.InvalidMcpResponse;
+    for (versions.array.items) |value| if (value == .string and std.mem.eql(u8, value.string, modern_protocol)) return true;
+    return false;
+}
+
+fn modernRejected(allocator: std.mem.Allocator, body: []const u8, id: i64) bool {
+    const document = rpcDocument(allocator, body, id) catch return false;
+    defer allocator.free(document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .object or !matchesId(parsed.value.object, id)) return false;
+    const code = mcpErrorCode(parsed.value.object) orelse return false;
+    return code == -32601 or code == -32022;
 }
 
 const HttpResponse = struct {
     allocator: std.mem.Allocator,
     body: []u8,
     session_id: ?[]u8,
+    status: u16,
 
     fn deinit(response: *HttpResponse) void {
         response.allocator.free(response.body);
@@ -103,7 +224,7 @@ const HttpResponse = struct {
     }
 };
 
-fn postHttp(allocator: std.mem.Allocator, _: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8, session_id: ?[]const u8, document: []const u8) !HttpResponse {
+fn postHttp(allocator: std.mem.Allocator, _: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8, era: Era, session_id: ?[]const u8, method: []const u8, name: ?[]const u8, document: []const u8) !HttpResponse {
     if (document.len > max_frame_bytes) return error.McpFrameTooLarge;
     const uri = std.Uri.parse(url) catch return error.InvalidConnectorUrl;
     var headers: [260]http.Header = undefined;
@@ -112,8 +233,14 @@ fn postHttp(allocator: std.mem.Allocator, _: Io, client: *http.Client, connector
     count += 1;
     headers[count] = .{ .name = "Accept", .value = "application/json, text/event-stream" };
     count += 1;
-    headers[count] = .{ .name = "MCP-Protocol-Version", .value = "2025-06-18" };
+    headers[count] = .{ .name = "MCP-Protocol-Version", .value = if (era == .modern) modern_protocol else legacy_protocol };
     count += 1;
+    headers[count] = .{ .name = "Mcp-Method", .value = method };
+    count += 1;
+    if (name) |value| {
+        headers[count] = .{ .name = "Mcp-Name", .value = value };
+        count += 1;
+    }
     if (session_id) |value| {
         headers[count] = .{ .name = "Mcp-Session-Id", .value = value };
         count += 1;
@@ -144,7 +271,6 @@ fn postHttp(allocator: std.mem.Allocator, _: Io, client: *http.Client, connector
     var redirect_buffer: [16 * 1024]u8 = undefined;
     var response = try request.receiveHead(&redirect_buffer);
     const code = @intFromEnum(response.head.status);
-    if (code < 200 or code >= 300) return error.McpHttpRejected;
     const owned_session_id = try responseSessionId(allocator, response.head);
     errdefer if (owned_session_id) |value| allocator.free(value);
     const storage = try allocator.alloc(u8, max_frame_bytes);
@@ -153,7 +279,11 @@ fn postHttp(allocator: std.mem.Allocator, _: Io, client: *http.Client, connector
     var read_buffer: [16 * 1024]u8 = undefined;
     const reader = response.reader(&read_buffer);
     _ = reader.streamRemaining(&output) catch return error.McpFrameTooLarge;
-    return .{ .allocator = allocator, .body = try allocator.dupe(u8, output.buffered()), .session_id = owned_session_id };
+    return .{ .allocator = allocator, .body = try allocator.dupe(u8, output.buffered()), .session_id = owned_session_id, .status = code };
+}
+
+fn requireHttpSuccess(status: u16) !void {
+    if (status < 200 or status >= 300) return error.McpHttpRejected;
 }
 
 fn responseSessionId(allocator: std.mem.Allocator, head: http.Client.Response.Head) !?[]u8 {
@@ -173,7 +303,10 @@ fn rpcResult(allocator: std.mem.Allocator, body: []const u8, id: i64) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpFrame;
     defer parsed.deinit();
     if (parsed.value != .object or !matchesId(parsed.value.object, id)) return error.InvalidMcpResponse;
-    if (parsed.value.object.get("error") != null) return error.McpRequestRejected;
+    if (mcpErrorCode(parsed.value.object)) |code| {
+        if (code == -32601 or code == -32022) return error.ModernMcpUnsupported;
+        return error.McpRequestRejected;
+    }
     const result = parsed.value.object.get("result") orelse return error.InvalidMcpResponse;
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
@@ -198,7 +331,7 @@ fn rpcDocument(allocator: std.mem.Allocator, body: []const u8, id: i64) ![]u8 {
 }
 
 fn reservedHeader(name: []const u8) bool {
-    for ([_][]const u8{ "content-type", "accept", "content-length", "transfer-encoding", "connection", "host", "mcp-protocol-version", "mcp-session-id" }) |reserved| {
+    for ([_][]const u8{ "content-type", "accept", "content-length", "transfer-encoding", "connection", "host", "mcp-protocol-version", "mcp-session-id", "mcp-method", "mcp-name" }) |reserved| {
         if (std.ascii.eqlIgnoreCase(name, reserved)) return true;
     }
     return false;
@@ -245,12 +378,7 @@ const Connection = struct {
             var parsed = std.json.parseFromSlice(std.json.Value, connection.allocator, line, .{}) catch return error.InvalidMcpFrame;
             defer parsed.deinit();
             if (parsed.value != .object or !matchesId(parsed.value.object, id)) continue;
-            if (parsed.value.object.get("error") != null) return error.McpRequestRejected;
-            const result = parsed.value.object.get("result") orelse return error.InvalidMcpResponse;
-            var output: Io.Writer.Allocating = .init(connection.allocator);
-            errdefer output.deinit();
-            try std.json.Stringify.value(result, .{}, &output.writer);
-            return output.toOwnedSlice();
+            return rpcResult(connection.allocator, line, id);
         }
     }
 
@@ -278,6 +406,13 @@ const Connection = struct {
         }
     }
 };
+
+fn mcpErrorCode(object: std.json.ObjectMap) ?i64 {
+    const value = object.get("error") orelse return null;
+    if (value != .object) return null;
+    const code = value.object.get("code") orelse return null;
+    return if (code == .integer) code.integer else null;
+}
 
 fn matchesId(object: std.json.ObjectMap, expected: i64) bool {
     const value = object.get("id") orelse return false;
