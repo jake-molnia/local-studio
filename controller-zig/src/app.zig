@@ -8,6 +8,7 @@ const recipes = @import("repository/recipes.zig");
 const shutdown_module = @import("shutdown.zig");
 const sqlite = @import("repository/sqlite.zig");
 const workers = @import("services/workers.zig");
+const lifecycle = @import("services/lifecycle.zig");
 
 const Io = std.Io;
 
@@ -18,6 +19,7 @@ pub const App = struct {
     recipe_column: recipes.PayloadColumn,
     system: system_info.Snapshot,
     worker_pool: workers.Pool,
+    supervisor: lifecycle.Supervisor,
     shutdown: shutdown_module.Shutdown,
     server: http_server.HttpServer,
 
@@ -38,6 +40,8 @@ pub const App = struct {
         errdefer shutdown.deinit();
         var worker_pool = workers.Pool.init(allocator);
         errdefer worker_pool.deinit();
+        var supervisor = lifecycle.Supervisor.init(allocator, io, config.data_dir, config.llm_instance_path);
+        errdefer supervisor.deinit();
         const server = try http_server.HttpServer.init(allocator, io, config);
         return .{
             .io = io,
@@ -46,6 +50,7 @@ pub const App = struct {
             .recipe_column = recipe_column,
             .system = system,
             .worker_pool = worker_pool,
+            .supervisor = supervisor,
             .shutdown = shutdown,
             .server = server,
         };
@@ -56,24 +61,34 @@ pub const App = struct {
         app.shutdown.deinit();
         app.system.deinit();
         app.worker_pool.deinit();
+        app.supervisor.deinit();
         app.database.deinit();
         app.config.deinit();
         app.* = undefined;
     }
 
     pub fn run(app: *App) !void {
-        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, app.recipe_column, &app.system, &app.worker_pool, &app.shutdown });
+        var supervisor_task = try app.io.concurrent(runSupervisor, .{&app.supervisor});
+        defer supervisor_task.cancel(app.io) catch |failure| switch (failure) {
+            error.Canceled => {},
+        };
+        var server_task = try app.io.concurrent(runServer, .{ &app.server, &app.database, app.recipe_column, &app.system, &app.worker_pool, &app.supervisor, &app.shutdown });
         defer server_task.cancel(app.io) catch |failure| switch (failure) {
             error.Canceled => {},
         };
         std.log.info("controller mode={t} node={s} listening on {s}:{d}", .{ app.config.mode, app.system.hostname, app.config.host, app.config.port });
         try app.shutdown.wait();
+        if (app.config.mode != .head) _ = app.supervisor.evict() catch |failure| std.log.err("engine shutdown failed: {t}", .{failure});
         std.log.info("controller shutdown complete", .{});
     }
 };
 
-fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *workers.Pool, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
-    server.run(database, recipe_column, system, worker_pool) catch |failure| switch (failure) {
+fn runSupervisor(supervisor: *lifecycle.Supervisor) Io.Cancelable!void {
+    return supervisor.run();
+}
+
+fn runServer(server: *http_server.HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *workers.Pool, supervisor: *lifecycle.Supervisor, shutdown: *shutdown_module.Shutdown) Io.Cancelable!void {
+    server.run(database, recipe_column, system, worker_pool, supervisor) catch |failure| switch (failure) {
         error.Canceled => return error.Canceled,
         else => std.log.err("controller server stopped: {t}", .{failure}),
     };
