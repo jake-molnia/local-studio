@@ -301,6 +301,10 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/events")) {
+        try serveControllerEvents(allocator, io, client, database, recipe_column, configuration, default_trust_remote_code, system, supervisor, runtime_cache, request);
+        return false;
+    }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances") and request.head.method == .GET) {
         const response = try supervisor.instancesPayload(client);
         defer allocator.free(response);
@@ -840,4 +844,71 @@ fn serveSse(io: Io, request: *http.Server.Request) !void {
         try body.flush();
         try io.sleep(.fromSeconds(1), .awake);
     }
+}
+
+fn serveControllerEvents(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, configuration: *const Config, default_trust_remote_code: bool, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, request: *http.Server.Request) !void {
+    var stream_buffer: [16 * 1024]u8 = undefined;
+    var body = try request.respondStreaming(&stream_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var sequence: u64 = 0;
+    var runtime_at: ?Io.Timestamp = null;
+    while (true) {
+        const status = try supervisor.statusPayload(database, recipe_column, configuration.inference_port, default_trust_remote_code);
+        defer allocator.free(status);
+        try writeControllerEvent(io, &body, "status", status, &sequence);
+
+        const gpu = try telemetry.gpuPayload(allocator, io, system);
+        defer allocator.free(gpu);
+        try writeControllerEvent(io, &body, "gpu", gpu, &sequence);
+
+        const current_metrics = try metrics.payload(allocator, io, client, database, recipe_column, configuration.inference_port, default_trust_remote_code, system, supervisor);
+        defer allocator.free(current_metrics);
+        try writeControllerEvent(io, &body, "metrics", current_metrics, &sequence);
+
+        const now = Io.Clock.awake.now(io);
+        if (runtime_at == null or runtime_at.?.durationTo(now).toSeconds() >= 30) {
+            const runtime = try system_service.runtimeSummaryPayload(allocator, io, configuration, system, supervisor, runtime_cache, database, recipe_column, default_trust_remote_code);
+            defer allocator.free(runtime);
+            try writeControllerEvent(io, &body, "runtime_summary", runtime, &sequence);
+            runtime_at = now;
+        }
+        try io.sleep(.fromSeconds(5), .awake);
+    }
+}
+
+fn writeControllerEvent(io: Io, body: anytype, event_type: []const u8, data: []const u8, sequence: *u64) !void {
+    var timestamp_buffer: [24]u8 = undefined;
+    const timestamp = eventTimestamp(io, &timestamp_buffer);
+    try body.writer.print("id: {d}\nevent: {s}\ndata: {{\"data\":", .{ sequence.*, event_type });
+    try body.writer.writeAll(data);
+    try body.writer.writeAll(",\"timestamp\":");
+    try std.json.Stringify.value(timestamp, .{}, &body.writer);
+    try body.writer.writeAll("}\n\n");
+    try body.writer.flush();
+    try body.flush();
+    sequence.* += 1;
+}
+
+fn eventTimestamp(io: Io, buffer: *[24]u8) []const u8 {
+    const seconds = Io.Clock.real.now(io).toSeconds();
+    const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(seconds, 0)) };
+    const year_day = epoch.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch.getDaySeconds();
+    return std.fmt.bufPrint(buffer, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.000Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+    }) catch unreachable;
 }

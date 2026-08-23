@@ -267,6 +267,51 @@ pub fn computeEnginesPayload(allocator: std.mem.Allocator, io: Io, config: *cons
     return try output.toOwnedSlice();
 }
 
+pub fn runtimeSummaryPayload(allocator: std.mem.Allocator, io: Io, config: *const config_module.Config, system: *const system_info.Snapshot, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, database: anytype, recipe_column: anytype, default_trust_remote_code: bool) ![]u8 {
+    const config_document = try configPayload(allocator, io, config, system, supervisor, runtime_cache);
+    defer allocator.free(config_document);
+    var parsed_config = std.json.parseFromSlice(std.json.Value, allocator, config_document, .{}) catch return error.InvalidSystemPayload;
+    defer parsed_config.deinit();
+    if (parsed_config.value != .object) return error.InvalidSystemPayload;
+    const runtime_value = parsed_config.value.object.get("runtime") orelse return error.InvalidSystemPayload;
+    const services_value = parsed_config.value.object.get("services") orelse return error.InvalidSystemPayload;
+    if (runtime_value != .object or services_value != .array) return error.InvalidSystemPayload;
+    const platform_value = runtime_value.object.get("platform") orelse return error.InvalidSystemPayload;
+    const gpu_monitoring_value = runtime_value.object.get("gpu_monitoring") orelse return error.InvalidSystemPayload;
+    const backends_value = runtime_value.object.get("backends") orelse return error.InvalidSystemPayload;
+
+    const status_document = try supervisor.statusPayload(database, recipe_column, config.inference_port, default_trust_remote_code);
+    defer allocator.free(status_document);
+    var parsed_status = std.json.parseFromSlice(std.json.Value, allocator, status_document, .{}) catch return error.InvalidStatusPayload;
+    defer parsed_status.deinit();
+    var holder: ?[]const u8 = null;
+    if (parsed_status.value == .object) {
+        if (parsed_status.value.object.get("process")) |process| if (process == .object) {
+            holder = optionalJsonString(process.object, "served_model_name") orelse if (optionalJsonString(process.object, "model_path")) |path| std.fs.path.basename(path) else "inference";
+        };
+    }
+    const Payload = struct {
+        platform: std.json.Value,
+        gpu_monitoring: std.json.Value,
+        backends: std.json.Value,
+        services: std.json.Value,
+        lease: struct {
+            holder: ?[]const u8,
+            since: ?u8 = null,
+        },
+    };
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try std.json.Stringify.value(Payload{
+        .platform = platform_value,
+        .gpu_monitoring = gpu_monitoring_value,
+        .backends = backends_value,
+        .services = services_value,
+        .lease = .{ .holder = holder },
+    }, .{}, &output.writer);
+    return try output.toOwnedSlice();
+}
+
 const Support = union(enum) {
     runtimes: []const []const u8,
     reason: []const u8,
@@ -351,4 +396,9 @@ fn unsignedField(object: std.json.ObjectMap, name: []const u8) ?u64 {
 fn boolField(object: std.json.ObjectMap, name: []const u8) bool {
     const value = object.get(name) orelse return false;
     return value == .bool and value.bool;
+}
+
+fn optionalJsonString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
+    const value = object.get(name) orelse return null;
+    return if (value == .string and value.string.len > 0) value.string else null;
 }
