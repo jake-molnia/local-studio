@@ -255,6 +255,26 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
         try request.respond(output.writer.buffered(), .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances") and request.head.method == .GET) {
+        const response = try supervisor.instancesPayload(client);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/stop")) {
+        const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/stop");
+        defer allocator.free(name);
+        const stopped = supervisor.stopNamed(name) catch |failure| return try respondLifecycleFailure(request, failure);
+        try request.respond(if (stopped) "{\"stopped\":true}" else "{\"stopped\":false}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/cancel")) {
+        const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/cancel");
+        defer allocator.free(name);
+        const cancelled = try supervisor.cancelNamed(name);
+        try request.respond(if (cancelled) "{\"cancelled\":true}" else "{\"cancelled\":false}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (mode != .head and std.mem.eql(u8, route.path, "/recipes") and request.head.method == .GET) {
         const response = try recipe_service.listPayload(allocator, io, database, recipe_column, llm_instance_path, default_trust_remote_code);
         defer allocator.free(response);

@@ -170,6 +170,37 @@ pub const Supervisor = struct {
         return false;
     }
 
+    pub fn instancesPayload(supervisor: *Supervisor, client: *http.Client) ![]u8 {
+        try supervisor.mutex.lock(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
+        const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return try supervisor.allocator.dupe(u8, "{\"instances\":[]}");
+        var record = record_value;
+        defer record.deinit();
+        const document = try instances.readDocument(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return try supervisor.allocator.dupe(u8, "{\"instances\":[]}");
+        defer supervisor.allocator.free(document);
+        const state: []const u8 = if (record.process == null)
+            "reserving"
+        else if (!processes.owns(supervisor.allocator, supervisor.io, &record))
+            "exited"
+        else if (try healthy(supervisor.allocator, supervisor.io, client, record.port, healthPath(record.engine)))
+            "ready"
+        else if (instances.timestampPassed(supervisor.io, record.ready_deadline_at))
+            "unhealthy"
+        else
+            "starting";
+        return try std.fmt.allocPrint(supervisor.allocator, "{{\"instances\":[{{\"record\":{s},\"state\":\"{s}\"}}]}}", .{ document, state });
+    }
+
+    pub fn stopNamed(supervisor: *Supervisor, name: []const u8) !bool {
+        if (!std.mem.eql(u8, name, "llm")) return false;
+        return supervisor.evict();
+    }
+
+    pub fn cancelNamed(supervisor: *Supervisor, name: []const u8) !bool {
+        if (!std.mem.eql(u8, name, "llm")) return false;
+        return supervisor.cancelLaunch();
+    }
+
     pub fn run(supervisor: *Supervisor) Io.Cancelable!void {
         while (true) {
             supervisor.superviseOnce() catch |failure| switch (failure) {
@@ -186,6 +217,10 @@ pub const Supervisor = struct {
         const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return;
         var record = record_value;
         defer record.deinit();
+        if (record.process == null) {
+            if (instances.timestampOlderThan(supervisor.io, record.started_at, 60)) try instances.dropLlm(supervisor.io, supervisor.instance_path);
+            return;
+        }
         if (!processes.owns(supervisor.allocator, supervisor.io, &record)) try instances.dropLlm(supervisor.io, supervisor.instance_path);
     }
 };
@@ -247,6 +282,10 @@ fn healthy(allocator: std.mem.Allocator, io: Io, client: *http.Client, port: u16
     }
 }
 
+fn healthPath(engine: []const u8) []const u8 {
+    return if (std.mem.eql(u8, engine, "mlx")) "/v1/models" else "/health";
+}
+
 fn healthTimeout(io: Io) Io.Cancelable!void {
     return io.sleep(.fromSeconds(3), .awake);
 }
@@ -271,7 +310,7 @@ fn fetchHealth(allocator: std.mem.Allocator, client: *http.Client, port: u16, pa
 fn portBindable(io: Io, port: u16) bool {
     for ([_][]const u8{ "127.0.0.1", "0.0.0.0" }) |host| {
         const address = std.Io.net.IpAddress.parse(host, port) catch return false;
-        var listener = address.listen(io, .{}) catch return false;
+        var listener = address.listen(io, .{ .reuse_address = true }) catch return false;
         listener.deinit(io);
     }
     return true;
