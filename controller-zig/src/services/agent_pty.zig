@@ -1,12 +1,77 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const config = @import("../config.zig");
+const sqlite = @import("../repository/sqlite.zig");
 const agent_projects = @import("agent_projects.zig");
+const harness_nodes = @import("harness_nodes.zig");
+const node_transport = @import("node_transport.zig");
 
 const Io = std.Io;
 const max_sessions = 64;
 const max_replay_bytes = 200_000;
 const max_input_bytes = 32_768;
+
+pub const RemoteId = struct {
+    node: []const u8,
+    session: []const u8,
+};
+
+pub fn splitRemoteId(id: []const u8) !RemoteId {
+    const separator = std.mem.findScalar(u8, id, '~') orelse return error.InvalidPtyId;
+    if (separator == 0 or separator + 1 >= id.len) return error.InvalidPtyId;
+    const result = RemoteId{ .node = id[0..separator], .session = id[separator + 1 ..] };
+    for (result.node) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return error.InvalidPtyId;
+    for (result.session) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return error.InvalidPtyId;
+    return result;
+}
+
+pub fn remoteTarget(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id: RemoteId) !harness_nodes.Target {
+    return (try harness_nodes.selectCapability(allocator, io, database, "terminal", id.node)) orelse error.TerminalNodeUnavailable;
+}
+
+pub fn openRemotePayload(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
+    var target = (try harness_nodes.selectCapability(allocator, io, database, "terminal", preferred_node)) orelse return error.TerminalNodeRequired;
+    defer target.deinit();
+    const response = node_transport.send(allocator, client, &target, "/internal/node/v1/terminal/pty/open", .POST, document) catch |failure| switch (failure) {
+        error.NodeRequestRejected => return error.TerminalNodeRejected,
+        else => return failure,
+    };
+    defer allocator.free(response);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch return error.InvalidPtyResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidPtyResponse;
+    const remote_id = requiredString(parsed.value.object, "id") orelse return error.InvalidPtyResponse;
+    const reused = parsed.value.object.get("reused");
+    if (reused == null or reused.? != .bool) return error.InvalidPtyResponse;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"id\":");
+    const public_id = try std.fmt.allocPrint(allocator, "{s}~{s}", .{ target.id, remote_id });
+    defer allocator.free(public_id);
+    try std.json.Stringify.value(public_id, .{}, &output.writer);
+    try output.writer.print(",\"reused\":{}}}", .{reused.?.bool});
+    return output.toOwnedSlice();
+}
+
+pub fn actionRemotePayload(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, database: *sqlite.Database, action: []const u8, document: []const u8) ![]u8 {
+    var parsed = try parseAction(allocator, document);
+    defer parsed.deinit();
+    const public_id = requiredString(parsed.value.object, "id") orelse return error.PtyIdRequired;
+    const remote = try splitRemoteId(public_id);
+    var target = try remoteTarget(allocator, io, database, remote);
+    defer target.deinit();
+    const id_value = parsed.value.object.getPtr("id") orelse return error.PtyIdRequired;
+    id_value.* = .{ .string = remote.session };
+    var rewritten: Io.Writer.Allocating = .init(allocator);
+    defer rewritten.deinit();
+    try std.json.Stringify.value(parsed.value, .{}, &rewritten.writer);
+    const path = try std.fmt.allocPrint(allocator, "/internal/node/v1/terminal/pty/{s}", .{action});
+    defer allocator.free(path);
+    return node_transport.send(allocator, client, &target, path, .POST, rewritten.writer.buffered()) catch |failure| switch (failure) {
+        error.NodeRequestRejected => error.TerminalNodeRejected,
+        else => failure,
+    };
+}
 
 const Session = struct {
     allocator: std.mem.Allocator,

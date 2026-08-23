@@ -1705,7 +1705,7 @@ async function afterPack(context) {
     ].join(`
   `));
   let controllerRoot = path.join(resourcesDir, "app", "controller"), controllerExecutable = path.join(controllerRoot, electronPlatformName === "win32" ? "local-studio-controller.exe" : "local-studio-controller");
-  if (!existsSync(controllerExecutable))
+  if (electronPlatformName !== "win32" && !existsSync(controllerExecutable))
     throw Error(`Packaged app is missing its Zig controller executable: ${controllerExecutable}`);
   let standaloneRoot = path.dirname(standaloneServer), missingRuntimeFile = [
     path.join(standaloneRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),

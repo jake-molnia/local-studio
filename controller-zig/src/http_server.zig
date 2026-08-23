@@ -422,21 +422,36 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal/pty/stream")) {
-        if (mode != .standalone) return respondTerminalFailure(request, error.TerminalNodeRequired);
         const id = try queryParameter(allocator, request.head.target, "id");
         defer if (id) |value| allocator.free(value);
-        pty.serveStream(id orelse return respondTerminalFailure(request, error.PtyIdRequired), request) catch return false;
+        const session_id = id orelse return respondTerminalFailure(request, error.PtyIdRequired);
+        if (mode == .standalone) {
+            pty.serveStream(session_id, request) catch return false;
+            return false;
+        }
+        const remote = agent_pty.splitRemoteId(session_id) catch |failure| return respondTerminalFailure(request, failure);
+        var target = agent_pty.remoteTarget(allocator, io, database, remote) catch |failure| return respondTerminalFailure(request, failure);
+        defer target.deinit();
+        var captured = try reverse_proxy.captureRequest(allocator, request);
+        defer captured.deinit();
+        allocator.free(captured.target);
+        captured.target = try std.fmt.allocPrint(allocator, "/internal/node/v1/terminal/pty/stream?id={s}", .{remote.session});
+        reverse_proxy.serveWorkerBuffered(allocator, client, target.address, target.api_key, target.id, "", &captured, request) catch return false;
         return false;
     }
     if (std.mem.startsWith(u8, route.path, "/api/agent/terminal/pty/")) {
-        if (mode != .standalone) return respondTerminalFailure(request, error.TerminalNodeRequired);
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = if (std.mem.endsWith(u8, route.path, "/open"))
+        const action = std.mem.trimStart(u8, route.path[std.mem.lastIndexOfScalar(u8, route.path, '/').? + 1 ..], "/");
+        const response = if (mode != .standalone)
+            if (std.mem.eql(u8, action, "open")) agent_pty.openRemotePayload(allocator, io, client, database, node_id, document) else agent_pty.actionRemotePayload(allocator, io, client, database, action, document)
+        else if (std.mem.eql(u8, action, "open"))
             pty.openPayload(document)
-        else if (std.mem.endsWith(u8, route.path, "/input"))
+        else if (std.mem.eql(u8, action, "input"))
             pty.inputPayload(document)
-        else if (std.mem.endsWith(u8, route.path, "/resize"))
+        else if (std.mem.eql(u8, action, "resize"))
             pty.resizePayload(document)
         else
             pty.closePayload(document);
@@ -667,6 +682,28 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             agent_terminal.resolveLocal(allocator, io, configuration, document)
         else
             agent_terminal.runLocal(allocator, io, configuration, cwd orelse return respondTerminalFailure(request, error.TerminalCwdRequired), document);
+        const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/terminal/pty/stream")) {
+        const id = try queryParameter(allocator, request.head.target, "id");
+        defer if (id) |value| allocator.free(value);
+        pty.serveStream(id orelse return respondTerminalFailure(request, error.PtyIdRequired), request) catch return false;
+        return false;
+    }
+    if (std.mem.startsWith(u8, route.path, "/internal/node/v1/terminal/pty/")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = if (std.mem.endsWith(u8, route.path, "/open"))
+            pty.openPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/input"))
+            pty.inputPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/resize"))
+            pty.resizePayload(document)
+        else
+            pty.closePayload(document);
         const payload = response catch |failure| return respondTerminalFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1820,11 +1857,12 @@ fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bo
 
 fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.InvalidTerminalPayload, error.TerminalCommandRequired, error.TerminalCommandTooLarge, error.TerminalCwdRequired, error.TerminalFromMustBeAbsolute, error.PreviousDirectoryUnavailable, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotDirectory, error.InvalidPtyPayload, error.PtyIdRequired, error.PtyInputRequired => .bad_request,
+        error.InvalidTerminalPayload, error.TerminalCommandRequired, error.TerminalCommandTooLarge, error.TerminalCwdRequired, error.TerminalFromMustBeAbsolute, error.PreviousDirectoryUnavailable, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotDirectory, error.InvalidPtyPayload, error.PtyIdRequired, error.InvalidPtyId, error.PtyInputRequired, error.InvalidPtyResponse => .bad_request,
         error.PtyInputTooLarge => .payload_too_large,
         error.ProjectPathNotFound => .not_found,
         error.ProjectPathOutsideRoots => .forbidden,
         error.TerminalNodeRequired, error.TerminalNodeRejected => .conflict,
+        error.TerminalNodeUnavailable => .service_unavailable,
         error.PtyUnavailable, error.PtyLimitReached => .service_unavailable,
         else => .internal_server_error,
     };
@@ -1842,10 +1880,13 @@ fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !boo
         error.TerminalNodeRejected => "The terminal node rejected the request",
         error.InvalidPtyPayload => "Invalid PTY payload",
         error.PtyIdRequired => "id is required",
+        error.InvalidPtyId => "invalid PTY id",
+        error.InvalidPtyResponse => "terminal node returned an invalid PTY response",
         error.PtyInputRequired => "id and data are required",
         error.PtyInputTooLarge => "input too large",
         error.PtyUnavailable => "PTY is unavailable on this platform",
         error.PtyLimitReached => "PTY session limit reached",
+        error.TerminalNodeUnavailable => "The terminal node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);

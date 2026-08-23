@@ -112,8 +112,15 @@ const ensureToolchain = async () => {
   }
 };
 
-await ensureToolchain();
 const arguments_ = process.argv.slice(2);
+if (arguments_[0] === "build-desktop") {
+  if (process.platform === "win32") {
+    console.log("Zig desktop controller packaging is not available on Windows yet");
+    process.exit(0);
+  }
+  arguments_[0] = "build";
+}
+await ensureToolchain();
 if (arguments_.length === 0) arguments_.push("version");
 const result = spawnSync(executable, arguments_, {
   cwd: join(projectRoot, "controller-zig"),

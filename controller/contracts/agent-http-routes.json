@@ -360,6 +360,36 @@
     },
     {
       "method": "POST",
+      "path": "/internal/node/v1/terminal/pty/open",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/terminal/pty/stream",
+      "ownership": "worker",
+      "streaming": "always"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/terminal/pty/input",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/terminal/pty/resize",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/terminal/pty/close",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
       "path": "/internal/harness/v1/turn",
       "ownership": "worker",
       "streaming": "never"
