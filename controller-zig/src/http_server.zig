@@ -367,6 +367,8 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/grants")) {
         const node_id = try queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
+        const probe_id = try queryParameter(allocator, request.head.target, "connector");
+        defer if (probe_id) |value| allocator.free(value);
         const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
@@ -374,7 +376,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
-            .GET => agent_connectors.grantsPayload(allocator, io, mode, client, database, node_id),
+            .GET => agent_connectors.grantsPayload(allocator, io, mode, configuration, client, database, node_id, probe_id),
             .PUT => agent_connectors.putGrantPayload(allocator, io, mode, client, database, node_id, document orelse return false),
             .DELETE => agent_connectors.deleteGrantPayload(allocator, io, mode, client, database, node_id, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
             else => unreachable,
@@ -516,6 +518,8 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-grants")) {
+        const probe_id = try queryParameter(allocator, request.head.target, "connector");
+        defer if (probe_id) |value| allocator.free(value);
         const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
@@ -523,7 +527,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
-            .GET => agent_connectors.grantsLocal(allocator, io, database),
+            .GET => agent_connectors.grantsLocal(allocator, io, configuration, client, database, probe_id),
             .PUT => agent_connectors.putGrantLocal(allocator, io, database, document orelse return false),
             .DELETE => agent_connectors.deleteGrantLocal(allocator, io, database, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
             else => unreachable,
@@ -539,9 +543,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const response = if (request.head.method == .GET)
-            agent_connectors.inventoryLocal(allocator, io, configuration, database, model_id orelse "")
+            agent_connectors.inventoryLocal(allocator, io, configuration, client, database, model_id orelse "")
         else
-            agent_connectors.callLocal(allocator, io, configuration, database, document orelse return false);
+            agent_connectors.callLocal(allocator, io, configuration, client, database, document orelse return false);
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -550,7 +554,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-test")) {
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = agent_connectors.testLocal(allocator, io, configuration, database, document) catch |failure| return respondConnectorFailure(request, failure);
+        const response = agent_connectors.testLocal(allocator, io, configuration, client, database, document) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
