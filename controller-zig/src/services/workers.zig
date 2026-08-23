@@ -10,14 +10,14 @@ const probe_timeout = Io.Duration.fromSeconds(3);
 const max_parallel_probes = 16;
 const max_probe_response_bytes = 4 * 1024 * 1024;
 
-const Target = struct {
+pub const Target = struct {
     allocator: std.mem.Allocator,
     id: []u8,
     name: []u8,
     address: []u8,
     api_key: []u8,
 
-    fn deinit(target: *Target) void {
+    pub fn deinit(target: *Target) void {
         target.allocator.free(target.id);
         target.allocator.free(target.name);
         target.allocator.free(target.address);
@@ -29,9 +29,21 @@ const Target = struct {
 const TargetList = struct {
     allocator: std.mem.Allocator,
     storage: []Target,
+    len: usize,
+
+    fn items(targets: *TargetList) []Target {
+        return targets.storage[0..targets.len];
+    }
+
+    fn take(targets: *TargetList, index: usize) Target {
+        const target = targets.storage[index];
+        std.mem.copyForwards(Target, targets.storage[index .. targets.len - 1], targets.storage[index + 1 .. targets.len]);
+        targets.len -= 1;
+        return target;
+    }
 
     fn deinit(targets: *TargetList) void {
-        for (targets.storage) |*target| target.deinit();
+        for (targets.storage[0..targets.len]) |*target| target.deinit();
         targets.allocator.free(targets.storage);
         targets.* = undefined;
     }
@@ -65,16 +77,13 @@ const FetchResponse = struct {
 };
 
 pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database) ![]u8 {
-    try database.lock(io);
-    var targets = targetsFromRigs(allocator, database) catch |failure| {
-        database.unlock(io);
+    var targets = loadTargets(allocator, io, database) catch |failure| {
         std.log.warn("could not load Worker configuration: {t}", .{failure});
         return try emptyPayload(allocator, mode);
     };
-    database.unlock(io);
     defer targets.deinit();
 
-    const results = try allocator.alloc(ProbeResult, targets.storage.len);
+    const results = try allocator.alloc(ProbeResult, targets.len);
     defer allocator.free(results);
     for (results) |*result| result.* = .{ .allocator = allocator };
     defer for (results) |*result| result.deinit();
@@ -82,9 +91,9 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
     var group: Io.Group = .init;
     defer group.cancel(io);
     var start: usize = 0;
-    while (start < targets.storage.len) {
-        const end = @min(start + max_parallel_probes, targets.storage.len);
-        for (targets.storage[start..end], results[start..end]) |*target, *result| {
+    while (start < targets.len) {
+        const end = @min(start + max_parallel_probes, targets.len);
+        for (targets.items()[start..end], results[start..end]) |*target, *result| {
             group.concurrent(io, probeInto, .{ allocator, io, client, target, result }) catch probeInto(allocator, io, client, target, result);
         }
         try group.await(io);
@@ -94,7 +103,7 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.print("{{\"mode\":\"{t}\",\"workers\":[", .{mode});
-    for (targets.storage, results, 0..) |target, result, index| {
+    for (targets.items(), results, 0..) |target, result, index| {
         if (index > 0) try output.writer.writeByte(',');
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(target.id, .{}, &output.writer);
@@ -116,8 +125,23 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: 
     return try output.toOwnedSlice();
 }
 
+pub fn findTarget(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, worker_id: []const u8) !?Target {
+    var targets = try loadTargets(allocator, io, database);
+    defer targets.deinit();
+    for (targets.items(), 0..) |target, index| {
+        if (std.mem.eql(u8, target.id, worker_id)) return targets.take(index);
+    }
+    return null;
+}
+
 fn emptyPayload(allocator: std.mem.Allocator, mode: config.Mode) ![]u8 {
     return try std.fmt.allocPrint(allocator, "{{\"mode\":\"{t}\",\"workers\":[]}}", .{mode});
+}
+
+fn loadTargets(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !TargetList {
+    try database.lock(io);
+    defer database.unlock(io);
+    return try targetsFromRigs(allocator, database);
 }
 
 fn targetsFromRigs(allocator: std.mem.Allocator, database: *sqlite.Database) !TargetList {
@@ -153,7 +177,8 @@ fn targetsFromRigs(allocator: std.mem.Allocator, database: *sqlite.Database) !Ta
             seen.putAssumeCapacityNoClobber(target.id, {});
         }
     }
-    return .{ .allocator = allocator, .storage = try targets.toOwnedSlice(allocator) };
+    const storage = try targets.toOwnedSlice(allocator);
+    return .{ .allocator = allocator, .storage = storage, .len = storage.len };
 }
 
 fn makeTarget(allocator: std.mem.Allocator, database: *sqlite.Database, id: []const u8, name: []const u8, address: []const u8) !Target {

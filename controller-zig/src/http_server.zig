@@ -126,8 +126,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     switch (topology.disposition(mode, route.ownership)) {
         .local => {},
         .proxy => {
-            try respondPendingWorkerProxy(request);
-            return request.head.keep_alive;
+            return try serveWorkerProxy(allocator, io, client, database, request);
         },
         .reject => {
             try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -184,32 +183,45 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     return request.head.keep_alive;
 }
 
-fn respondPendingWorkerProxy(request: *http.Server.Request) !void {
+fn serveWorkerProxy(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, request: *http.Server.Request) !bool {
     if (requestHeader(request, "X-Local-Studio-Federation-Hop") != null) {
         try request.respond("{\"detail\":\"Federation loop rejected\"}", .{
             .status = .loop_detected,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return request.head.keep_alive;
     }
     const worker_id = requestHeader(request, "X-Local-Studio-Worker-Id") orelse {
         try request.respond("{\"detail\":\"Select a Worker before using this controller endpoint\"}", .{
             .status = .conflict,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return request.head.keep_alive;
     };
-    if (std.mem.trim(u8, worker_id, " \t").len == 0) {
+    const normalized_worker_id = std.mem.trim(u8, worker_id, " \t");
+    if (normalized_worker_id.len == 0) {
         try request.respond("{\"detail\":\"Select a Worker before using this controller endpoint\"}", .{
             .status = .conflict,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return request.head.keep_alive;
     }
-    try request.respond("{\"detail\":\"Selected Worker was not found\"}", .{
-        .status = .not_found,
-        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
-    });
+    var target = worker_service.findTarget(allocator, io, database, normalized_worker_id) catch {
+        try request.respond("{\"detail\":\"Worker configuration unavailable\"}", .{
+            .status = .internal_server_error,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    } orelse {
+        try request.respond("{\"detail\":\"Selected Worker was not found\"}", .{
+            .status = .not_found,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    };
+    defer target.deinit();
+    try reverse_proxy.serveWorker(allocator, client, target.address, target.api_key, target.id, request);
+    return false;
 }
 
 fn requestHeader(request: *const http.Server.Request, expected_name: []const u8) ?[]const u8 {

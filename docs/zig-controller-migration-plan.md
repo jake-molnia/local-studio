@@ -45,7 +45,7 @@ Completed foundation evidence:
 - Invalid and oversized request heads have explicit 400 and 431 response paths.
 - Connection tasks are capped at 256; a live 257th concurrent connection received 503 and capacity recovered after the held connections closed.
 - Route disposition is explicit for every mode: Head handles shared and Head routes locally, proxies proxied routes, and rejects Worker routes; Worker handles shared, Worker, and proxied routes locally while rejecting Head routes; Standalone handles every route locally.
-- Head proxy disposition rejects federation loops, requires a selected Worker, and returns the existing not-found response until the production Worker registry is connected.
+- Head proxy disposition rejects federation loops, requires a selected Worker, resolves that Worker from the production rig registry, and preserves the existing 409, 404, 502, and 508 failure behavior.
 - Application-owned platform discovery captures hostname, operating system, CPU topology, total memory, and Apple Silicon identity behind a Zig boundary shared by Worker and Standalone modes.
 - The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
 - A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
@@ -55,6 +55,7 @@ Completed foundation evidence:
 - `GET /studio/rigs` is production-backed in Head, Worker, and Standalone modes. It seeds the default rig, refreshes detected local-node fields, preserves unknown rig and node fields, skips malformed JSON, and persists data that Bun reopens successfully.
 - Zig initializes and reads Bun's existing `rig_node_credentials` table without returning API keys to clients. Head derives deduplicated Workers from rig nodes, normalizes their HTTP origins once, and attaches credentials only to federation requests.
 - Head `GET /studio/workers` probes model and hardware contracts in parallel with a 16-Worker concurrency ceiling, a three-second deadline per request, and a 4 MiB response limit. Live acceptance covered an authenticated healthy Worker, a hanging Worker, duplicate IDs, concurrent rig reads, secret non-disclosure, and clean shutdown.
+- Head forwards selected-Worker management requests with streaming bodies and responses, replaces client credentials with the stored Worker key, adds the federation-hop marker, and returns the selected Worker response header. Live acceptance covered exact query forwarding, a 2 MiB request body, SSE, spoofed-header replacement, credential isolation, and unavailable-Worker behavior.
 - Shared SQLite web access is serialized with a cancellation-aware mutex, while statement and transaction lifetime counters are atomic.
 - The compatibility route registry is mechanically generated from all 94 unique manifest routes and matches exact paths and named path segments.
 - The reverse-proxy spike forwards methods, paths, queries, end-to-end headers, and request bodies while removing framing and hop-by-hop headers in both directions.
@@ -65,7 +66,7 @@ Completed foundation evidence:
 - An upstream that failed after response headers were flushed did not retry, returned a truncated response, and left the controller healthy.
 - SIGTERM during an active proxy stream canceled the work and exited the controller with status zero.
 
-The migration is not production-ready. Selected-Worker management forwarding, inference routing, full SQLite table parity, runtime process supervision, and shutdown with child processes still require live proof.
+The migration is not production-ready. Inference routing, full SQLite table parity, runtime process supervision, desktop cutover, and shutdown with child processes still require live proof.
 
 ## Compatibility ledger
 

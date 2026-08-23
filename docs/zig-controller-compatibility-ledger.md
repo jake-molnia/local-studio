@@ -268,3 +268,4 @@ Each correction needs an explicit compatibility ledger update and live frontend 
 
 - `GET /studio/rigs` is `shared`. Head and Standalone use it for the local rig view, and Worker must serve it so Head hardware probes can resolve the Worker's detected local node. Rig mutations remain Head-owned and locally available in Standalone.
 - Head `GET /studio/workers` preserves the existing payload and plaintext credential-table compatibility while enforcing credential non-disclosure, bounded probe concurrency, per-request deadlines, and bounded response bodies in Zig.
+- Head selected-Worker forwarding uses the generated `proxied` ownership set, strips client credentials, attaches the stored Worker credential and federation-hop marker, replaces any Worker-supplied target header, and preserves streaming response commitment.

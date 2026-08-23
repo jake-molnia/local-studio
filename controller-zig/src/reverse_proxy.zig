@@ -2,6 +2,12 @@ const std = @import("std");
 
 const http = std.http;
 
+const Forwarding = struct {
+    extra_request_headers: []const http.Header = &.{},
+    strip_credentials: bool = false,
+    worker_id: ?[]const u8 = null,
+};
+
 pub const ResponseCommitment = enum {
     pending,
     committed,
@@ -24,10 +30,10 @@ const RequestBodyState = enum {
 pub fn serve(client: *http.Client, primary: []const u8, fallback: ?[]const u8, request: *http.Server.Request) !void {
     var commitment: ResponseCommitment = .pending;
     var request_body_state: RequestBodyState = .untouched;
-    proxyAttempt(client, primary, request, &commitment, &request_body_state) catch |primary_failure| {
+    proxyAttempt(client, primary, request, &commitment, &request_body_state, .{}) catch |primary_failure| {
         if (request_body_state == .streaming) return primary_failure;
         if (!request.head.method.requestHasBody() and fallback != null and commitment.canRetry()) {
-            proxyAttempt(client, fallback.?, request, &commitment, &request_body_state) catch |fallback_failure| {
+            proxyAttempt(client, fallback.?, request, &commitment, &request_body_state, .{}) catch |fallback_failure| {
                 if (!commitment.canRetry()) return fallback_failure;
                 try respondBadGateway(request);
             };
@@ -38,10 +44,32 @@ pub fn serve(client: *http.Client, primary: []const u8, fallback: ?[]const u8, r
     };
 }
 
-fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState) !void {
+pub fn serveWorker(allocator: std.mem.Allocator, client: *http.Client, upstream: []const u8, api_key: []const u8, worker_id: []const u8, request: *http.Server.Request) !void {
+    const authorization = if (api_key.len > 0) try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_key}) else null;
+    defer if (authorization) |value| allocator.free(value);
+    var headers: [2]http.Header = undefined;
+    headers[0] = .{ .name = "X-Local-Studio-Federation-Hop", .value = "head" };
+    var header_count: usize = 1;
+    if (authorization) |value| {
+        headers[1] = .{ .name = "Authorization", .value = value };
+        header_count += 1;
+    }
+    var commitment: ResponseCommitment = .pending;
+    var request_body_state: RequestBodyState = .untouched;
+    proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
+        .extra_request_headers = headers[0..header_count],
+        .strip_credentials = true,
+        .worker_id = worker_id,
+    }) catch |failure| {
+        if (!commitment.canRetry()) return failure;
+        try respondBadGateway(request);
+    };
+}
+
+fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Server.Request, commitment: *ResponseCommitment, request_body_state: *RequestBodyState, forwarding: Forwarding) !void {
     const uri = try uriForTarget(upstream, request.head.target);
     var request_headers: [64]http.Header = undefined;
-    const request_header_count = try collectRequestHeaders(request, &request_headers);
+    const request_header_count = try collectRequestHeaders(request, &request_headers, forwarding);
     var upstream_request = try client.request(request.head.method, uri, .{
         .redirect_behavior = .unhandled,
         .keep_alive = false,
@@ -74,7 +102,7 @@ fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Serve
     var redirect_buffer: [8 * 1024]u8 = undefined;
     var upstream_response = try upstream_request.receiveHead(&redirect_buffer);
     var response_headers: [64]http.Header = undefined;
-    const response_header_count = try collectResponseHeaders(upstream_response.head, &response_headers);
+    const response_header_count = try collectResponseHeaders(upstream_response.head, &response_headers, forwarding.worker_id);
 
     var response_write_buffer: [16 * 1024]u8 = undefined;
     commitment.commit();
@@ -106,11 +134,18 @@ fn uriForTarget(upstream: []const u8, target: []const u8) !std.Uri {
     return uri;
 }
 
-fn collectRequestHeaders(request: *const http.Server.Request, output: *[64]http.Header) !usize {
+fn collectRequestHeaders(request: *const http.Server.Request, output: *[64]http.Header, forwarding: Forwarding) !usize {
     var count: usize = 0;
     var iterator = request.iterateHeaders();
     while (iterator.next()) |header| {
         if (isFramingOrHopByHop(header.name) or connectionNominatesRequestHeader(request, header.name)) continue;
+        if (forwarding.strip_credentials and (std.ascii.eqlIgnoreCase(header.name, "authorization") or std.ascii.eqlIgnoreCase(header.name, "x-api-key"))) continue;
+        if (replacedByExtraHeader(header.name, forwarding.extra_request_headers)) continue;
+        if (count == output.len) return error.TooManyForwardedHeaders;
+        output[count] = header;
+        count += 1;
+    }
+    for (forwarding.extra_request_headers) |header| {
         if (count == output.len) return error.TooManyForwardedHeaders;
         output[count] = header;
         count += 1;
@@ -118,16 +153,27 @@ fn collectRequestHeaders(request: *const http.Server.Request, output: *[64]http.
     return count;
 }
 
-fn collectResponseHeaders(head: http.Client.Response.Head, output: *[64]http.Header) !usize {
+fn collectResponseHeaders(head: http.Client.Response.Head, output: *[64]http.Header, worker_id: ?[]const u8) !usize {
     var count: usize = 0;
     var iterator = head.iterateHeaders();
     while (iterator.next()) |header| {
         if (isFramingOrHopByHop(header.name) or connectionNominatesResponseHeader(head, header.name)) continue;
+        if (worker_id != null and std.ascii.eqlIgnoreCase(header.name, "x-local-studio-worker-id")) continue;
         if (count == output.len) return error.TooManyForwardedHeaders;
         output[count] = header;
         count += 1;
     }
+    if (worker_id) |value| {
+        if (count == output.len) return error.TooManyForwardedHeaders;
+        output[count] = .{ .name = "X-Local-Studio-Worker-Id", .value = value };
+        count += 1;
+    }
     return count;
+}
+
+fn replacedByExtraHeader(name: []const u8, extra_headers: []const http.Header) bool {
+    for (extra_headers) |header| if (std.ascii.eqlIgnoreCase(name, header.name)) return true;
+    return false;
 }
 
 fn connectionNominatesRequestHeader(request: *const http.Server.Request, name: []const u8) bool {
