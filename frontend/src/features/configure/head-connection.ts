@@ -33,14 +33,15 @@ function requireHeadUrl(value: string): string {
   }
 }
 
-const connectHeadEffect = (input: { name: string; url: string }) =>
+const connectHeadEffect = (input: { name: string; url: string; apiKey?: string }) =>
   Effect.gen(function* () {
     const url = requireHeadUrl(input.url);
+    const apiKey = input.apiKey?.trim() ?? "";
     const probe = createApiClient({
       baseUrl: "/api/proxy",
       useProxy: true,
       backendUrlOverride: url,
-      apiKeyOverride: "",
+      apiKeyOverride: apiKey,
     });
 
     const workerPayload = yield* Effect.tryPromise({
@@ -55,11 +56,29 @@ const connectHeadEffect = (input: { name: string; url: string }) =>
     const controllers = loadSavedControllers().filter(
       (controller) => normalizeControllerUrl(controller.url) !== url,
     );
-    saveSavedControllers([...controllers, { url, name: input.name.trim() || "Studio Head" }]);
-    setHeadConnection({ name: input.name.trim() || "Studio Head", url });
+    const name = input.name.trim() || "Studio Head";
+    saveSavedControllers([...controllers, { url, name, ...(apiKey ? { apiKey } : {}) }]);
+    const persisted = yield* Effect.tryPromise({
+      try: () =>
+        fetch("/api/proxy/api/agent/head-connection", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, url, apiKey }),
+        }),
+      catch: () => new Error("Could not persist the Head connection on this desktop"),
+    });
+    if (!persisted.ok) {
+      return yield* Effect.fail(
+        new Error("The Head is reachable, but this desktop could not save the connection"),
+      );
+    }
+    setHeadConnection({ name, url });
     scheduleDurableUiPreferencesSave();
     return url;
   });
 
-export const connectHead = (input: { name: string; url: string }): Promise<string> =>
-  Effect.runPromise(connectHeadEffect(input));
+export const connectHead = (input: {
+  name: string;
+  url: string;
+  apiKey?: string;
+}): Promise<string> => Effect.runPromise(connectHeadEffect(input));

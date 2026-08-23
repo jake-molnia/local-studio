@@ -346,8 +346,10 @@ export function NodeFormModal({
               />
             </FormField>
           )}
-          {detected || connectingHead ? null : (
-            <FormField label="Controller API key (optional)">
+          {detected ? null : (
+            <FormField
+              label={connectingHead ? "Head API key (optional)" : "Controller API key (optional)"}
+            >
               <Input
                 type="password"
                 value={form.api_key}
