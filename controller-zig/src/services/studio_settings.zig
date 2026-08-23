@@ -32,6 +32,14 @@ pub const State = struct {
     pub fn unlockFiles(state: *State, io: std.Io) void {
         state.files_mutex.unlock(io);
     }
+
+    pub fn lockSettings(state: *State, io: std.Io) !void {
+        try state.mutex.lock(io);
+    }
+
+    pub fn unlockSettings(state: *State, io: std.Io) void {
+        state.mutex.unlock(io);
+    }
 };
 
 pub fn payload(allocator: std.mem.Allocator, io: std.Io, configuration: *const config_module.Config, state: *State, database: *sqlite.Database) ![]u8 {

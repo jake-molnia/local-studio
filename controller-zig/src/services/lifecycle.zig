@@ -258,6 +258,16 @@ pub const Supervisor = struct {
         return processes.owns(supervisor.allocator, supervisor.io, &record);
     }
 
+    pub fn runningEngine(supervisor: *Supervisor, allocator: std.mem.Allocator) !?[]u8 {
+        try supervisor.mutex.lock(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
+        const record_value = try instances.readLlm(supervisor.allocator, supervisor.io, supervisor.instance_path) orelse return null;
+        var record = record_value;
+        defer record.deinit();
+        if (!processes.owns(supervisor.allocator, supervisor.io, &record)) return null;
+        return @as(?[]u8, try allocator.dupe(u8, record.engine));
+    }
+
     pub fn run(supervisor: *Supervisor) Io.Cancelable!void {
         while (true) {
             supervisor.superviseOnce() catch |failure| switch (failure) {

@@ -265,6 +265,25 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/llamacpp/config")) {
         return serveRuntimeConfigHelp(allocator, io, configuration, .llamacpp, request);
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/targets") and request.head.method == .GET) {
+        const response = try runtime_routes.targetsPayload(allocator, io, configuration, system, runtime_cache, supervisor);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/targets/:targetId/select")) {
+        const target_id = try pathParameterBetween(allocator, request.head.target, "/runtime/targets/", "/select");
+        defer allocator.free(target_id);
+        try studio.lockSettings(io);
+        defer studio.unlockSettings(io);
+        const response = try runtime_routes.selectTargetPayload(allocator, io, configuration, system, runtime_cache, supervisor, target_id) orelse {
+            try request.respond("{\"detail\":\"Runtime target not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
         defer allocator.free(response);
