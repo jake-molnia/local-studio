@@ -149,6 +149,41 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     return output.toOwnedSlice();
 }
 
+pub fn runScheduler(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) Io.Cancelable!void {
+    while (true) {
+        runDue(allocator, io, mode, client, database, harness) catch |failure| std.log.err("automation scheduler pass failed: {t}", .{failure});
+        try io.sleep(.fromSeconds(30), .awake);
+    }
+}
+
+fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) !void {
+    var now_buffer: [24]u8 = undefined;
+    const now = formatTimestampAt(io, 0, &now_buffer);
+    try database.lock(io);
+    var due = repository.due(allocator, database, now) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
+    database.unlock(io);
+    defer due.deinit();
+    for (due.documents) |document| {
+        var parsed = parseObject(allocator, document) catch |failure| {
+            std.log.err("invalid due automation: {t}", .{failure});
+            continue;
+        };
+        defer parsed.deinit();
+        const automation_id = requiredString(parsed.value.object, "id") orelse {
+            std.log.err("due automation is missing id", .{});
+            continue;
+        };
+        const response = runPayload(allocator, io, mode, client, database, harness, automation_id) catch |failure| {
+            std.log.err("automation {s} dispatch failed: {t}", .{ automation_id, failure });
+            continue;
+        };
+        allocator.free(response);
+    }
+}
+
 fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, cwd: []const u8, native_session: ?[]const u8, project_id: ?[]const u8, failure: ?[]const u8) ![]u8 {
     const arena = automation.arena.allocator();
     var run: std.json.ObjectMap = .empty;
