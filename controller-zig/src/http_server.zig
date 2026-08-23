@@ -44,6 +44,7 @@ const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
+const agent_goals = @import("services/agent_goals.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -425,6 +426,23 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else
             agent_terminal.runPayload(allocator, io, mode, configuration, client, database, node_id, cwd orelse return respondTerminalFailure(request, error.TerminalCwdRequired), document);
         const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/goal")) {
+        const session_id = try queryParameter(allocator, request.head.target, "piSessionId");
+        defer if (session_id) |value| allocator.free(value);
+        const id = session_id orelse return respondGoalFailure(request, error.SessionIdRequired);
+        const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => agent_goals.getPayload(allocator, io, database, id),
+            .PUT => agent_goals.putPayload(allocator, io, database, id, document orelse return false),
+            .DELETE => agent_goals.deletePayload(allocator, io, database, id),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondGoalFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1756,6 +1774,22 @@ fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !boo
         error.ProjectPathOutsideRoots => "cwd is not an allowed workspace",
         error.TerminalNodeRequired => "No enrolled node offers terminal execution",
         error.TerminalNodeRejected => "The terminal node rejected the request",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondGoalFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.SessionIdRequired, error.InvalidSessionId, error.InvalidGoalPayload, error.InvalidGoalStatus, error.InvalidGoalBudget => .bad_request,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.SessionIdRequired => "piSessionId is required",
+        error.InvalidSessionId => "Invalid piSessionId",
+        error.InvalidGoalPayload => "Invalid goal payload",
+        error.InvalidGoalStatus => "Invalid goal status",
+        error.InvalidGoalBudget => "turnBudget must be positive or null",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
