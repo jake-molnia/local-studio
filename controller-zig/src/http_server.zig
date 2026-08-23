@@ -3,10 +3,10 @@ const config_module = @import("config.zig");
 const shutdown = @import("shutdown.zig");
 const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
+const topology = @import("topology.zig");
 
 const Config = config_module.Config;
 const Mode = config_module.Mode;
-const Ownership = route_registry.Ownership;
 const Io = std.Io;
 const net = Io.net;
 const http = std.http;
@@ -117,9 +117,19 @@ fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]con
         return request.head.keep_alive;
     };
 
-    if (!ownershipAllows(route.ownership, mode)) {
-        try request.respond("{\"detail\":\"Not Found\"}", .{ .status = .not_found });
-        return request.head.keep_alive;
+    switch (topology.disposition(mode, route.ownership)) {
+        .local => {},
+        .proxy => {
+            try respondPendingWorkerProxy(request);
+            return request.head.keep_alive;
+        },
+        .reject => {
+            try request.respond("{\"detail\":\"Not Found\"}", .{
+                .status = .not_found,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return request.head.keep_alive;
+        },
     }
 
     if (std.mem.eql(u8, route.path, "/health")) {
@@ -152,13 +162,40 @@ fn serveRequest(io: Io, mode: Mode, client: *http.Client, spike_upstream: ?[]con
     return request.head.keep_alive;
 }
 
-fn ownershipAllows(ownership: Ownership, mode: Mode) bool {
-    return switch (ownership) {
-        .shared => true,
-        .head => mode != .worker,
-        .worker => mode != .head,
-        .proxied => true,
+fn respondPendingWorkerProxy(request: *http.Server.Request) !void {
+    if (requestHeader(request, "X-Local-Studio-Federation-Hop") != null) {
+        try request.respond("{\"detail\":\"Federation loop rejected\"}", .{
+            .status = .loop_detected,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+    const worker_id = requestHeader(request, "X-Local-Studio-Worker-Id") orelse {
+        try request.respond("{\"detail\":\"Select a Worker before using this controller endpoint\"}", .{
+            .status = .conflict,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
     };
+    if (std.mem.trim(u8, worker_id, " \t").len == 0) {
+        try request.respond("{\"detail\":\"Select a Worker before using this controller endpoint\"}", .{
+            .status = .conflict,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return;
+    }
+    try request.respond("{\"detail\":\"Selected Worker was not found\"}", .{
+        .status = .not_found,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+}
+
+fn requestHeader(request: *const http.Server.Request, expected_name: []const u8) ?[]const u8 {
+    var iterator = request.iterateHeaders();
+    while (iterator.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.name, expected_name)) return header.value;
+    }
+    return null;
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {
