@@ -37,6 +37,7 @@ const codex_gateway = @import("services/codex_gateway.zig");
 const harness_runtime = @import("services/harness_runtime.zig");
 const agent_coordinator = @import("services/agent_coordinator.zig");
 const agent_sessions = @import("services/agent_sessions.zig");
+const automations = @import("services/automations.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -232,6 +233,42 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/api/agent/setup-checks")) {
         const response = try agent_coordinator.setupPayload(allocator, io, mode, database, harness);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/automations")) {
+        const response = if (request.head.method == .GET)
+            automations.listPayload(allocator, io, database)
+        else create: {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            break :create automations.createPayload(allocator, io, database, document);
+        };
+        const payload = response catch |failure| return respondAutomationFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/automations/:id")) {
+        const automation_id = try pathParameter(allocator, request.head.target, "/api/agent/automations/");
+        defer allocator.free(automation_id);
+        const response = if (request.head.method == .DELETE)
+            automations.deletePayload(allocator, io, database, automation_id)
+        else patch: {
+            const document = try readBoundedJsonBody(allocator, request) orelse return false;
+            defer allocator.free(document);
+            break :patch automations.patchPayload(allocator, io, database, automation_id, document);
+        };
+        const payload = response catch |failure| return respondAutomationFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/automations/:id/run")) {
+        const automation_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/automations/", "/run");
+        defer allocator.free(automation_id);
+        const response = automations.runPayload(allocator, io, mode, client, database, harness, automation_id) catch |failure| return respondAutomationFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1382,6 +1419,28 @@ fn respondRigFailure(request: *http.Server.Request, failure: anyerror) !bool {
         error.InvalidNodeRole => "Invalid node role",
         error.InvalidRigPayload, error.InvalidNodePayload => "Invalid JSON body",
         error.InvalidRigRecord => "Stored rig data is invalid",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondAutomationFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.AutomationNotFound => .not_found,
+        error.InvalidAutomationPayload, error.InvalidAutomationRecord, error.InvalidAutomationSchedule, error.InvalidAutomationStatus, error.AutomationNameRequired, error.AutomationPromptRequired, error.AutomationModelRequired, error.AutomationCwdRequired, error.AutomationScheduleRequired => .bad_request,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.AutomationNotFound => "Automation not found",
+        error.AutomationNameRequired => "name is required",
+        error.AutomationPromptRequired => "prompt is required",
+        error.AutomationModelRequired => "modelId is required",
+        error.AutomationCwdRequired => "cwd is required",
+        error.AutomationScheduleRequired => "schedule is required",
+        error.InvalidAutomationSchedule => "Invalid automation schedule",
+        error.InvalidAutomationStatus => "Invalid automation status",
+        error.InvalidAutomationPayload => "Invalid JSON body",
+        error.InvalidAutomationRecord => "Stored automation data is invalid",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);

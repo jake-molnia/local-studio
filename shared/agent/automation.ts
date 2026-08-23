@@ -40,6 +40,9 @@ export const AutomationSchema = Schema.Struct({
    * records written before this field existed) means each run starts fresh.
    */
   targetSessionId: Schema.optional(Schema.NullOr(Schema.String)),
+  nodeId: Schema.optional(Schema.NullOr(Schema.String)),
+  projectId: Schema.optional(Schema.NullOr(Schema.String)),
+  harness: Schema.optional(Schema.String),
   schedule: AutomationScheduleSchema,
   status: Schema.Literals(["active", "paused"]),
   nextRunAt: Schema.NullOr(Schema.String),

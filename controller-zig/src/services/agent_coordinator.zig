@@ -79,12 +79,13 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
     const native_session_id = optionalString(object, "piSessionId");
+    const requested_node = optionalString(object, "nodeId");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
     var existing = try lockedGet(allocator, io, database, session_id);
     defer if (existing) |*session| session.deinit();
-    const preferred_node = if (existing) |session| session.node_id else null;
+    const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head) try harness_nodes.select(allocator, io, database, "pi", preferred_node) else null;
     defer if (target) |*node| node.deinit();
     if (mode == .head and target == null) return if (preferred_node != null) error.AssignedHarnessUnavailable else error.HarnessNodeRequired;
