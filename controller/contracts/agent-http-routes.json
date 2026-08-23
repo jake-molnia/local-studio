@@ -113,6 +113,42 @@
       "streaming": "never"
     },
     {
+      "method": "GET",
+      "path": "/api/agent/projects",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/projects",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/projects",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/projects",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/projects",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "DELETE",
+      "path": "/internal/node/v1/projects",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
       "method": "POST",
       "path": "/internal/harness/v1/turn",
       "ownership": "worker",

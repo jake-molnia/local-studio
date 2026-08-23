@@ -59,6 +59,40 @@ pub fn select(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
     return fallback;
 }
 
+pub fn selectCapability(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, capability: []const u8, preferred_node_id: ?[]const u8) !?Target {
+    try database.lock(io);
+    defer database.unlock(io);
+    var documents = try rigs.list(allocator, database);
+    defer documents.deinit();
+    var fallback: ?Target = null;
+    errdefer if (fallback) |*target| target.deinit();
+    for (documents.items()) |document| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const nodes = parsed.value.object.get("nodes") orelse continue;
+        if (nodes != .array) continue;
+        for (nodes.array.items) |node| {
+            if (!supportsCapability(node, capability)) continue;
+            const id = stringField(node.object, "id") orelse continue;
+            if (std.mem.eql(u8, id, "local")) continue;
+            const address = nullableStringField(node.object, "address") orelse continue;
+            const name = stringField(node.object, "name") orelse id;
+            var target = try makeTarget(allocator, database, id, name, address, node.object, "");
+            if (preferred_node_id) |preferred| {
+                if (std.mem.eql(u8, preferred, id)) {
+                    if (fallback) |*existing| existing.deinit();
+                    return target;
+                }
+                target.deinit();
+                continue;
+            }
+            if (fallback == null) fallback = target else target.deinit();
+        }
+    }
+    return fallback;
+}
+
 pub fn count(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, harness: []const u8) !usize {
     try database.lock(io);
     defer database.unlock(io);
@@ -91,6 +125,14 @@ fn supportsHarness(node: std.json.Value, harness: []const u8) bool {
         if (entry == .string and std.mem.eql(u8, entry.string, harness)) return true;
     }
     return false;
+}
+
+fn supportsCapability(node: std.json.Value, capability: []const u8) bool {
+    if (node != .object) return false;
+    const capabilities = node.object.get("capabilities") orelse return false;
+    if (capabilities != .object) return false;
+    const value = capabilities.object.get(capability) orelse return false;
+    return value == .bool and value.bool;
 }
 
 fn makeTarget(allocator: std.mem.Allocator, database: *sqlite.Database, id: []const u8, name: []const u8, address: []const u8, node: std.json.ObjectMap, harness: []const u8) !Target {
