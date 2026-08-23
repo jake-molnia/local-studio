@@ -20,6 +20,7 @@ const studio_operations = @import("services/studio_operations.zig");
 const model_files = @import("services/model_files.zig");
 const model_index = @import("services/model_index.zig");
 const studio_models = @import("services/studio_models.zig");
+const runtime_routes = @import("services/runtime_routes.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -233,6 +234,36 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm")) {
+        return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .vllm, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/sglang")) {
+        return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .sglang, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/llamacpp")) {
+        return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .llamacpp, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/mlx")) {
+        return serveRuntimeBackend(allocator, configuration, system, runtime_cache, .mlx, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/cuda")) {
+        const response = try runtime_routes.cudaPayload(allocator, configuration, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/rocm")) {
+        const response = try runtime_routes.rocmPayload(allocator, configuration, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm/config")) {
+        return serveRuntimeConfigHelp(allocator, io, configuration, .vllm, request);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/runtime/llamacpp/config")) {
+        return serveRuntimeConfigHelp(allocator, io, configuration, .llamacpp, request);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
         const response = try worker_service.modelCatalogPayload(allocator, io, client, database);
@@ -631,6 +662,20 @@ fn serveModelIndex(allocator: std.mem.Allocator, configuration: *const Config, c
         try request.respond(output.writer.buffered(), .{ .status = .internal_server_error, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     };
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn serveRuntimeBackend(allocator: std.mem.Allocator, configuration: *const Config, system: *const system_info.Snapshot, cache: *runtime_info.Cache, backend: runtime_routes.Backend, request: *http.Server.Request) !bool {
+    const response = try runtime_routes.backendPayload(allocator, configuration, system, cache, backend);
+    defer allocator.free(response);
+    try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
+fn serveRuntimeConfigHelp(allocator: std.mem.Allocator, io: Io, configuration: *const Config, backend: runtime_routes.Backend, request: *http.Server.Request) !bool {
+    const response = try runtime_routes.configHelpPayload(allocator, io, configuration, backend);
     defer allocator.free(response);
     try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
