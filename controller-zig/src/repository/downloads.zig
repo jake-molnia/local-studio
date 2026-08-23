@@ -73,6 +73,37 @@ pub fn getPayload(allocator: std.mem.Allocator, database: *sqlite.Database, id: 
     return try normalizedData(allocator, data);
 }
 
+pub fn findReusablePayload(allocator: std.mem.Allocator, database: *sqlite.Database, model_id: []const u8, target_dir: []const u8, file_paths: []const []const u8) !?[]u8 {
+    var statement = try database.prepare("SELECT data FROM model_downloads ORDER BY updated_at DESC");
+    defer statement.deinit();
+    var candidates: [3]?[]u8 = .{ null, null, null };
+    defer for (&candidates) |*candidate| if (candidate.*) |data| allocator.free(data);
+    while (try statement.step() == .row) {
+        const data = statement.columnText(0) orelse continue;
+        const normalized = try normalizedData(allocator, data) orelse continue;
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, normalized, .{}) catch {
+            allocator.free(normalized);
+            continue;
+        };
+        defer parsed.deinit();
+        const object = parsed.value.object;
+        if (!std.mem.eql(u8, object.get("model_id").?.string, model_id) or !std.mem.eql(u8, object.get("target_dir").?.string, target_dir) or !sameFiles(object.get("files").?.array.items, file_paths)) {
+            allocator.free(normalized);
+            continue;
+        }
+        const priority = reusablePriority(object.get("status").?.string) orelse {
+            allocator.free(normalized);
+            continue;
+        };
+        if (candidates[priority] == null) candidates[priority] = normalized else allocator.free(normalized);
+    }
+    for (&candidates) |*candidate| if (candidate.*) |data| {
+        candidate.* = null;
+        return data;
+    };
+    return null;
+}
+
 pub fn save(database: *sqlite.Database, id: []const u8, data: []const u8) !void {
     var statement = try database.prepare(
         \\INSERT INTO model_downloads (id, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -191,6 +222,36 @@ fn downloadStatus(value: []const u8) bool {
 
 fn fileStatus(value: []const u8) bool {
     return std.mem.eql(u8, value, "pending") or std.mem.eql(u8, value, "downloading") or std.mem.eql(u8, value, "completed") or std.mem.eql(u8, value, "error");
+}
+
+fn reusablePriority(status: []const u8) ?usize {
+    if (std.mem.eql(u8, status, "completed")) return 0;
+    if (std.mem.eql(u8, status, "downloading") or std.mem.eql(u8, status, "queued")) return 1;
+    if (std.mem.eql(u8, status, "paused")) return 2;
+    return null;
+}
+
+fn sameFiles(files: []const std.json.Value, expected: []const []const u8) bool {
+    if (files.len != expected.len) return false;
+    for (files, 0..) |file, index| {
+        const path = file.object.get("path").?.string;
+        var earlier = false;
+        for (files[0..index]) |candidate| if (std.mem.eql(u8, candidate.object.get("path").?.string, path)) {
+            earlier = true;
+            break;
+        };
+        if (earlier) continue;
+        var actual_count: usize = 0;
+        var expected_count: usize = 0;
+        for (files) |candidate| {
+            if (std.mem.eql(u8, candidate.object.get("path").?.string, path)) actual_count += 1;
+        }
+        for (expected) |candidate| {
+            if (std.mem.eql(u8, candidate, path)) expected_count += 1;
+        }
+        if (actual_count != expected_count) return false;
+    }
+    return true;
 }
 
 fn stringify(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
