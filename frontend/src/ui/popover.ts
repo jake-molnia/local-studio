@@ -1,18 +1,8 @@
-/**
- * Shared floating-surface classes.
- *
- * One hairline only: the CSS border. `--color-popover-border` resolves to
- * `--color-border` in light and `transparent` in dark (Codex dropdowns float on
- * shadow alone), so the drop shadow must NOT add its own `0 0 0 .5px` ring —
- * that stacked a second hairline on top of the border in light mode.
- *
- * Outer edge -> `--color-popover-border`. Internal dividers -> `--border`.
- */
-const POPOVER_SHADOW_CLASS = "shadow-[0px_16px_32px_-8px_rgba(0,0,0,0.3)]";
+const POPOVER_SHADOW_CLASS = "shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]";
 
 /** Bare surface: 8px radius, single hairline, shared elevation. No padding. */
 export const POPOVER_SURFACE_CLASS =
-  `rounded-lg border border-(--color-popover-border) bg-(--color-popover) ${POPOVER_SHADOW_CLASS}` as const;
+  `rounded-[var(--rad-sm)] border border-(--color-popover-border) bg-(--color-popover) ${POPOVER_SHADOW_CLASS}` as const;
 
 /**
  * Menu-shaped popover: shared surface plus a tight 4px inset that lets
@@ -33,7 +23,7 @@ export const POPOVER_PANEL_CLASS = `${POPOVER_SURFACE_CLASS} overflow-hidden` as
  * lifted off the page, not a dropdown pinned to a trigger.
  */
 export const MODAL_SURFACE_CLASS =
-  "overflow-hidden rounded-[14px] border border-(--color-popover-border) bg-(--color-popover) shadow-[0_24px_64px_-12px_rgba(0,0,0,0.55)]" as const;
+  "overflow-hidden rounded-[var(--rad-lg)] border border-(--color-popover-border) bg-(--color-popover) shadow-[0_18px_48px_-12px_rgba(0,0,0,0.58)]" as const;
 
 /** Hairline separator between groups inside a popover. */
 export const POPOVER_SEPARATOR_CLASS = "my-1 h-px bg-(--border)";

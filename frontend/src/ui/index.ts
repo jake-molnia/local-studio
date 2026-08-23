@@ -66,5 +66,5 @@ export type { UiTone, StatusPillVariant } from "./status";
 
 export { UserBrowserIcon, PanelIcon } from "./icons";
 
-export { MenuItem } from "./menu";
+export { handleMenuKeyboard, MenuItem } from "./menu";
 export type { MenuItemProps } from "./menu";

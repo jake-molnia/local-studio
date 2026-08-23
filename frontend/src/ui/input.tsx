@@ -5,7 +5,7 @@ import { useFormControlAttributes } from "./form-field-context";
 import { cx, FIELD_LABEL_CLASS } from "./utils";
 
 const modelInputBaseClasses =
-  "h-7 w-full rounded-md border border-transparent bg-(--ui-surface) px-2.5 text-[length:var(--fs-md)] text-(--ui-fg) outline-none transition placeholder:text-(--ui-muted)/65 focus:bg-(--ui-bg) focus:ring-1 focus:ring-(--ui-info)/60";
+  "h-6 w-full rounded-[4px] border border-transparent bg-(--ui-surface) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) outline-none transition placeholder:text-(--ui-muted)/65 focus:border-(--ui-border-heavy) focus:bg-(--ui-bg) disabled:cursor-not-allowed disabled:opacity-50";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -41,10 +41,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   return (
     <div>
       {label && (
-        <label
-          htmlFor={inputId}
-          className={FIELD_LABEL_CLASS}
-        >
+        <label htmlFor={inputId} className={FIELD_LABEL_CLASS}>
           {label}
         </label>
       )}
@@ -55,10 +52,11 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         <input
           ref={ref}
           id={inputId}
+          data-ui-control="field"
           required={field.required}
           aria-describedby={describedBy}
           aria-invalid={field.invalid ?? (error ? true : undefined)}
-          className={`h-9 w-full rounded-[10px] border border-(--ui-separator) bg-(--surface-3) px-3 text-[length:var(--fs-base)] text-(--ui-fg) transition-all placeholder:text-(--hl2) focus:border-(--link)/70 focus:outline-none focus:ring-1 focus:ring-(--link)/25 ${icon ? "pl-9" : ""} ${error ? "border-(--ui-danger)" : ""} ${className}`}
+          className={`h-[var(--control-height)] w-full rounded-[4px] border border-(--ui-separator) bg-(--surface-3) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) transition-[background-color,border-color] placeholder:text-(--hl2) focus:border-(--link)/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${icon ? "pl-8" : ""} ${error ? "border-(--ui-danger)" : ""} ${className}`}
           {...props}
         />
       </div>
@@ -90,6 +88,7 @@ export function ModelInput({
     <input
       {...props}
       type={type}
+      data-ui-control="compact"
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className={cx(modelInputBaseClasses, className)}
