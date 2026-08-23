@@ -23,6 +23,7 @@ pub const Config = struct {
     llm_instance_path: []const u8,
     models_dir: []const u8,
     api_key: ?[]const u8,
+    default_trust_remote_code: bool,
     spike_upstream: ?[]const u8,
     spike_fallback_upstream: ?[]const u8,
 
@@ -82,6 +83,7 @@ pub const Config = struct {
             .llm_instance_path = llm_instance_path,
             .models_dir = models_dir,
             .api_key = api_key,
+            .default_trust_remote_code = !std.mem.eql(u8, init.environ_map.get("LOCAL_STUDIO_DEFAULT_TRUST_REMOTE_CODE") orelse "true", "false"),
             .spike_upstream = spike_upstream,
             .spike_fallback_upstream = spike_fallback_upstream,
         };

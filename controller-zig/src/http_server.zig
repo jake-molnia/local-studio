@@ -7,6 +7,7 @@ const rig_service = @import("services/rigs.zig");
 const worker_service = @import("services/workers.zig");
 const model_service = @import("services/models.zig");
 const tokenization_service = @import("services/tokenization.zig");
+const recipe_service = @import("services/recipes.zig");
 const recipes = @import("repository/recipes.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
@@ -71,7 +72,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_origin, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_origin, server.config.default_trust_remote_code, system, worker_pool, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -79,7 +80,7 @@ pub const HttpServer = struct {
     }
 };
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, default_trust_remote_code: bool, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -101,7 +102,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *ht
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, client, database, recipe_column, llm_instance_path, inference_origin, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, client, database, recipe_column, llm_instance_path, inference_origin, default_trust_remote_code, system, worker_pool, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -118,7 +119,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_origin: []const u8, default_trust_remote_code: bool, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
             .status = .not_found,
@@ -196,6 +197,47 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/tokenize-chat-completions")) {
         return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .chat);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/recipes") and request.head.method == .GET) {
+        const response = try recipe_service.listPayload(allocator, io, database, recipe_column, llm_instance_path, default_trust_remote_code);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .GET) {
+        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        defer allocator.free(recipe_id);
+        const response = try recipe_service.detailPayload(allocator, io, database, recipe_column, recipe_id, default_trust_remote_code) orelse {
+            try request.respond("{\"detail\":\"Recipe not found\"}", .{
+                .status = .not_found,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return request.head.keep_alive;
+        };
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/recipes") and request.head.method == .POST) {
+        return try saveRecipe(allocator, io, database, recipe_column, request, null, default_trust_remote_code);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .PUT) {
+        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        defer allocator.free(recipe_id);
+        return try saveRecipe(allocator, io, database, recipe_column, request, recipe_id, default_trust_remote_code);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .DELETE) {
+        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        defer allocator.free(recipe_id);
+        if (!(try recipe_service.delete(io, database, recipe_id))) {
+            try request.respond("{\"detail\":\"Recipe not found\"}", .{
+                .status = .not_found,
+                .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+            });
+            return request.head.keep_alive;
+        }
+        try request.respond("{\"success\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
@@ -482,6 +524,42 @@ fn respondInvalidPayload(request: *http.Server.Request) !bool {
     return request.head.keep_alive;
 }
 
+fn saveRecipe(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, request: *http.Server.Request, override_id: ?[]const u8, default_trust_remote_code: bool) !bool {
+    const storage = try allocator.alloc(u8, max_chat_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const id = recipe_service.savePayload(allocator, io, database, recipe_column, body_writer.buffered(), override_id, default_trust_remote_code) catch |failure| {
+        var output: Io.Writer.Allocating = .init(allocator);
+        defer output.deinit();
+        try output.writer.writeAll("{\"detail\":");
+        try std.json.Stringify.value(@errorName(failure), .{}, &output.writer);
+        try output.writer.writeByte('}');
+        try request.respond(output.writer.buffered(), .{
+            .status = .bad_request,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    };
+    defer allocator.free(id);
+    var output: Io.Writer.Allocating = .init(allocator);
+    defer output.deinit();
+    try output.writer.writeAll("{\"success\":true,\"id\":");
+    try std.json.Stringify.value(id, .{}, &output.writer);
+    try output.writer.writeByte('}');
+    try request.respond(output.writer.buffered(), .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+    return request.head.keep_alive;
+}
+
 fn respondModelRequired(request: *http.Server.Request) !bool {
     try request.respond("{\"detail\":\"model is required\"}", .{
         .status = .bad_request,
@@ -557,6 +635,16 @@ fn requestHeader(request: *const http.Server.Request, expected_name: []const u8)
         if (std.ascii.eqlIgnoreCase(header.name, expected_name)) return header.value;
     }
     return null;
+}
+
+fn pathParameter(allocator: std.mem.Allocator, target: []const u8, prefix: []const u8) ![]u8 {
+    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
+    const path = target[0..query_start];
+    if (!std.mem.startsWith(u8, path, prefix) or path.len <= prefix.len) return error.InvalidPathParameter;
+    const encoded = path[prefix.len..];
+    const storage = try allocator.dupe(u8, encoded);
+    defer allocator.free(storage);
+    return try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage));
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {

@@ -62,6 +62,22 @@ pub fn activeModelId(allocator: std.mem.Allocator, io: std.Io, database: *sqlite
     return try modelIdFromDocument(allocator, documents.items()[index]);
 }
 
+pub fn activeRecipeId(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: recipes.PayloadColumn, llm_instance_path: []const u8) !?[]u8 {
+    var documents = documents: {
+        try database.lock(io);
+        defer database.unlock(io);
+        break :documents try recipes.list(allocator, database, column);
+    };
+    defer documents.deinit();
+    const index = activeRecipeIndex(allocator, io, documents.items(), llm_instance_path) orelse return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, documents.items()[index], .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const id = parsed.value.object.get("id") orelse return null;
+    if (id != .string or id.string.len == 0) return null;
+    return try allocator.dupe(u8, id.string);
+}
+
 fn modelIdFromDocument(allocator: std.mem.Allocator, document: []const u8) !?[]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return null;
     defer parsed.deinit();
