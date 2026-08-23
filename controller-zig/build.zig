@@ -9,6 +9,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    const model_index_document = b.build_root.handle.readFileAlloc(b.graph.io, "../controller/contracts/model-index.json", b.allocator, .limited(4 * 1024 * 1024)) catch @panic("unable to read model index contract");
+    const model_index_options = b.addOptions();
+    model_index_options.addOption([]const u8, "document", model_index_document);
+    root_module.addOptions("model_index_contract", model_index_options);
     const executable = b.addExecutable(.{
         .name = "local-studio-controller",
         .root_module = root_module,
