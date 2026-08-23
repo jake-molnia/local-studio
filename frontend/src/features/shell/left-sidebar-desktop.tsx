@@ -64,13 +64,15 @@ export function DesktopSidebar({
     <aside
       onPointerEnter={onRevealProjectsNav}
       onFocusCapture={onRevealProjectsNav}
-      className={`group/sidebar relative hidden md:flex sticky top-0 h-[100dvh] border-r border-(--border) bg-(--sidebar-bg) flex-col shrink-0 z-40 overflow-hidden ${
+      className={`group/sidebar relative hidden md:flex sticky top-0 h-[100dvh] border-r border-(--border) bg-(--sidebar-bg) flex-col shrink-0 z-40 ${
+        isExpanded ? "overflow-hidden" : "overflow-visible border-r-0 bg-transparent"
+      } ${
         resizing
           ? ""
           : "transition-[width] duration-[var(--motion-fast)] ease-[var(--ease-standard)]"
       }`}
       style={{
-        width: isExpanded ? `${width}px` : 44,
+        width: isExpanded ? `${width}px` : 0,
       }}
     >
       {isExpanded ? (
@@ -86,10 +88,10 @@ export function DesktopSidebar({
         />
       ) : null}
       {!isExpanded ? (
-        <div className="flex h-[var(--h-toolbar)] shrink-0 items-center justify-center">
+        <div className="absolute left-2 top-2 z-[70] flex h-7 w-7 shrink-0 items-center justify-center">
           <button
             onClick={() => onSetPinnedOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-(--hl2) transition-colors hover:bg-(--hover) hover:text-(--fg)"
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-transparent text-(--hl2) transition-colors hover:bg-(--hover) hover:text-(--fg)"
             title="Expand sidebar"
             aria-label="Expand sidebar"
           >
@@ -114,7 +116,9 @@ export function DesktopSidebar({
                 <PanelLeftFilled className="h-3 w-3" strokeWidth={1.75} />
               </button>
               <div className="min-w-0 flex-1" />
-              <SessionStatus running={runningSessions} finished={finishedSessions} />
+              <span className="flex h-6 w-8 shrink-0 items-center justify-center">
+                <SessionStatus running={runningSessions} finished={finishedSessions} />
+              </span>
               <button
                 onClick={() => window.history.back()}
                 className={HISTORY_STEPPER_CLASS}
@@ -161,7 +165,7 @@ export function DesktopSidebar({
                   <span className="flex-1 truncate text-left text-[length:var(--fs-xs)] font-medium">
                     New task
                   </span>
-                  <kbd className="rounded-[3px] border border-(--border) px-1 text-[10px] leading-4 text-(--dim)">
+                  <kbd className="w-7 rounded-[3px] border border-(--border) px-1 text-center text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity group-hover:opacity-100">
                     ⌘N
                   </kbd>
                 </Link>

@@ -95,19 +95,17 @@ export function ProjectRow({
           type="button"
           onClick={handleToggle}
           title={project.path}
-          className={`flex min-w-0 flex-1 items-center gap-2 px-0 text-left ${
-            pinned ? "pr-[62px]" : "pr-8 group-hover:pr-[62px]"
-          }`}
+          className="flex min-w-0 flex-1 items-center gap-2 px-0 pr-[62px] text-left"
         >
           {icon === "chat" ? (
             <ChatIcon className="h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100" />
           ) : (
             <span className="relative h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity group-hover:opacity-100">
               <Folder
-                className={`absolute inset-0 h-3.5 w-3.5 transition-all duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
+                className={`absolute inset-0 h-3.5 w-3.5 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
               />
               <FolderOpen
-                className={`absolute inset-0 h-3.5 w-3.5 transition-all duration-[var(--motion-fast)] ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
+                className={`absolute inset-0 h-3.5 w-3.5 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
               />
             </span>
           )}
@@ -132,7 +130,7 @@ export function ProjectRow({
                 event.stopPropagation();
                 onRemove();
               }}
-              className="flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity hover:text-(--err) group-hover:opacity-100"
+              className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--err) focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
               title="Remove from list"
               aria-label="Remove project"
             >
@@ -142,7 +140,7 @@ export function ProjectRow({
           <NewChatPlusButton
             project={project}
             label={`New task in ${project.name}`}
-            className="flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity hover:text-(--fg)/80 group-hover:opacity-100"
+            className="pointer-events-none flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:text-(--fg)/80 focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
             onNavigateStart={onNewChatStart}
           />
         </div>

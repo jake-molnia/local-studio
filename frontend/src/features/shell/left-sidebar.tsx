@@ -95,7 +95,14 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
   }, [pathname, setMobileMenuOpen]);
 
   useMountSubscription(() => {
+    if (hidesAppSidebar) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteMode((mode) => (mode === "search" ? null : "search"));
@@ -103,7 +110,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [hidesAppSidebar]);
 
   useMountSubscription(() => {
     return () => {
@@ -181,6 +188,12 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== "n") return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
       event.preventDefault();
       openNewTask();
     };

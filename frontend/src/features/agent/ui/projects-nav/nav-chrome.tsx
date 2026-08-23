@@ -66,7 +66,7 @@ export function PinButton({
       className={`inline-flex h-5 w-5 items-center justify-center rounded-[3px] transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) ${
         pinned
           ? "bg-(--active) text-(--fg)/80 opacity-75"
-          : "opacity-0 text-(--dim)/70 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+          : "pointer-events-none opacity-0 text-(--dim)/70 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
       }`}
     >
       <PinIcon className="pointer-events-none h-3 w-3" />

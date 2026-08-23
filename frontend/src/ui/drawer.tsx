@@ -74,7 +74,7 @@ export function DrawerOverlay({
       // inside a `space-y-*` stack and the sibling margin lands on this fixed
       // box, shrinking it away from the bottom of the viewport.
       className={cx(
-        "ui-scrim-enter fixed inset-0 z-50 m-0 flex bg-(--color-scrim) backdrop-blur-[2px]",
+        "ui-scrim-enter fixed inset-0 z-[250] m-0 flex bg-(--color-scrim) backdrop-blur-[2px]",
         side === "right" ? "justify-end" : "justify-start",
         className,
       )}

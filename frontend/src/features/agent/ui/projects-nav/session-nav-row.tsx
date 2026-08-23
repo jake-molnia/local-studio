@@ -240,12 +240,7 @@ function SessionOpenTarget({
         },
       }
     : {};
-  const targetClass = `flex min-w-0 flex-1 items-center gap-1 ${
-    // One padding for every section — pinned rows used to reserve pr-8 for an
-    // always-visible pin that no longer renders at rest, which pushed their
-    // dates to a different column than task rows.
-    "pr-2"
-  } group-hover:pr-[52px] group-has-[:focus-visible]:pr-[52px]`;
+  const targetClass = "flex min-w-0 flex-1 items-center gap-1 pr-[52px]";
   const content = <SessionRowContent activity={activity} timestamp={timestamp} label={label} />;
 
   if (href) {

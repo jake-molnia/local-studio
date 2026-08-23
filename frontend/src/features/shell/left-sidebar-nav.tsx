@@ -2,15 +2,7 @@
 
 import Link from "next/link";
 import { type ComponentType, type MouseEvent } from "react";
-import {
-  AutomationsIcon,
-  ConfigureIcon,
-  FileIcon,
-  ModelsIcon,
-  SettingsIcon,
-  StatusIcon,
-  UsageIcon,
-} from "@/ui/icon-registry";
+import { AutomationsIcon, ModelsIcon, SettingsIcon, StatusIcon } from "@/ui/icon-registry";
 
 export type IconComponent = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -21,9 +13,6 @@ export const primaryTabs = [
 export const studioTabs = [
   { href: "/", label: "Status", icon: StatusIcon },
   { href: "/models", label: "Models", icon: ModelsIcon },
-  { href: "/configure", label: "Configure", icon: ConfigureIcon },
-  { href: "/usage", label: "Usage", icon: UsageIcon },
-  { href: "/logs", label: "Logs", icon: FileIcon },
 ] as const;
 
 export const tabs = [...primaryTabs, ...studioTabs];
@@ -156,7 +145,7 @@ export function NavActionDesktop({
       <Icon className="h-3.5 w-3.5 shrink-0 opacity-58 group-hover:opacity-95" strokeWidth={1.6} />
       <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)]">{label}</span>
       {shortcut ? (
-        <kbd className="rounded-[3px] border border-(--border) px-1 text-[10px] leading-4 text-(--dim)">
+        <kbd className="w-7 rounded-[3px] border border-(--border) px-1 text-center text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity group-hover:opacity-100">
           {shortcut}
         </kbd>
       ) : null}
