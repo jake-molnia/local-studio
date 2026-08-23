@@ -120,10 +120,8 @@ export default function UsagePage({
 
   const content = (
     <PageContainer width="sm" className="pt-3 sm:pt-4">
-      <header className="flex items-start justify-between gap-3">
-        {embedded ? (
-          <h1 className="text-[length:var(--fs-md)] font-medium text-(--ui-fg)">Usage</h1>
-        ) : (
+      <header className={`flex items-start gap-3 ${embedded ? "justify-end" : "justify-between"}`}>
+        {!embedded ? (
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -163,7 +161,7 @@ export default function UsagePage({
               ) : null}
             </div>
           </div>
-        )}
+        ) : null}
         <RefreshButton onRefresh={loadStats} loading={loading} className="h-7 w-7" />
       </header>
 

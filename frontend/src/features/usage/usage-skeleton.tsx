@@ -26,14 +26,16 @@ const MODEL_COLUMNS = [
 export function UsageSkeleton({ embedded = false }: { embedded?: boolean }) {
   const content = (
     <PageContainer width="sm" className="pt-3 sm:pt-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className={`${pulse} h-8 w-8 shrink-0 rounded-full`} />
-          <div>
-            <div className={`${pulse} h-3.5 w-14`} />
-            <div className={`${pulse} mt-1.5 h-5 w-32`} />
+      <div className={`flex items-start gap-3 ${embedded ? "justify-end" : "justify-between"}`}>
+        {!embedded ? (
+          <div className="flex items-center gap-3">
+            <div className={`${pulse} h-8 w-8 shrink-0 rounded-full`} />
+            <div>
+              <div className={`${pulse} h-3.5 w-14`} />
+              <div className={`${pulse} mt-1.5 h-5 w-32`} />
+            </div>
           </div>
-        </div>
+        ) : null}
         <div className={`${pulse} h-7 w-7 rounded-md`} />
       </div>
 
