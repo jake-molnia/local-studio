@@ -8,6 +8,7 @@ const harness_events = @import("harness_events.zig");
 const harness_runtime = @import("harness_runtime.zig");
 const harness_session_id = @import("harness_session_id.zig");
 const node_transport = @import("node_transport.zig");
+const agent_goal_driver = @import("agent_goal_driver.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -102,7 +103,9 @@ pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.D
 }
 
 pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, document: []const u8) ![]u8 {
-    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidTurnPayload;
+    const routed_document = try agent_goal_driver.decorateTurn(allocator, io, database, document);
+    defer allocator.free(routed_document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, routed_document, .{}) catch return error.InvalidTurnPayload;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidTurnPayload;
     const object = parsed.value.object;
@@ -144,12 +147,12 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         .sharing_policy = if (existing) |session| session.sharing_policy else "private",
     });
     const command_id = commandId(io);
-    try lockedEnqueue(io, database, command_id[0..], session_id, command_kind, document);
+    try lockedEnqueue(io, database, command_id[0..], session_id, command_kind, routed_document);
 
     const payload = if (mode == .standalone)
-        harness.turnPayload(document)
+        harness.turnPayload(routed_document)
     else
-        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", document);
+        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", routed_document);
     const response = payload catch |failure| {
         try lockedFinish(io, database, command_id[0..], "rejected", @errorName(failure));
         try lockedRuntime(io, database, session_id, "unavailable", null, null);
@@ -209,6 +212,7 @@ pub fn controlPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, c
     defer allocator.free(session_id);
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
     defer session.deinit();
+    if (std.mem.eql(u8, operation, "abort")) try agent_goal_driver.pauseForAbort(allocator, io, database, &session);
     if (mode == .standalone) {
         if (std.mem.eql(u8, operation, "abort")) return harness.abortPayload(document);
         if (std.mem.eql(u8, operation, "compact")) return harness.compactPayload(document);
@@ -289,7 +293,20 @@ fn reconcileEvents(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
             std.log.err("agent session {s} reconciliation failed: {t}", .{ session.id, failure });
             continue;
         };
+        const continuation = agent_goal_driver.reconcile(allocator, io, database, &session, payload) catch |failure| failed: {
+            std.log.err("goal reconciliation for {s} failed: {t}", .{ session.id, failure });
+            break :failed null;
+        };
         allocator.free(payload);
+        if (continuation) |document| {
+            defer allocator.free(document);
+            try io.sleep(.fromSeconds(2), .awake);
+            const response = turnPayload(allocator, io, mode, client, database, harness, document) catch |failure| {
+                std.log.err("goal continuation for {s} failed: {t}", .{ session.id, failure });
+                continue;
+            };
+            allocator.free(response);
+        }
     }
 }
 
