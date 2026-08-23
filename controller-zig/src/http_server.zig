@@ -24,6 +24,7 @@ const runtime_routes = @import("services/runtime_routes.zig");
 const vram_calculator = @import("services/vram_calculator.zig");
 const benchmark_service = @import("services/benchmark.zig");
 const runtime_jobs_service = @import("services/runtime_jobs.zig");
+const huggingface_models = @import("services/huggingface_models.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const sqlite = @import("repository/sqlite.zig");
@@ -284,6 +285,34 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = try studio_models.payload(allocator, io, database, recipe_column, models_dir, environment);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/huggingface/models")) {
+        const search_value = try queryParameter(allocator, request.head.target, "search");
+        defer if (search_value) |value| allocator.free(value);
+        const filter_value = try queryParameter(allocator, request.head.target, "filter");
+        defer if (filter_value) |value| allocator.free(value);
+        const sort_value = try queryParameter(allocator, request.head.target, "sort");
+        defer if (sort_value) |value| allocator.free(value);
+        const search = if (search_value) |value| trimmedOptional(value) else null;
+        const filter = if (filter_value) |value| if (value.len > 0) value else null else null;
+        const sort = if (sort_value) |value| trimmedOptional(value) else null;
+        const limit: usize = @intCast(@min(@max(queryUnsigned(request.head.target, "limit") orelse 50, 1), 100));
+        const raw_offset = queryUnsigned(request.head.target, "offset") orelse 0;
+        const offset = std.math.cast(usize, raw_offset) orelse std.math.maxInt(usize);
+        var result = huggingface_models.payload(allocator, io, client, environment, search, filter, sort, limit, offset) catch |failure| {
+            var output: Io.Writer.Allocating = .init(allocator);
+            defer output.deinit();
+            try output.writer.writeAll("{\"detail\":");
+            const detail = try std.fmt.allocPrint(allocator, "Failed to reach HuggingFace API: {t}", .{failure});
+            defer allocator.free(detail);
+            try std.json.Stringify.value(detail, .{}, &output.writer);
+            try output.writer.writeByte('}');
+            try request.respond(output.writer.buffered(), .{ .status = .service_unavailable, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+            return request.head.keep_alive;
+        };
+        defer result.deinit();
+        try request.respond(result.body, .{ .status = result.status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/vllm")) {
@@ -1344,6 +1373,11 @@ fn queryParameter(allocator: std.mem.Allocator, target: []const u8, expected_nam
         return @as(?[]u8, try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage)));
     }
     return null;
+}
+
+fn trimmedOptional(value: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t\r\n");
+    return if (trimmed.len == 0) null else trimmed;
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {
