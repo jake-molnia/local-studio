@@ -11,6 +11,7 @@ pub const Disposition = enum {
 pub fn routeDisposition(mode: config.Mode, route: route_registry.Route) Disposition {
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/models")) return .local;
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) return .local;
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/responses")) return .local;
     return disposition(mode, route.ownership);
 }
 

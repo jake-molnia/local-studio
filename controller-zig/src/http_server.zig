@@ -184,6 +184,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, client: *http.
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
         return try serveLocalChat(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin);
     }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/responses")) {
+        return try serveLocalPassthrough(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .responses);
+    }
+    if (mode != .head and std.mem.eql(u8, route.path, "/v1/messages")) {
+        return try serveLocalPassthrough(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .messages);
+    }
     if (std.mem.eql(u8, route.path, "/__zig-spike/proxy")) {
         const upstream = spike_upstream orelse {
             try request.respond("{\"detail\":\"Proxy spike upstream is not configured\"}", .{
@@ -337,8 +343,82 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, client: *http.Client, da
             }
         }
     }
-    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request) catch return false;
+    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request, null) catch return false;
     return false;
+}
+
+const LocalProtocol = enum {
+    responses,
+    messages,
+};
+
+fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, request: *http.Server.Request, inference_origin: []const u8, protocol: LocalProtocol) !bool {
+    var captured = try reverse_proxy.captureRequest(allocator, request);
+    defer captured.deinit();
+    const storage = try allocator.alloc(u8, max_chat_request_bytes);
+    defer allocator.free(storage);
+    var body_writer: Io.Writer = .fixed(storage);
+    var request_read_buffer: [16 * 1024]u8 = undefined;
+    const body_reader = try request.readerExpectContinue(&request_read_buffer);
+    _ = body_reader.streamRemaining(&body_writer) catch {
+        try request.respond("{\"detail\":\"Request body is too large\"}", .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return false;
+    };
+    const body = body_writer.buffered();
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return try respondInvalidProtocolBody(request, protocol);
+    defer parsed.deinit();
+    if (parsed.value != .object) return try respondInvalidProtocolBody(request, protocol);
+
+    const model_value = parsed.value.object.get("model");
+    const requested_model = if (model_value != null and model_value.? == .string)
+        std.mem.trim(u8, model_value.?.string, " \t\r\n")
+    else
+        "";
+    if (protocol == .responses and requested_model.len == 0) {
+        try request.respond("{\"detail\":\"Responses request requires a model\"}", .{
+            .status = .bad_request,
+            .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+        });
+        return request.head.keep_alive;
+    }
+
+    var rewritten: ?[]u8 = null;
+    defer if (rewritten) |payload| allocator.free(payload);
+    if (requested_model.len > 0) {
+        var resolution = try model_service.resolveRequestedModel(allocator, io, database, recipe_column, llm_instance_path, requested_model);
+        defer resolution.deinit();
+        if (resolution.canonical) |canonical| {
+            if (!std.mem.eql(u8, canonical, requested_model)) {
+                try parsed.value.object.put(parsed.arena.allocator(), "model", .{ .string = canonical });
+                var output: Io.Writer.Allocating = .init(allocator);
+                errdefer output.deinit();
+                try std.json.Stringify.value(parsed.value, .{}, &output.writer);
+                rewritten = try output.toOwnedSlice();
+            }
+        }
+    }
+    const accept: ?[]const u8 = if (protocol == .responses)
+        if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json"
+    else
+        null;
+    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request, accept) catch return false;
+    return false;
+}
+
+fn respondInvalidProtocolBody(request: *http.Server.Request, protocol: LocalProtocol) !bool {
+    const body = switch (protocol) {
+        .responses => "{\"detail\":\"Invalid Responses request body\"}",
+        .messages => "{\"detail\":\"Invalid JSON request body\"}",
+    };
+    try request.respond(body, .{
+        .status = .bad_request,
+        .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
+    });
+    return request.head.keep_alive;
 }
 
 fn respondModelRequired(request: *http.Server.Request) !bool {

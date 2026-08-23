@@ -128,12 +128,18 @@ pub fn serveWorkerBuffered(allocator: std.mem.Allocator, client: *http.Client, u
     };
 }
 
-pub fn serveLocalBuffered(client: *http.Client, upstream: []const u8, payload: []const u8, captured: *const CapturedRequest, request: *http.Server.Request) !void {
+pub fn serveLocalBuffered(client: *http.Client, upstream: []const u8, payload: []const u8, captured: *const CapturedRequest, request: *http.Server.Request, accept: ?[]const u8) !void {
     var commitment: ResponseCommitment = .pending;
     var request_body_state: RequestBodyState = .untouched;
-    const headers = [_]http.Header{.{ .name = "Content-Type", .value = "application/json" }};
+    var headers: [2]http.Header = undefined;
+    headers[0] = .{ .name = "Content-Type", .value = "application/json" };
+    var header_count: usize = 1;
+    if (accept) |value| {
+        headers[1] = .{ .name = "Accept", .value = value };
+        header_count += 1;
+    }
     proxyAttempt(client, upstream, request, &commitment, &request_body_state, .{
-        .extra_request_headers = &headers,
+        .extra_request_headers = headers[0..header_count],
         .strip_credentials = true,
     }, payload, captured) catch |failure| {
         if (!commitment.canRetry()) return failure;
