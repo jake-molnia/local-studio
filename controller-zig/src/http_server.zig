@@ -33,6 +33,7 @@ const provider_gateway = @import("services/provider_gateway.zig");
 const openai_protocol = @import("services/openai_protocol.zig");
 const head_providers = @import("services/head_providers.zig");
 const codex_gateway = @import("services/codex_gateway.zig");
+const harness_runtime = @import("services/harness_runtime.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -79,6 +80,7 @@ pub const HttpServer = struct {
     downloads: download_manager.State,
     compute: compute_lifecycle.Manager,
     head_provider_state: head_providers.State,
+    harness: harness_runtime.Manager,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -89,6 +91,8 @@ pub const HttpServer = struct {
         errdefer compute.deinit();
         var head_provider_state = try head_providers.State.init(allocator, io, config.data_dir);
         errdefer head_provider_state.deinit();
+        var harness = try harness_runtime.Manager.init(allocator, io, &config);
+        errdefer harness.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -101,6 +105,7 @@ pub const HttpServer = struct {
             .downloads = download_manager.State.init(allocator, io),
             .compute = compute,
             .head_provider_state = head_provider_state,
+            .harness = harness,
         };
     }
 
@@ -108,6 +113,7 @@ pub const HttpServer = struct {
         server.listener.deinit(server.io);
         server.compute.deinit();
         server.head_provider_state.deinit();
+        server.harness.deinit();
         server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
@@ -128,7 +134,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.harness, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -140,7 +146,7 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -162,7 +168,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, harness, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -179,7 +185,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -218,6 +224,68 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond("{\"status\":\"ok\"}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/setup-checks")) {
+        const response = try harness.setupPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/sessions")) {
+        const response = try harness.sessionsPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/status")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        const session_id = session_id_value orelse "default";
+        const response = try harness.statusPayload(session_id, queryUnsigned(request.head.target, "after") orelse 0);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/events")) {
+        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        defer if (session_id_value) |value| allocator.free(value);
+        harness.serveEvents(session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
+            if (failure == error.SessionNotFound) return respondHarnessFailure(request, failure);
+            return false;
+        };
+        return false;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/turn")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = harness.turnPayload(document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/abort")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = harness.abortPayload(document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/compact")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = harness.compactPayload(document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/runtime/extension-ui")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = harness.extensionUiPayload(document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs")) {
@@ -1142,6 +1210,27 @@ fn respondHeadProviderFailure(request: *http.Server.Request, failure: anyerror) 
         error.InvalidAuthType => respondDownloadError(request, .bad_request, "Provider requires OAuth"),
         else => respondDownloadError(request, .service_unavailable, "Head model provider is unavailable"),
     };
+}
+
+fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.RemoteHarnessRequired, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected => .conflict,
+        error.SessionNotFound => .not_found,
+        error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
+        error.FileNotFound => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.RemoteHarnessRequired => "This Head has no enrolled harness node assigned to the session",
+        error.SessionNotActive => "Runtime session is no longer active",
+        error.SessionNotFound => "Runtime session not found",
+        error.ModelChangeRequiresNewSession => "Changing models requires a new harness session",
+        error.QueueMutationNotSupported => "Queue mutation is not available in the Zig harness protocol yet",
+        error.CwdMustBeAbsolute => "cwd must be absolute",
+        error.FileNotFound => "Pi executable was not found",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
 }
 
 fn serveStudioSettingsUpdate(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, database: *sqlite.Database, request: *http.Server.Request) !bool {
