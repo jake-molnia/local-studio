@@ -115,7 +115,7 @@ export default function UsagePage() {
 
   return (
     <AppPage>
-      <PageContainer width="sm" className="pt-5 sm:pt-7">
+      <PageContainer width="sm" className="pt-3 sm:pt-4">
         <header className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -125,7 +125,7 @@ export default function UsagePage() {
               title="Update profile image"
               aria-label="Update profile image"
             >
-              <ProfileAvatar profile={profile} size={38} />
+              <ProfileAvatar profile={profile} size={32} />
               <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                 <Upload className="h-4 w-4 text-white" />
               </span>
@@ -150,7 +150,7 @@ export default function UsagePage() {
                   if (!profile.name.trim()) updateProfile({ name: "Studio" });
                 }}
                 aria-label="Profile display name"
-                className="mt-0.5 block h-7 max-w-56 bg-transparent text-[length:var(--fs-lg)] font-medium text-(--ui-fg) outline-none placeholder:text-(--ui-muted)"
+                className="mt-0.5 block h-6 max-w-56 bg-transparent text-[length:var(--fs-md)] font-medium text-(--ui-fg) outline-none placeholder:text-(--ui-muted)"
                 placeholder="Studio"
               />
               {imageError ? (
@@ -161,11 +161,11 @@ export default function UsagePage() {
           <RefreshButton onRefresh={loadStats} loading={loading} className="h-7 w-7" />
         </header>
 
-        <section className="mt-8">
+        <section className="mt-5">
           <p className="text-[length:var(--fs-sm)] text-(--ui-muted)">
             {head ? "Global proxied tokens" : "Proxied tokens"}
           </p>
-          <div className="mt-1 text-[length:var(--fs-display)] font-medium leading-none tracking-[-0.03em] tabular-nums text-(--ui-fg)">
+          <div className="mt-1 text-[length:var(--fs-3xl)] font-medium leading-none tracking-[-0.03em] tabular-nums text-(--ui-fg)">
             {formatNumber(stats.totals.total_tokens)}
           </div>
           <p className="mt-2 text-[length:var(--fs-sm)] text-(--ui-muted)">
@@ -192,27 +192,27 @@ export default function UsagePage() {
         {/* The year at a glance, above the tabs rather than inside one: it is
             true of the whole window like the grid above it, and it is the thing
             people come to this page to look at. */}
-        <section className="mt-8">
+        <section className="mt-5">
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="text-[length:var(--fs-md)] font-medium text-(--ui-fg)">Past year</h2>
             <span className="text-[length:var(--fs-xs)] text-(--ui-muted)">tokens per day</span>
           </div>
-          <div className="mt-3">
+          <div className="mt-2">
             <TokenActivityHeatmap daily={stats.daily} />
           </div>
         </section>
 
-        <div className="mt-8 border-b border-(--ui-separator)">
+        <div className="mt-5 border-b border-(--ui-separator)">
           <Tabs items={USAGE_TABS} activeTab={tab} onSelectTab={setTab} className="-mb-px" />
         </div>
 
-        <section className="mt-8">
-          <h2 className="text-[length:var(--fs-2xl)] font-medium tracking-[-0.015em] text-(--ui-fg)">
+        <section className="mt-5">
+          <h2 className="text-[length:var(--fs-lg)] font-medium tracking-[-0.015em] text-(--ui-fg)">
             {heading.title}
           </h2>
           <p className="mt-1 text-[length:var(--fs-sm)] text-(--ui-muted)">{heading.description}</p>
 
-          <div className="mt-6">
+          <div className="mt-4">
             {tab === "models" ? (
               <UsageModelsTab stats={stats} />
             ) : tab === "activity" ? (
@@ -231,7 +231,7 @@ export default function UsagePage() {
 
 function StatGrid({ children }: { children: ReactNode }) {
   return (
-    <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--rad-xl)] bg-(--ui-border) sm:grid-cols-3 lg:grid-cols-6">
+    <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--rad-xl)] bg-(--ui-border) sm:grid-cols-3 lg:grid-cols-6">
       {children}
     </dl>
   );
@@ -239,10 +239,10 @@ function StatGrid({ children }: { children: ReactNode }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 bg-(--ui-surface) px-3 py-2.5 sm:px-4">
+    <div className="min-w-0 bg-(--ui-surface) px-3 py-2 sm:px-3.5">
       {/* truncate, because "Active streak" and a five-digit millisecond value
           both have to survive a six-column row on a narrow window. */}
-      <dd className="truncate text-[length:var(--fs-lg)] font-medium tabular-nums text-(--ui-fg)">
+      <dd className="truncate text-[length:var(--fs-md)] font-medium tabular-nums text-(--ui-fg)">
         {value}
       </dd>
       <dt className="mt-0.5 truncate text-[length:var(--fs-sm)] text-(--ui-muted)">{label}</dt>

@@ -23,14 +23,14 @@ function ReasoningDisclosure({ block, active }: { block: ThinkingBlock; active: 
   return (
     <details className="group min-w-0" open={open}>
       <summary
-        className="flex min-h-6 cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
+        className="flex min-h-5 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
         onClick={(event) => {
           event.preventDefault();
           setUserOpen(!open);
         }}
       >
         <span
-          className={`text-[length:var(--fs-base)] font-normal leading-5 ${
+          className={`text-[length:var(--fs-sm)] font-normal leading-5 ${
             active ? "codex-shimmer-text" : "text-(--fg)/48"
           }`}
         >
@@ -54,14 +54,14 @@ function ExploreAccordion({ blocks, live }: { blocks: ToolBlock[]; live: boolean
   return (
     <details className="group min-w-0" open={open}>
       <summary
-        className="flex min-h-6 min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
+        className="flex min-h-5 min-w-0 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
         onClick={(event) => {
           event.preventDefault();
           setOpen((value) => !value);
         }}
       >
         <span
-          className={`shrink-0 text-[length:var(--fs-base)] font-normal leading-5 ${
+          className={`shrink-0 text-[length:var(--fs-sm)] font-normal leading-5 ${
             running ? "codex-shimmer-text" : "text-(--fg)/48"
           }`}
         >
@@ -154,7 +154,7 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
             collapsed summary grows with the turn ("Ran 20 commands · edited 13
             files · …") and will not fit a phone column — let it truncate
             instead of forcing the row wider than the thread. */}
-        {!(busy) ? <SummaryGlyph kind={summaryIcon} /> : null}
+        {!busy ? <SummaryGlyph kind={summaryIcon} /> : null}
         <span
           className={`text-[length:var(--fs-base)] font-normal leading-5 ${
             busy ? "codex-shimmer-text shrink-0" : "min-w-0 flex-1 truncate"
@@ -162,7 +162,7 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
         >
           {busy ? "Working" : summary}
         </span>
-        {!expanded && (busy) && preview ? (
+        {!expanded && busy && preview ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-(--dim)/70">
             <PreviewGlyph kind={preview.kind} verb={preview.verb} />
             <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--codex-chat-code-font-size)] leading-5">

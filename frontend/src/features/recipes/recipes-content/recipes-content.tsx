@@ -182,7 +182,7 @@ function ModelsWorkerGate({
 
   if (embedded) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="flex justify-end">{action}</div>
         {notice}
       </div>
@@ -197,7 +197,7 @@ function ModelsWorkerGate({
           description="Choose a machine, then manage its recommendations, downloads, recipes, and model servers."
           actions={action}
         />
-        <div className="mt-8">{notice}</div>
+        <div className="mt-5">{notice}</div>
       </PageContainer>
     </AppPage>
   );
