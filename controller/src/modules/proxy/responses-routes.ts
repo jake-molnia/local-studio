@@ -66,7 +66,13 @@ export const registerResponsesRoutes = defineRoutes((app, context) =>
           );
         }
         const result = yield* Effect.tryPromise({
-          try: () => context.codexProvider.responses(parsed.modelId, payload, ctx.req.raw.signal),
+          try: () =>
+            context.headProviders.responses(
+              CODEX_PROVIDER_ID,
+              parsed.modelId,
+              payload,
+              ctx.req.raw.signal,
+            ),
           catch: () => serviceUnavailable("OpenAI Codex request failed"),
         });
         if (streamed) {

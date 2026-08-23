@@ -158,7 +158,7 @@ export const registerModelsRoutes = defineRoutes((app, context) => {
         const codexModels =
           context.config.controller_mode === "head"
             ? yield* Effect.tryPromise({
-                try: () => context.codexProvider.models(),
+                try: () => context.headProviders.models(CODEX_PROVIDER_ID),
                 catch: () => [] as const,
               }).pipe(Effect.catch(() => Effect.succeed([] as const)))
             : [];

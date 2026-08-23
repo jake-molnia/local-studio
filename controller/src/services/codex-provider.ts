@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type {
+  ProviderAuthType,
   ProviderLoginEvent,
   ProviderLoginEventPayload,
   ProviderLoginJobView,
@@ -20,6 +21,7 @@ import type {
 import { Effect } from "effect";
 import { redactLogLine } from "../core/log-redaction";
 import { CodexCredentialStore } from "./codex-credential-store";
+import type { HeadProviderAdapter } from "./head-provider";
 
 export const CODEX_PROVIDER_ID = "openai-codex";
 
@@ -237,7 +239,8 @@ const normalizeSse = (
   return { stream, completion };
 };
 
-export class CodexProviderService {
+export class CodexProviderService implements HeadProviderAdapter {
+  public readonly id = CODEX_PROVIDER_ID;
   readonly #models: MutableModels;
   readonly #jobs = new Map<string, LoginJob>();
 
@@ -328,7 +331,8 @@ export class CodexProviderService {
     }
   }
 
-  public startLogin(): string {
+  public startLogin(authType: ProviderAuthType): string {
+    if (authType !== "oauth") throw new Error("OpenAI Codex requires OAuth");
     for (const job of this.#jobs.values()) {
       if (job.status === "running") {
         job.abort.abort();
