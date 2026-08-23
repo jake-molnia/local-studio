@@ -176,7 +176,12 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
           {eyebrow ? (
             <div className="mb-0.5 text-[length:var(--fs-xs)] text-(--ui-muted)">{eyebrow}</div>
           ) : null}
-          <h2 className="text-[length:var(--fs-md)] font-medium tracking-[-0.015em] text-(--ui-fg)">
+          <h2
+            className={cx(
+              "font-medium tracking-[-0.015em] text-(--ui-fg)",
+              takeover ? "text-[length:var(--fs-lg)]" : "text-[length:var(--fs-md)]",
+            )}
+          >
             {active?.label ?? title}
           </h2>
           {!takeover && active?.description ? (
@@ -250,7 +255,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
             <div
               className={cx(
                 "mx-auto w-full px-4 pb-12 pt-5 sm:px-6 lg:pt-7",
-                width === "wide" ? "max-w-[68rem]" : "max-w-[32rem]",
+                width === "wide" ? "max-w-[68rem]" : "max-w-[42rem]",
               )}
             >
               {content}
@@ -332,7 +337,7 @@ export function SettingsGroup({
     <section
       data-setting-key={settingsSearchKey(title)}
       tabIndex={-1}
-      className="mb-4 rounded-[6px] outline-none transition-colors focus:bg-(--ui-hover)/30 last:mb-0"
+      className="mb-4 rounded-[6px] outline-none transition-colors duration-[var(--motion-fast)] focus:bg-(--ui-hover)/30 last:mb-0"
     >
       <div className="mb-1.5 flex items-start justify-between gap-3 px-1">
         <div className="min-w-0">
@@ -345,7 +350,7 @@ export function SettingsGroup({
             >
               <ChevronDown
                 className={cx(
-                  "h-3.5 w-3.5 text-(--ui-muted) transition-transform",
+                  "h-3.5 w-3.5 text-(--ui-muted) transition-transform duration-[var(--motion-fast)]",
                   open ? "" : "-rotate-90",
                 )}
                 aria-hidden
@@ -366,7 +371,7 @@ export function SettingsGroup({
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
       {showBody ? (
-        <div className="overflow-hidden rounded-[6px] border border-(--ui-separator) bg-(--ui-surface)/45 [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/80">
+        <div className="overflow-hidden rounded-[5px] bg-(--ui-surface)/60 ring-1 ring-inset ring-(--ui-separator)/50 [&>*+*]:border-t [&>*+*]:border-(--ui-separator)/65">
           {children}
         </div>
       ) : null}

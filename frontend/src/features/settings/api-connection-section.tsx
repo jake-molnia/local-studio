@@ -153,7 +153,7 @@ export function ApiConnectionSection({
       <AppVersionSection />
       <SettingsGroup
         title="Local controller"
-        description="This endpoint runs models on this machine. Connect and manage the Studio Head from Configure."
+        description="This endpoint runs models on this machine. Connect and manage the Studio Head from Settings → Machines."
         actions={
           <div className="flex items-center gap-2">
             <ApiUrlCensorToggle />

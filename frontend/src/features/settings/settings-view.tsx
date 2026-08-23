@@ -329,6 +329,12 @@ export function SettingsView({
     ? machineTargets.get(activeMachineNodeId)
     : undefined;
   const activeMachineView = machineViewFromSection(activeSection);
+  const settingsWidth =
+    activeSection === "controller" ||
+    activeSection === MACHINES_SECTION.id ||
+    Boolean(activeMachineView)
+      ? "wide"
+      : "default";
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
@@ -359,7 +365,7 @@ export function SettingsView({
       activeSection={activeSection}
       title="Settings"
       loading={loading}
-      width="wide"
+      width={settingsWidth}
       takeover
       onReload={onReload}
       onSelectSection={selectSection}
