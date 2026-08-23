@@ -14,12 +14,14 @@ pub const Config = struct {
     mode: Mode,
     host: []const u8,
     port: u16,
+    db_path: ?[]const u8,
 
     pub fn load(init: std.process.Init) !Config {
         var config: Config = .{
             .mode = try Mode.parse(init.environ_map.get("LOCAL_STUDIO_CONTROLLER_MODE") orelse "standalone"),
             .host = init.environ_map.get("LOCAL_STUDIO_HOST") orelse "127.0.0.1",
             .port = try parsePort(init.environ_map.get("LOCAL_STUDIO_PORT") orelse "8080"),
+            .db_path = init.environ_map.get("LOCAL_STUDIO_DB_PATH"),
         };
 
         var arguments = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);

@@ -40,8 +40,10 @@ Completed foundation evidence:
 - Disconnecting an SSE client does not terminate the server.
 - SIGTERM while an SSE stream is active cancels the connection task and exits the controller with status zero.
 - Invalid and oversized request heads have explicit 400 and 431 response paths.
+- The SQLite C API is loaded dynamically without blocking Linux cross-compilation.
+- A copied controller database passes Zig `PRAGMA quick_check`, remains byte-for-byte unchanged, and reopens successfully with Bun.
 
-The spike is not production-ready. Streaming request bodies, reverse-proxy backpressure, upstream cancellation, slow clients, task limits, timeouts, SQLite compatibility, and shutdown with child processes still require live proof.
+The spike is not production-ready. Streaming request bodies, reverse-proxy backpressure, upstream cancellation, slow clients, task limits, timeouts, full SQLite statement and transaction parity, and shutdown with child processes still require live proof.
 
 ## Compatibility ledger
 
@@ -154,7 +156,7 @@ The frozen HTTP, header, SSE, environment, SQLite, filesystem, installer, and pr
 
 #### 1.6 SQLite C API
 
-- Link the system SQLite library.
+- Load the platform SQLite library and resolve the required C API explicitly.
 - Wrap open, close, prepare, bind, step, reset, finalize, transaction, and error extraction.
 - Apply `busy_timeout = 5000`.
 - Preserve current schemas and migrations.
