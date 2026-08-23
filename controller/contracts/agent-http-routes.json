@@ -203,6 +203,36 @@
       "streaming": "never"
     },
     {
+      "method": "POST",
+      "path": "/api/agent/terminal/pty/open",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/terminal/pty/stream",
+      "ownership": "head",
+      "streaming": "always"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/terminal/pty/input",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/terminal/pty/resize",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/terminal/pty/close",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
       "method": "GET",
       "path": "/api/agent/goal",
       "ownership": "head",

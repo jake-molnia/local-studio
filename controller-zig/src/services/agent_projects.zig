@@ -159,7 +159,9 @@ pub fn resolveAllowedPath(allocator: std.mem.Allocator, io: Io, environment: *co
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) return error.ProjectPathRequired;
     if (!std.fs.path.isAbsolute(trimmed)) return error.ProjectPathMustBeAbsolute;
-    const canonical = Io.Dir.realPathFileAbsoluteAlloc(io, trimmed, allocator) catch return error.ProjectPathNotFound;
+    const canonical_z = Io.Dir.realPathFileAbsoluteAlloc(io, trimmed, allocator) catch return error.ProjectPathNotFound;
+    defer allocator.free(canonical_z);
+    const canonical = try allocator.dupe(u8, canonical_z);
     errdefer allocator.free(canonical);
     const stat = Io.Dir.cwd().statFile(io, canonical, .{}) catch return error.ProjectPathNotFound;
     if (stat.kind != .directory) return error.ProjectPathNotDirectory;
@@ -168,9 +170,9 @@ pub fn resolveAllowedPath(allocator: std.mem.Allocator, io: Io, environment: *co
     while (roots.next()) |root_value| {
         const root_trimmed = std.mem.trim(u8, root_value, " \t\r\n");
         if (root_trimmed.len == 0 or !std.fs.path.isAbsolute(root_trimmed)) continue;
-        const root = Io.Dir.realPathFileAbsoluteAlloc(io, root_trimmed, allocator) catch continue;
-        defer allocator.free(root);
-        if (withinRoot(root, canonical)) return canonical;
+        const root_z = Io.Dir.realPathFileAbsoluteAlloc(io, root_trimmed, allocator) catch continue;
+        defer allocator.free(root_z);
+        if (withinRoot(root_z, canonical)) return canonical;
     }
     return error.ProjectPathOutsideRoots;
 }

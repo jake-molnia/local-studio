@@ -44,6 +44,7 @@ const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
+const agent_pty = @import("services/agent_pty.zig");
 const agent_goals = @import("services/agent_goals.zig");
 const agent_subagents = @import("services/agent_subagents.zig");
 const request_auth = @import("services/request_auth.zig");
@@ -94,6 +95,7 @@ pub const HttpServer = struct {
     compute: compute_lifecycle.Manager,
     head_provider_state: head_providers.State,
     harness: harness_runtime.Manager,
+    pty: agent_pty.Manager,
     connection_limiter: ConnectionLimiter = .{},
 
     pub fn init(allocator: std.mem.Allocator, io: Io, config: Config) !HttpServer {
@@ -106,6 +108,8 @@ pub const HttpServer = struct {
         errdefer head_provider_state.deinit();
         var harness = try harness_runtime.Manager.init(allocator, io, &config);
         errdefer harness.deinit();
+        var pty = agent_pty.Manager.init(allocator, io, &config);
+        errdefer pty.deinit();
         return .{
             .allocator = allocator,
             .io = io,
@@ -119,6 +123,7 @@ pub const HttpServer = struct {
             .compute = compute,
             .head_provider_state = head_provider_state,
             .harness = harness,
+            .pty = pty,
         };
     }
 
@@ -127,6 +132,7 @@ pub const HttpServer = struct {
         server.compute.deinit();
         server.head_provider_state.deinit();
         server.harness.deinit();
+        server.pty.deinit();
         server.downloads.deinit();
         server.client.deinit();
         server.studio.deinit();
@@ -149,7 +155,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.harness, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.harness, &server.pty, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -161,7 +167,7 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -183,7 +189,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, harness, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, harness, pty, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -200,7 +206,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -413,6 +419,30 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = agent_connectors.testPayload(allocator, io, mode, configuration, client, database, node_id, document) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/terminal/pty/stream")) {
+        if (mode != .standalone) return respondTerminalFailure(request, error.TerminalNodeRequired);
+        const id = try queryParameter(allocator, request.head.target, "id");
+        defer if (id) |value| allocator.free(value);
+        pty.serveStream(id orelse return respondTerminalFailure(request, error.PtyIdRequired), request) catch return false;
+        return false;
+    }
+    if (std.mem.startsWith(u8, route.path, "/api/agent/terminal/pty/")) {
+        if (mode != .standalone) return respondTerminalFailure(request, error.TerminalNodeRequired);
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = if (std.mem.endsWith(u8, route.path, "/open"))
+            pty.openPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/input"))
+            pty.inputPayload(document)
+        else if (std.mem.endsWith(u8, route.path, "/resize"))
+            pty.resizePayload(document)
+        else
+            pty.closePayload(document);
+        const payload = response catch |failure| return respondTerminalFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal") or std.mem.eql(u8, route.path, "/api/agent/terminal/resolve-cwd")) {
@@ -1790,10 +1820,12 @@ fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bo
 
 fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.InvalidTerminalPayload, error.TerminalCommandRequired, error.TerminalCommandTooLarge, error.TerminalCwdRequired, error.TerminalFromMustBeAbsolute, error.PreviousDirectoryUnavailable, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotDirectory => .bad_request,
+        error.InvalidTerminalPayload, error.TerminalCommandRequired, error.TerminalCommandTooLarge, error.TerminalCwdRequired, error.TerminalFromMustBeAbsolute, error.PreviousDirectoryUnavailable, error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotDirectory, error.InvalidPtyPayload, error.PtyIdRequired, error.PtyInputRequired => .bad_request,
+        error.PtyInputTooLarge => .payload_too_large,
         error.ProjectPathNotFound => .not_found,
         error.ProjectPathOutsideRoots => .forbidden,
         error.TerminalNodeRequired, error.TerminalNodeRejected => .conflict,
+        error.PtyUnavailable, error.PtyLimitReached => .service_unavailable,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
@@ -1808,6 +1840,12 @@ fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !boo
         error.ProjectPathOutsideRoots => "cwd is not an allowed workspace",
         error.TerminalNodeRequired => "No enrolled node offers terminal execution",
         error.TerminalNodeRejected => "The terminal node rejected the request",
+        error.InvalidPtyPayload => "Invalid PTY payload",
+        error.PtyIdRequired => "id is required",
+        error.PtyInputRequired => "id and data are required",
+        error.PtyInputTooLarge => "input too large",
+        error.PtyUnavailable => "PTY is unavailable on this platform",
+        error.PtyLimitReached => "PTY session limit reached",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
