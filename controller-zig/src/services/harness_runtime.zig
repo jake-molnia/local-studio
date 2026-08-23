@@ -84,7 +84,7 @@ pub const Manager = struct {
         manager.* = undefined;
     }
     pub fn setupPayload(manager: *Manager) ![]u8 {
-        const available = manager.piIsAvailable() and manager.model_route.available();
+        const available = manager.piIsAvailable();
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"checks\":[{\"id\":\"pi-rpc\",\"label\":\"Pi RPC harness\",\"ok\":");
@@ -94,7 +94,7 @@ pub const Manager = struct {
         return output.toOwnedSlice();
     }
     pub fn piIsAvailable(manager: *Manager) bool {
-        return manager.piAvailable();
+        return manager.piAvailable() and manager.model_route.available();
     }
     pub fn sessionsPayload(manager: *Manager) ![]u8 {
         try manager.mutex.lock(manager.io);

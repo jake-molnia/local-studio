@@ -36,6 +36,7 @@ const head_providers = @import("services/head_providers.zig");
 const codex_gateway = @import("services/codex_gateway.zig");
 const harness_runtime = @import("services/harness_runtime.zig");
 const agent_coordinator = @import("services/agent_coordinator.zig");
+const agent_sessions = @import("services/agent_sessions.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
 const compute_lifecycle = @import("services/compute_lifecycle.zig");
@@ -400,6 +401,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/sessions")) {
+        const response = try agent_sessions.payload(allocator, io, database);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/studio/sessions/:sessionId")) {
+        const session_id = try pathParameter(allocator, request.head.target, "/studio/sessions/");
+        defer allocator.free(session_id);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = agent_sessions.upsert(allocator, io, database, session_id, document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/settings") and request.head.method == .GET) {
