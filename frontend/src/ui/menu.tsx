@@ -26,16 +26,16 @@ export function MenuItem({
       disabled={disabled}
       className={
         Icon
-          ? `flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] transition-[color,background-color] ${
+          ? `flex h-7 w-full items-center gap-2 rounded-[5px] px-2 text-left text-[length:var(--fs-xs)] transition-[color,background-color,box-shadow] duration-[var(--motion-fast)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] ${
               danger
                 ? "text-(--err) hover:bg-(--err)/10 active:bg-(--err)/15"
                 : "text-(--fg) hover:bg-(--color-menu-hover) active:bg-(--color-selected)"
             } disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent`
-          : "flex h-6 w-full items-center rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] text-(--fg) transition-[color,background-color] hover:bg-(--color-menu-hover) active:bg-(--color-selected) disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+          : "flex h-7 w-full items-center rounded-[5px] px-2 text-left text-[length:var(--fs-xs)] text-(--fg) transition-[color,background-color,box-shadow] duration-[var(--motion-fast)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] hover:bg-(--color-menu-hover) active:bg-(--color-selected) disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
       }
     >
       {Icon ? (
-        <Icon className={`h-3 w-3 shrink-0 ${danger ? "" : "opacity-70"}`} strokeWidth={1.5} />
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${danger ? "" : "opacity-70"}`} strokeWidth={1.5} />
       ) : null}
       {Icon ? <span className="truncate">{children}</span> : children}
     </button>

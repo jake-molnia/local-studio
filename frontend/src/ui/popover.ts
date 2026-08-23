@@ -1,8 +1,9 @@
-const POPOVER_SHADOW_CLASS = "shadow-[0_4px_12px_-4px_rgba(0,0,0,0.5)]";
+const POPOVER_SHADOW_CLASS =
+  "shadow-[0_12px_30px_-16px_rgba(0,0,0,0.72),0_2px_8px_-4px_rgba(0,0,0,0.32)]";
 
 /** Bare surface: 8px radius, single hairline, shared elevation. No padding. */
 export const POPOVER_SURFACE_CLASS =
-  `rounded-[var(--rad-sm)] border border-(--color-popover-border) bg-(--color-popover) ${POPOVER_SHADOW_CLASS}` as const;
+  `rounded-[var(--rad-md)] border border-(--color-popover-border) bg-(--color-popover) ${POPOVER_SHADOW_CLASS}` as const;
 
 /**
  * Menu-shaped popover: shared surface plus a tight 4px inset that lets
@@ -23,7 +24,7 @@ export const POPOVER_PANEL_CLASS = `${POPOVER_SURFACE_CLASS} overflow-hidden` as
  * lifted off the page, not a dropdown pinned to a trigger.
  */
 export const MODAL_SURFACE_CLASS =
-  "overflow-hidden rounded-[var(--rad-lg)] border border-(--color-popover-border) bg-(--color-popover) shadow-[0_18px_48px_-12px_rgba(0,0,0,0.58)]" as const;
+  "overflow-hidden rounded-[var(--rad-xl)] border border-(--color-popover-border) bg-(--color-popover) shadow-[0_24px_60px_-20px_rgba(0,0,0,0.68),0_6px_18px_-8px_rgba(0,0,0,0.38)]" as const;
 
 /** Hairline separator between groups inside a popover. */
 export const POPOVER_SEPARATOR_CLASS = "my-1 h-px bg-(--border)";

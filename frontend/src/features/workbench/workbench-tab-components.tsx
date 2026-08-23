@@ -41,6 +41,7 @@ function tabIcon(tab: WorkbenchTab): WorkbenchIcon {
 export function WorkbenchProjectTabList({
   projectName,
   threadTitle,
+  sidebarCollapsed,
   orderedTabs,
   activeId,
   onActivate,
@@ -52,6 +53,7 @@ export function WorkbenchProjectTabList({
 }: {
   projectName: string;
   threadTitle: string;
+  sidebarCollapsed?: boolean;
   orderedTabs: readonly WorkbenchTab[];
   activeId: string | null;
   onActivate: (tab: WorkbenchTab) => void;
@@ -63,54 +65,60 @@ export function WorkbenchProjectTabList({
 }) {
   return (
     <div
-      role="tablist"
-      aria-label={`${projectName}, ${threadTitle} tabs`}
-      className="flex min-w-0 items-stretch gap-0 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "pl-7" : ""}`}
     >
       <div
-        role="presentation"
-        className="flex h-full min-w-0 shrink-0 items-center gap-1 border-r border-(--border)/55 px-1.5"
+        className="flex min-w-0 max-w-[220px] shrink-0 items-center gap-1.5 border-r border-(--border)/45 px-2.5"
         title={`${projectName} · ${threadTitle}`}
       >
-        <span className="shrink-0 text-[9px] font-semibold leading-none text-(--hl2)">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] bg-(--accent)/15 text-[9px] font-semibold leading-none text-(--accent)">
           {projectInitial(projectName)}
         </span>
-        <span className="max-w-[150px] truncate text-[10px] text-(--dim)">
-          {projectName} · {threadTitle}
+        <span className="min-w-0 truncate text-[length:var(--fs-xs)] text-(--dim)">
+          <span className="text-(--fg)/80">{projectName}</span>
+          <span className="px-1 text-(--dim)/55">/</span>
+          {threadTitle}
         </span>
       </div>
-      {orderedTabs.map((tab, index) => (
-        <WorkbenchTabButton
-          key={tab.id}
-          tab={tab}
-          active={tab.id === activeId}
-          ariaLabel={`${projectName}, ${threadTitle}, ${tab.title}`}
-          shortcut={index < 9 ? `⌘${index + 1}` : undefined}
-          onActivate={() => onActivate(tab)}
-          onClose={() => onClose(tab.id)}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowLeft") {
-              event.preventDefault();
-              onFocusTab(index - 1);
-            } else if (event.key === "ArrowRight") {
-              event.preventDefault();
-              onFocusTab(index + 1);
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              onFocusTab(0);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              onFocusTab(orderedTabs.length - 1);
-            } else if (event.key === "Delete" || event.key === "Backspace") {
-              event.preventDefault();
-              onClose(tab.id);
-            }
-          }}
-          onDragStart={() => onDragStart(tab.id)}
-          onDrop={(event) => onDrop(event, tab.id)}
-          register={(element) => register(tab.id, element)}
-        />
-      ))}
+      <div
+        role="tablist"
+        aria-orientation="horizontal"
+        aria-label={`${projectName}, ${threadTitle} tabs`}
+        className="flex min-w-0 flex-1 items-end gap-0 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {orderedTabs.map((tab, index) => (
+          <WorkbenchTabButton
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeId}
+            ariaLabel={`${projectName}, ${threadTitle}, ${tab.title}`}
+            shortcut={index < 9 ? `⌘${index + 1}` : undefined}
+            onActivate={() => onActivate(tab)}
+            onClose={() => onClose(tab.id)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                onFocusTab(index - 1);
+              } else if (event.key === "ArrowRight") {
+                event.preventDefault();
+                onFocusTab(index + 1);
+              } else if (event.key === "Home") {
+                event.preventDefault();
+                onFocusTab(0);
+              } else if (event.key === "End") {
+                event.preventDefault();
+                onFocusTab(orderedTabs.length - 1);
+              } else if (event.key === "Delete" || event.key === "Backspace") {
+                event.preventDefault();
+                onClose(tab.id);
+              }
+            }}
+            onDragStart={() => onDragStart(tab.id)}
+            onDrop={(event) => onDrop(event, tab.id)}
+            register={(element) => register(tab.id, element)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -142,16 +150,22 @@ export function WorkbenchTabButton({
   const working = tab.kind === "task" && Boolean(tab.status && isWorkingStatus(tab.status));
   return (
     <div
+      role="presentation"
       draggable={tab.kind === "tool"}
       onDragStart={onDragStart}
       onDragOver={(event) => event.preventDefault()}
       onDrop={onDrop}
-      className={`workbench-tab group relative flex h-full shrink-0 items-center gap-1 border border-l-0 px-2 text-left text-[11px] transition-colors duration-[var(--motion-fast)] ${
-        tab.kind === "task" ? "w-[96px] max-w-[96px]" : "w-[92px] max-w-[92px]"
+      style={{
+        flex: "0 1 clamp(var(--workbench-tab-min-width), 12vw, var(--workbench-tab-max-width))",
+      }}
+      className={`workbench-tab group/tab relative flex h-[30px] min-w-[var(--workbench-tab-min-width)] max-w-[var(--workbench-tab-max-width)] shrink-0 items-center self-end border-x border-y px-2 text-left text-[length:var(--fs-xs)] transition-[background-color,border-color,color,box-shadow] duration-[var(--motion-fast)] ${
+        active
+          ? "z-10 -mb-px rounded-t-[8px] border-(--border)/70 border-b-(--agent-bg) bg-(--agent-bg) text-(--fg) shadow-[0_-1px_0_color-mix(in_srgb,var(--border)_55%,transparent)]"
+          : "rounded-t-[7px] border-transparent bg-transparent text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
       } ${
         active
-          ? "border-(--border) border-b-(--agent-bg) bg-(--agent-bg) text-(--fg)"
-          : "border-(--border)/35 bg-(--color-header) text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+          ? ""
+          : "after:absolute after:right-0 after:top-1/2 after:h-4 after:w-px after:-translate-y-1/2 after:bg-(--border)/45"
       }`}
     >
       <button
@@ -169,17 +183,14 @@ export function WorkbenchTabButton({
           if (event.button === 1) onClose();
         }}
         title={shortcut ? `${tab.title} (${shortcut})` : tab.title}
-        className="flex h-full min-w-0 flex-1 items-center gap-1 text-left outline-none"
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:rounded-[4px] focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px]"
       >
         <span
           className={`relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-[var(--motion-fast)] ${
             active ? "text-(--fg)" : "text-(--hl2)"
           }`}
         >
-          <Icon
-            className="h-[var(--workbench-tab-icon-size)] w-[var(--workbench-tab-icon-size)] opacity-90"
-            strokeWidth={1.65}
-          />
+          <Icon className="h-3 w-3 opacity-90" strokeWidth={1.65} />
           {working ? (
             <span className="absolute -bottom-px -right-px h-1.5 w-1.5 rounded-full bg-(--accent) ring-2 ring-(--color-header)" />
           ) : null}
@@ -196,8 +207,7 @@ export function WorkbenchTabButton({
             onClose();
           }}
           className={cx(
-            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] text-(--dim) transition-[background-color,color,opacity] duration-[var(--motion-fast)] focus-visible:opacity-100 hover:bg-(--fg)/8 hover:text-(--fg)",
-            active ? "opacity-75" : "opacity-0 group-hover:opacity-75",
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] text-(--dim) opacity-0 transition-[background-color,color,opacity] duration-[var(--motion-fast)] group-hover/tab:opacity-80 focus-visible:opacity-100 focus-visible:bg-(--fg)/8 hover:bg-(--fg)/8 hover:text-(--fg)",
           )}
         >
           <CloseIcon className="h-2.5 w-2.5" />

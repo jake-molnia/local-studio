@@ -9,7 +9,6 @@ import {
   ChevronRight,
   SearchIcon,
   NewTaskIcon,
-  SettingsIcon,
   PanelLeftHollow,
   PanelLeftFilled,
 } from "@/ui/icon-registry";
@@ -82,10 +81,14 @@ export function DesktopSidebar({
           aria-label="Resize sidebar"
           title="Resize sidebar"
           onMouseDown={onStartResize}
-          className={`absolute right-0 top-0 z-[60] h-full w-2 cursor-col-resize transition-colors ${
-            resizing ? "bg-(--fg)/10" : "hover:bg-(--fg)/8"
-          }`}
-        />
+          className="group absolute right-0 top-0 z-[60] h-full w-2 cursor-col-resize"
+        >
+          <span
+            className={`absolute inset-y-0 right-0 w-px transition-colors duration-[var(--motion-fast)] ${
+              resizing ? "bg-(--accent)/55" : "bg-transparent group-hover:bg-(--fg)/12"
+            }`}
+          />
+        </div>
       ) : null}
       {!isExpanded && pathname !== "/agent" ? (
         <div className="absolute left-2 top-2 z-[70] flex h-7 w-7 shrink-0 items-center justify-center">
@@ -105,10 +108,10 @@ export function DesktopSidebar({
           isExpanded ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <div className="sticky top-0 z-50 flex h-[var(--h-toolbar)] shrink-0 items-center gap-0.5 border-b border-(--border)/35 bg-(--sidebar-bg) px-1.5">
+        <div className="sticky top-0 z-50 flex h-[var(--h-toolbar)] shrink-0 items-center gap-0.5 bg-(--sidebar-bg) px-1.5">
           <button
             onClick={() => onSetPinnedOpen(false)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-(--hl2) transition-colors hover:bg-(--hover) hover:text-(--fg)"
+            className="flex h-6 w-6 items-center justify-center rounded-[5px] text-(--hl2) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
           >
@@ -155,9 +158,7 @@ export function DesktopSidebar({
                 event.preventDefault();
                 onNewTask();
               }}
-              className={`group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) ${
-                pathname === "/agent" ? "bg-(--active)" : ""
-              }`}
+              className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
               title="New task"
             >
               <NewTaskIcon className="h-3.5 w-3.5 shrink-0 opacity-80" />

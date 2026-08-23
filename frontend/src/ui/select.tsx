@@ -57,7 +57,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
           required={field.required}
           aria-describedby={field.describedBy}
           aria-invalid={field.invalid}
-          className={`${compact ? "h-6 w-auto min-w-24 border-(--ui-separator)/65 bg-(--ui-fg)/5 pl-2 pr-6 text-[length:var(--fs-xs)]" : "h-[var(--control-height)] w-full border-(--ui-separator) bg-(--ui-surface) pl-2 pr-7 text-[length:var(--fs-sm)]"} appearance-none rounded-[4px] border text-(--ui-fg) transition-[background-color,border-color] focus:border-(--ui-border-heavy) focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+          className={`${compact ? "h-6 w-auto min-w-24 border-(--ui-separator)/65 bg-(--ui-fg)/5 pl-2 pr-6 text-[length:var(--fs-xs)]" : "h-[var(--control-height)] w-full border-(--ui-separator) bg-(--ui-surface) pl-2 pr-7 text-[length:var(--fs-sm)]"} appearance-none rounded-[5px] border text-(--ui-fg) transition-[background-color,border-color,box-shadow] duration-[var(--motion-fast)] hover:border-(--ui-border-heavy) focus:border-(--ui-border-heavy) focus:bg-(--ui-bg) focus:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 ${className}`}
           {...props}
         >
           {placeholder && <option value="">{placeholder}</option>}

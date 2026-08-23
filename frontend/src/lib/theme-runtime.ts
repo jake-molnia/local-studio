@@ -34,12 +34,16 @@ function lightnessFromColor(value: string): number | null {
   return ((Math.max(r, g, b) + Math.min(r, g, b)) / 2) * 100;
 }
 
+function inkForTheme(tokens: ThemeTokens): string {
+  return (lightnessFromColor(tokens.bg) ?? 0) > 50 ? "26, 28, 31" : "255, 255, 255";
+}
+
 function deriveThemeUiTokens(
   tokens: ThemeTokens,
   overrides: Partial<ThemeUiTokens> = {},
 ): ThemeUiTokens {
   const isLight = (lightnessFromColor(tokens.bg) ?? 0) > 50;
-  const ink = isLight ? "26, 28, 31" : "255, 255, 255";
+  const ink = inkForTheme(tokens);
   return {
     // White/ink overlays over a unified canvas: 8% surfaces, 5% hover,
     // 8% active, hairline 8% borders — the same ratios tokens.css encodes.
@@ -47,13 +51,15 @@ function deriveThemeUiTokens(
     "surface-3": `rgba(${ink}, 0.05)`,
     // The rail sits one tone step above the canvas so the body reads darker
     // than the left navbar (mirrors tokens.css --color-sidebar).
-    rail: isLight ? "#f9f9f9" : tokens.surface,
+    rail: isLight
+      ? `color-mix(in oklab, ${tokens.bg} 97%, #000)`
+      : `color-mix(in oklab, ${tokens.bg} 82%, #000)`,
     border: `rgba(${ink}, 0.08)`,
     separator: `rgba(${ink}, 0.05)`,
     hover: `rgba(${ink}, 0.05)`,
     active: `rgba(${ink}, 0.08)`,
-    composer: "var(--sidebar-bg)",
-    "composer-footer": "var(--sidebar-bg)",
+    composer: tokens.bg,
+    "composer-footer": tokens.bg,
     bubble: tokens.surface,
     ...overrides,
   };
@@ -75,11 +81,11 @@ export function resolveThemeCssTokens(
     "color-brand": tokens.accent,
     "color-border": ui.border,
     "color-border-light": ui.separator,
-    "color-border-heavy": ui.border,
-    "color-border-hover": ui.border,
+    "color-border-heavy": `rgba(${inkForTheme(tokens)}, 0.16)`,
+    "color-border-hover": `rgba(${inkForTheme(tokens)}, 0.16)`,
     "color-hover": ui.hover,
     "color-selected": ui.active,
-    "color-header": tokens.bg,
+    "color-header": ui.rail,
     "color-panel": tokens.bg,
     "color-sidebar": ui.rail,
     "color-surface": tokens.surface,

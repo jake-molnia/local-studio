@@ -5,7 +5,7 @@ import { useFormControlAttributes } from "./form-field-context";
 import { cx, FIELD_LABEL_CLASS } from "./utils";
 
 const modelInputBaseClasses =
-  "h-6 w-full rounded-[4px] border border-transparent bg-(--ui-surface) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) outline-none transition placeholder:text-(--ui-muted)/65 focus:border-(--ui-border-heavy) focus:bg-(--ui-bg) disabled:cursor-not-allowed disabled:opacity-50";
+  "h-6 w-full rounded-[5px] border border-transparent bg-(--ui-surface) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) outline-none transition-[background-color,border-color,box-shadow] duration-[var(--motion-fast)] placeholder:text-(--ui-muted)/65 hover:border-(--ui-border-hover) focus:border-(--ui-border-heavy) focus:bg-(--ui-bg) focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -47,7 +47,12 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       )}
       <div className="relative">
         {icon && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-(--ui-muted)">{icon}</div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-(--ui-muted)"
+          >
+            {icon}
+          </div>
         )}
         <input
           ref={ref}
@@ -56,7 +61,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           required={field.required}
           aria-describedby={describedBy}
           aria-invalid={field.invalid ?? (error ? true : undefined)}
-          className={`h-[var(--control-height)] w-full rounded-[4px] border border-(--ui-separator) bg-(--surface-3) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) transition-[background-color,border-color] placeholder:text-(--hl2) focus:border-(--link)/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${icon ? "pl-8" : ""} ${error ? "border-(--ui-danger)" : ""} ${className}`}
+          className={`h-[var(--control-height)] w-full rounded-[5px] border border-(--ui-separator) bg-(--surface-3) px-2 text-[length:var(--fs-sm)] text-(--ui-fg) transition-[background-color,border-color,box-shadow] duration-[var(--motion-fast)] placeholder:text-(--hl2) hover:border-(--ui-border-heavy) focus:border-(--link)/70 focus:bg-(--ui-bg) focus:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) disabled:cursor-not-allowed disabled:pointer-events-none disabled:opacity-50 ${icon ? "pl-8" : ""} ${error ? "border-(--ui-danger) focus:border-(--ui-danger)" : ""} ${className}`}
           {...props}
         />
       </div>

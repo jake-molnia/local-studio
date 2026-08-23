@@ -514,7 +514,7 @@ export function WorkbenchTabStrip() {
           type="button"
           data-ui-control="compact"
           onClick={() => setSidebarExpanded(true)}
-          className="hidden h-full w-8 shrink-0 items-center justify-center border-r border-(--border) text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) md:flex"
+          className="absolute left-1 top-1/2 z-30 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[5px] text-(--dim) transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) md:flex"
           aria-label="Expand sidebar"
           title="Expand sidebar"
         >
@@ -534,6 +534,7 @@ export function WorkbenchTabStrip() {
       <WorkbenchProjectTabList
         projectName={projectName}
         threadTitle={activeScope.groupTitle}
+        sidebarCollapsed={!sidebarExpanded}
         orderedTabs={orderedTabs}
         activeId={activeTabId}
         onActivate={activateTab}

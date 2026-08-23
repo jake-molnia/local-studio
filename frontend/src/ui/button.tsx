@@ -37,7 +37,7 @@ const iconSizeClasses: Record<ButtonSize, string> = {
 };
 
 const baseClasses =
-  "inline-flex items-center justify-center gap-1.5 rounded-[4px] border border-transparent font-medium transition-[color,background-color,border-color,opacity]";
+  "inline-flex items-center justify-center gap-1.5 rounded-[5px] border border-transparent font-medium transition-[color,background-color,border-color,box-shadow,opacity] duration-[var(--motion-fast)] ease-[var(--ease-standard)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--ui-bg) active:brightness-95 disabled:pointer-events-none disabled:cursor-not-allowed";
 
 const modelButtonToneClasses = {
   default: "text-(--ui-muted) hover:bg-(--ui-hover) hover:text-(--ui-fg)",
@@ -45,7 +45,7 @@ const modelButtonToneClasses = {
   danger: "text-(--ui-danger) hover:bg-(--ui-danger)/10",
 } as const;
 const modelButtonBaseClasses =
-  "inline-flex h-6 items-center justify-center gap-1.5 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] font-medium transition-[background-color,color] disabled:pointer-events-none disabled:opacity-45";
+  "inline-flex h-6 items-center justify-center gap-1.5 rounded-[5px] px-1.5 text-[length:var(--fs-xs)] font-medium transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] ease-[var(--ease-standard)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-1 focus-visible:ring-offset-(--ui-bg) active:brightness-95 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45";
 
 export type ModelButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   tone?: "default" | "primary" | "danger";
@@ -56,6 +56,7 @@ export function ModelButton({
   children,
   tone = "default",
   type = "button",
+  className,
   ...props
 }: ModelButtonProps) {
   return (
@@ -63,7 +64,7 @@ export function ModelButton({
       type={type}
       data-ui-control="compact"
       {...props}
-      className={cx(modelButtonBaseClasses, modelButtonToneClasses[tone])}
+      className={cx(modelButtonBaseClasses, modelButtonToneClasses[tone], className)}
     >
       {children}
     </button>

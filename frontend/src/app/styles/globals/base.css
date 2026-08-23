@@ -172,8 +172,11 @@ a.nav-link:hover,
 }
 
 [data-ui-control]:focus-visible {
-  outline: 1px solid var(--focus-ring, var(--accent)) !important;
-  outline-offset: var(--focus-ring-offset, 1px) !important;
+  outline: none !important;
+  box-shadow:
+    0 0 0 1px var(--focus-ring, var(--accent)),
+    0 0 0 2px var(--ui-bg, var(--bg)) !important;
+  outline-offset: 0 !important;
 }
 
 [data-ui-control]:active:not(:disabled) {
