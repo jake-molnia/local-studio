@@ -1,6 +1,7 @@
 const std = @import("std");
 const config = @import("../config.zig");
 const repository = @import("../repository/head_connection.zig");
+const harness_runtime = @import("harness_runtime.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -13,7 +14,7 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, data_dir: []const u8) ![]u8
     return response(allocator, &connection.?);
 }
 
-pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, data_dir: []const u8, hostname: []const u8, os: []const u8, pi_available: bool, pi_version: ?[]const u8, pi_source: []const u8, document: []const u8) ![]u8 {
+pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, data_dir: []const u8, hostname: []const u8, os: []const u8, harness: *harness_runtime.Manager, document: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHeadConnection;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidHeadConnection;
@@ -32,7 +33,7 @@ pub fn updatePayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, cl
     io.random(&random);
     const generated = std.fmt.bytesToHex(random, .lower);
     const node_id = if (existing) |value| value.node_id else generated[0..];
-    const enrollment = try enrollmentDocument(allocator, mode, node_id, hostname, os, node_address, node_api_key, pi_available, pi_version, pi_source);
+    const enrollment = try enrollmentDocument(allocator, mode, node_id, hostname, os, node_address, node_api_key, harness);
     defer allocator.free(enrollment);
     try sendEnrollment(allocator, client, url, api_key, .POST, "/api/agent/enrollments", enrollment);
     try repository.save(allocator, io, data_dir, name, url, api_key, node_id, node_address);
@@ -68,7 +69,7 @@ fn response(allocator: std.mem.Allocator, connection: *const repository.Connecti
     return output.toOwnedSlice();
 }
 
-fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: []const u8, hostname: []const u8, os: []const u8, address: []const u8, api_key: []const u8, pi_available: bool, pi_version: ?[]const u8, pi_source: []const u8) ![]u8 {
+fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: []const u8, hostname: []const u8, os: []const u8, address: []const u8, api_key: []const u8, harness: *harness_runtime.Manager) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"nodeId\":");
@@ -85,18 +86,28 @@ fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: 
     try std.json.Stringify.value(api_key, .{}, &output.writer);
     try output.writer.writeAll(",\"role\":");
     try std.json.Stringify.value(if (mode == .worker) "worker" else "standalone", .{}, &output.writer);
-    try output.writer.print(",\"capabilities\":{{\"compute\":true,\"harnesses\":[{s}],\"mcp\":{},\"terminal\":{},\"browser\":true,\"harnessDetails\":[", .{
-        if (pi_available) "\"pi\"" else "", true, true,
-    });
-    if (pi_available) {
-        try output.writer.writeAll("{\"id\":\"pi\",\"version\":");
-        if (pi_version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
-        try output.writer.writeAll(",\"source\":");
-        try std.json.Stringify.value(pi_source, .{}, &output.writer);
-        try output.writer.writeAll(",\"capabilities\":[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]}");
-    }
+    try output.writer.writeAll(",\"capabilities\":{\"compute\":true,\"harnesses\":[\"chat\"");
+    if (harness.piIsAvailable()) try output.writer.writeAll(",\"pi\"");
+    if (harness.fxIsAvailable()) try output.writer.writeAll(",\"fx\"");
+    if (harness.codexIsAvailable()) try output.writer.writeAll(",\"codex\"");
+    try output.writer.writeAll("],\"mcp\":true,\"terminal\":true,\"browser\":true,\"harnessDetails\":[{\"id\":\"chat\",\"version\":\"0.0.0-local-studio\",\"source\":\"embedded\",\"capabilities\":[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]}");
+    if (harness.piIsAvailable()) try writeHarnessDetail(&output.writer, "pi", harness.piVersion(), harness.piSource(), "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
+    if (harness.fxIsAvailable()) try writeHarnessDetail(&output.writer, "fx", harness.fxVersion(), harness.fxSource(), "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    if (harness.codexIsAvailable()) try writeHarnessDetail(&output.writer, "codex", harness.codexVersion(), harness.codexSource(), "[\"persistent-session\",\"resume\",\"cancel\"]");
     try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
+}
+
+fn writeHarnessDetail(writer: *Io.Writer, id: []const u8, version: ?[]const u8, source: []const u8, capabilities: []const u8) !void {
+    try writer.writeAll(",{\"id\":");
+    try std.json.Stringify.value(id, .{}, writer);
+    try writer.writeAll(",\"version\":");
+    if (version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"source\":");
+    try std.json.Stringify.value(source, .{}, writer);
+    try writer.writeAll(",\"capabilities\":");
+    try writer.writeAll(capabilities);
+    try writer.writeByte('}');
 }
 
 fn sendEnrollment(allocator: std.mem.Allocator, client: *http.Client, head_url: []const u8, api_key: []const u8, method: http.Method, path: []const u8, payload_value: ?[]const u8) !void {

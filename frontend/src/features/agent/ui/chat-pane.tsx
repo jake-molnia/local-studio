@@ -481,7 +481,7 @@ export function ChatPane({
       if (!activeTab || activeTab.messages.length > 0) return;
       updateTab(activeTab.id, (session) => ({
         ...session,
-        harness: isChatsProject(project) ? "fx" : undefined,
+        harness: isChatsProject(project) ? "chat" : undefined,
         projectId: project.id,
         cwd: isChatsProject(project) ? undefined : project.path,
       }));

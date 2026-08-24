@@ -114,6 +114,10 @@ export function AgentModelPicker({
   const [selectedCompany, setSelectedCompany] = useState("openai");
   const [openSource, setOpenSource] = useState<"pointer" | "keyboard">("keyboard");
   const harnesses = useHarnessCatalog();
+  const selectableHarnesses = useMemo(
+    () => harnesses.filter((harness) => harness.selectable !== false),
+    [harnesses],
+  );
   const open = controlledOpen ?? internalOpen;
   const choices = useMemo(() => buildModelChoices(models), [models]);
   const activeChoice = useMemo(
@@ -139,7 +143,7 @@ export function AgentModelPicker({
         activeChoice,
         activeRoute,
         supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null,
-        onSelectHarness ? harnessLabel : null,
+        onSelectHarness && selectedHarness !== "chat" ? harnessLabel : null,
         modelTriggerLabel(activeChoice, selectedModel, loading, choices.length),
       ),
     [
@@ -150,6 +154,7 @@ export function AgentModelPicker({
       harnessLabel,
       loading,
       onSelectHarness,
+      selectedHarness,
       selectedModel,
       supportsReasoning,
     ],
@@ -466,8 +471,8 @@ export function AgentModelPicker({
                 </SimplePickerPanel>
               ) : view === "harness" && onSelectHarness ? (
                 <SimplePickerPanel title="Harness">
-                  {(harnesses.length
-                    ? harnesses
+                  {(selectableHarnesses.length
+                    ? selectableHarnesses
                     : [{ id: selectedHarness, name: harnessLabel, status: "available" }]
                   ).map((harness) => (
                     <SimplePickerOption

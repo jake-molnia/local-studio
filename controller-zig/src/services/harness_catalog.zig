@@ -67,11 +67,35 @@ pub fn discoverCodex(allocator: std.mem.Allocator, io: Io, configuration: *const
     };
 }
 
-pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const Installation) !void {
+pub fn discoverFx(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Installation {
+    if (configuration.environment.get("LOCAL_STUDIO_FX_BIN")) |configured| {
+        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+        if (trimmed.len > 0) return probeFx(allocator, io, configuration.environment, "configured", trimmed);
+    }
+    if (try pathExecutable(allocator, io, configuration.environment, "fx")) |executable| {
+        defer allocator.free(executable);
+        return probeFx(allocator, io, configuration.environment, "system", executable);
+    }
+    for (knownFxLocations()) |candidate| {
+        if (!executableFile(io, candidate)) continue;
+        return probeFx(allocator, io, configuration.environment, "system", candidate);
+    }
+    return .{
+        .allocator = allocator,
+        .source = try allocator.dupe(u8, "missing"),
+        .executable = try allocator.dupe(u8, "fx"),
+        .version = null,
+        .rpc_supported = false,
+    };
+}
+
+pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const Installation, fx: *const Installation) !void {
     try writer.writeAll("{\"harnesses\":[");
     try writePi(writer, pi);
     try writer.writeAll(",");
-    try writeFx(writer);
+    try writeChat(writer);
+    try writer.writeAll(",");
+    try writeInstallation(writer, "fx", "FX", "acp", fx);
     try writer.writeAll(",");
     try writeUnavailable(writer, "opencode", "OpenCode", "http-sse");
     try writer.writeAll(",");
@@ -83,7 +107,7 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const I
 
 pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
-    if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    if (std.mem.eql(u8, harness, "chat") or std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
     try writer.writeAll("[]");
 }
@@ -170,6 +194,24 @@ fn probeCodex(allocator: std.mem.Allocator, io: Io, environment: *const std.proc
     };
 }
 
+fn probeFx(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, source: []const u8, executable: []const u8) !Installation {
+    const owned_source = try allocator.dupe(u8, source);
+    errdefer allocator.free(owned_source);
+    const owned_executable = try allocator.dupe(u8, executable);
+    errdefer allocator.free(owned_executable);
+    const version = commandOutput(allocator, io, environment, &.{ executable, "--version" });
+    errdefer if (version) |value| allocator.free(value);
+    const help = commandOutput(allocator, io, environment, &.{ executable, "acp", "--help" });
+    defer if (help) |value| allocator.free(value);
+    return .{
+        .allocator = allocator,
+        .source = owned_source,
+        .executable = owned_executable,
+        .version = version,
+        .rpc_supported = help != null,
+    };
+}
+
 fn commandOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, argv: []const []const u8) ?[]u8 {
     const result = std.process.run(allocator, io, .{
         .argv = argv,
@@ -206,6 +248,7 @@ fn writeInstallation(writer: *Io.Writer, id: []const u8, name: []const u8, trans
     try std.json.Stringify.value(name, .{}, writer);
     try writer.writeAll(",\"status\":");
     try std.json.Stringify.value(if (installation.available()) "available" else if (installation.version != null) "unsupported" else "missing", .{}, writer);
+    try writer.writeAll(",\"selectable\":true");
     try writer.writeAll(",\"transport\":");
     try std.json.Stringify.value(transport, .{}, writer);
     try writer.writeAll(",\"installation\":{\"source\":");
@@ -219,9 +262,9 @@ fn writeInstallation(writer: *Io.Writer, id: []const u8, name: []const u8, trans
     try writer.writeByte('}');
 }
 
-fn writeFx(writer: *Io.Writer) !void {
-    try writer.writeAll("{\"id\":\"fx\",\"name\":\"FX\",\"status\":\"available\",\"transport\":\"embedded-acp\",\"installation\":{\"source\":\"embedded\",\"executable\":\"self\",\"version\":\"0.0.0-local-studio\"},\"capabilities\":");
-    try writeCapabilities(writer, "fx");
+fn writeChat(writer: *Io.Writer) !void {
+    try writer.writeAll("{\"id\":\"chat\",\"name\":\"Chat\",\"status\":\"available\",\"selectable\":false,\"transport\":\"embedded-acp\",\"installation\":{\"source\":\"embedded\",\"executable\":\"self\",\"version\":\"0.0.0-local-studio\"},\"capabilities\":");
+    try writeCapabilities(writer, "chat");
     try writer.writeByte('}');
 }
 
@@ -241,4 +284,8 @@ fn knownPiLocations() []const []const u8 {
 
 fn knownCodexLocations() []const []const u8 {
     return &.{ "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex" };
+}
+
+fn knownFxLocations() []const []const u8 {
+    return &.{ "/opt/homebrew/bin/fx", "/usr/local/bin/fx", "/usr/bin/fx" };
 }

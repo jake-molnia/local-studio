@@ -38,11 +38,13 @@ pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"harnesses\":[");
-    for ([_]struct { id: []const u8, name: []const u8, transport: []const u8 }{
-        .{ .id = "pi", .name = "Pi", .transport = "jsonl-rpc" },
-        .{ .id = "opencode", .name = "OpenCode", .transport = "http-sse" },
-        .{ .id = "codex", .name = "Codex", .transport = "app-server" },
-        .{ .id = "claude", .name = "Claude Code", .transport = "stream-json" },
+    for ([_]struct { id: []const u8, name: []const u8, transport: []const u8, selectable: bool }{
+        .{ .id = "pi", .name = "Pi", .transport = "jsonl-rpc", .selectable = true },
+        .{ .id = "chat", .name = "Chat", .transport = "embedded-acp", .selectable = false },
+        .{ .id = "fx", .name = "FX", .transport = "acp", .selectable = true },
+        .{ .id = "opencode", .name = "OpenCode", .transport = "http-sse", .selectable = true },
+        .{ .id = "codex", .name = "Codex", .transport = "app-server", .selectable = true },
+        .{ .id = "claude", .name = "Claude Code", .transport = "stream-json", .selectable = true },
     }, 0..) |descriptor, index| {
         if (index > 0) try output.writer.writeByte(',');
         const node_count = try harness_nodes.count(allocator, io, database, descriptor.id);
@@ -52,6 +54,7 @@ pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
         try std.json.Stringify.value(descriptor.name, .{}, &output.writer);
         try output.writer.writeAll(",\"status\":");
         try std.json.Stringify.value(if (node_count > 0) "available" else "missing", .{}, &output.writer);
+        try output.writer.print(",\"selectable\":{}", .{descriptor.selectable});
         try output.writer.writeAll(",\"transport\":");
         try std.json.Stringify.value(descriptor.transport, .{}, &output.writer);
         try output.writer.print(",\"installation\":null,\"nodeCount\":{d},\"capabilities\":", .{node_count});
@@ -133,7 +136,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const model_route_id = optionalString(object, "modelRouteId") orelse if (existing) |session| session.model_route_id orelse model_id else model_id;
     const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
-    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx")) return error.HarnessDriverUnavailable;
+    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "codex")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head) try harness_nodes.select(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
@@ -145,10 +148,10 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         .id = session_id,
         .harness = requested_harness,
         .harness_version = if (mode == .standalone)
-            if (std.mem.eql(u8, requested_harness, "fx")) "0.0.0-local-studio" else harness.piVersion()
+            if (std.mem.eql(u8, requested_harness, "chat")) "0.0.0-local-studio" else if (std.mem.eql(u8, requested_harness, "fx")) harness.fxVersion() else if (std.mem.eql(u8, requested_harness, "codex")) harness.codexVersion() else harness.piVersion()
         else
             target.?.harness_version orelse if (existing) |session| session.harness_version else null,
-        .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else if (std.mem.eql(u8, requested_harness, "pi")) "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]" else "[]",
+        .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else harnessCapabilities(requested_harness),
         .node_id = node_id,
         .native_session_id = native_session_id,
         .project_id = project_id,
@@ -214,7 +217,7 @@ pub fn transcriptPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode
     if (since) |entry_id| if (!validEntryId(entry_id)) return error.InvalidTranscriptCursor;
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
     defer session.deinit();
-    if (std.mem.eql(u8, session.harness, "fx")) return storedTranscriptPayload(allocator, io, database, &session);
+    if (std.mem.eql(u8, session.harness, "chat") or std.mem.eql(u8, session.harness, "fx")) return storedTranscriptPayload(allocator, io, database, &session);
     if (mode == .standalone) return harness.transcriptPayload(session_id, session.native_session_id, since);
     const native_session_id = session.native_session_id orelse return error.NativeSessionIdRequired;
     if (!harness_session_id.validNative(native_session_id)) return error.InvalidNativeSessionId;
@@ -571,6 +574,13 @@ fn validEntryId(value: []const u8) bool {
     if (value.len == 0 or value.len > 128) return false;
     for (value) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return false;
     return true;
+}
+
+fn harnessCapabilities(harness: []const u8) []const u8 {
+    if (std.mem.eql(u8, harness, "pi")) return "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]";
+    if (std.mem.eql(u8, harness, "chat") or std.mem.eql(u8, harness, "fx")) return "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]";
+    if (std.mem.eql(u8, harness, "codex")) return "[\"persistent-session\",\"resume\",\"cancel\"]";
+    return "[]";
 }
 
 fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

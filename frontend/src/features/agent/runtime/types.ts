@@ -12,7 +12,7 @@ import type { AgentThinkingLevel } from "@/features/agent/contracts";
 export type SessionId = string;
 
 export type SessionStatus = "idle" | "starting" | "running" | "stopping" | "loading";
-export type AgentHarness = "codex" | "fx" | "pi";
+export type AgentHarness = "chat" | "codex" | "fx" | "pi";
 
 export type ExtensionUiRequest = {
   requestId: string;

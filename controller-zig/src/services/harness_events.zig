@@ -24,7 +24,8 @@ pub fn canonicalDocument(allocator: std.mem.Allocator, harness: []const u8, docu
 }
 
 pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness: []const u8, document: []const u8) !void {
-    if (!std.mem.eql(u8, harness, "fx")) return writer.writeAll(document);
+    if (std.mem.eql(u8, harness, "codex")) return writeCodexCanonical(allocator, writer, document);
+    if (!isAcp(harness)) return writer.writeAll(document);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return writer.writeAll(document);
     defer parsed.deinit();
     if (parsed.value != .object) return writer.writeAll(document);
@@ -81,6 +82,50 @@ pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness:
     return writer.writeAll(document);
 }
 
+fn writeCodexCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, document: []const u8) !void {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return writer.writeAll(document);
+    defer parsed.deinit();
+    if (parsed.value != .object) return writer.writeAll(document);
+    const object = parsed.value.object;
+    const event_type = stringField(object, "type") orelse return writer.writeAll(document);
+    if (std.mem.eql(u8, event_type, "turn.started")) return writer.writeAll("{\"type\":\"agent_start\"}");
+    if (std.mem.eql(u8, event_type, "turn.completed")) return writer.writeAll("{\"type\":\"agent_settled\"}");
+    if (std.mem.eql(u8, event_type, "turn.failed")) {
+        try writer.writeAll("{\"type\":\"extension_error\",\"message\":");
+        try std.json.Stringify.value(codexError(object) orelse "Codex turn failed", .{}, writer);
+        try writer.writeByte('}');
+        return;
+    }
+    if (!std.mem.eql(u8, event_type, "item.started") and !std.mem.eql(u8, event_type, "item.completed")) return writer.writeAll(document);
+    const item = object.get("item") orelse return writer.writeAll(document);
+    if (item != .object) return writer.writeAll(document);
+    const item_type = stringField(item.object, "type") orelse return writer.writeAll(document);
+    const item_id = stringField(item.object, "id") orelse "codex-item";
+    if (std.mem.eql(u8, item_type, "agent_message") and std.mem.eql(u8, event_type, "item.completed")) {
+        try writer.writeAll("{\"type\":\"message\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":");
+        try std.json.Stringify.value(stringField(item.object, "text") orelse "", .{}, writer);
+        try writer.writeAll("}]}}");
+        return;
+    }
+    if (std.mem.eql(u8, item_type, "command_execution")) {
+        if (std.mem.eql(u8, event_type, "item.started")) {
+            try writer.writeAll("{\"type\":\"tool_execution_start\",\"toolCallId\":");
+            try std.json.Stringify.value(item_id, .{}, writer);
+            try writer.writeAll(",\"toolName\":\"command\"}");
+            return;
+        }
+        try writer.writeAll("{\"type\":\"tool_execution_end\",\"toolCallId\":");
+        try std.json.Stringify.value(item_id, .{}, writer);
+        try writer.writeAll(",\"isError\":");
+        try writer.writeAll(if (codexExitFailed(item.object)) "true" else "false");
+        try writer.writeAll(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":");
+        try std.json.Stringify.value(stringField(item.object, "aggregated_output") orelse "", .{}, writer);
+        try writer.writeAll("}]}}");
+        return;
+    }
+    return writer.writeAll(document);
+}
+
 pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness: []const u8, document: []const u8) !void {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch {
         try writer.writeAll("null");
@@ -91,7 +136,7 @@ pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness
         try writer.writeAll("null");
         return;
     }
-    if (std.mem.eql(u8, harness, "fx")) return writeAcpNormalized(writer, parsed.value.object);
+    if (isAcp(harness)) return writeAcpNormalized(writer, harness, parsed.value.object);
     const native_type = stringField(parsed.value.object, "type") orelse {
         try writer.writeAll("null");
         return;
@@ -106,7 +151,7 @@ pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness
     try writer.writeByte('}');
 }
 
-fn writeAcpNormalized(writer: *Io.Writer, object: std.json.ObjectMap) !void {
+fn writeAcpNormalized(writer: *Io.Writer, harness: []const u8, object: std.json.ObjectMap) !void {
     const method = stringField(object, "method");
     if (method) |value| if (std.mem.eql(u8, value, "session/update")) {
         const params = object.get("params") orelse return writer.writeAll("null");
@@ -124,7 +169,9 @@ fn writeAcpNormalized(writer: *Io.Writer, object: std.json.ObjectMap) !void {
             "session.updated";
         try writer.writeAll("{\"type\":");
         try std.json.Stringify.value(kind, .{}, writer);
-        try writer.writeAll(",\"harness\":\"fx\",\"nativeType\":");
+        try writer.writeAll(",\"harness\":");
+        try std.json.Stringify.value(harness, .{}, writer);
+        try writer.writeAll(",\"nativeType\":");
         try std.json.Stringify.value(native_type, .{}, writer);
         try writer.writeByte('}');
         return;
@@ -132,10 +179,22 @@ fn writeAcpNormalized(writer: *Io.Writer, object: std.json.ObjectMap) !void {
     const kind = if (object.get("error") != null) "session.failed" else if (object.get("result") != null) "turn.completed" else return writer.writeAll("null");
     try writer.writeAll("{\"type\":");
     try std.json.Stringify.value(kind, .{}, writer);
-    try writer.writeAll(",\"harness\":\"fx\",\"nativeType\":\"jsonrpc_response\"}");
+    try writer.writeAll(",\"harness\":");
+    try std.json.Stringify.value(harness, .{}, writer);
+    try writer.writeAll(",\"nativeType\":\"jsonrpc_response\"}");
+}
+
+fn isAcp(harness: []const u8) bool {
+    return std.mem.eql(u8, harness, "chat") or std.mem.eql(u8, harness, "fx");
 }
 
 fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u8 {
+    if (std.mem.eql(u8, native_type, "turn.started")) return "turn.started";
+    if (std.mem.eql(u8, native_type, "turn.completed")) return "turn.completed";
+    if (std.mem.eql(u8, native_type, "turn.failed")) return "session.failed";
+    if (std.mem.eql(u8, native_type, "thread.started")) return "session.started";
+    if (std.mem.eql(u8, native_type, "item.started")) return "item.started";
+    if (std.mem.eql(u8, native_type, "item.completed")) return "item.completed";
     if (std.mem.eql(u8, native_type, "turn_start")) return "turn.started";
     if (std.mem.eql(u8, native_type, "agent_settled")) return "turn.completed";
     if (std.mem.eql(u8, native_type, "tool_execution_start")) return "tool.started";
@@ -153,6 +212,18 @@ fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u
         return "message.updated";
     }
     return "native.event";
+}
+
+fn codexError(object: std.json.ObjectMap) ?[]const u8 {
+    const value = object.get("error") orelse return null;
+    if (value == .string) return value.string;
+    if (value != .object) return null;
+    return stringField(value.object, "message");
+}
+
+fn codexExitFailed(object: std.json.ObjectMap) bool {
+    const value = object.get("exit_code") orelse return false;
+    return value == .integer and value.integer != 0;
 }
 
 fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

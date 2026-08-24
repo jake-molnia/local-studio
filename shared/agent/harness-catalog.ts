@@ -6,6 +6,7 @@ export const HarnessCatalogSchema = Schema.Struct({
       id: Schema.String,
       name: Schema.String,
       status: Schema.String,
+      selectable: Schema.optional(Schema.Boolean),
       transport: Schema.String,
       nodeCount: Schema.optional(Schema.Number),
       installation: Schema.optional(
