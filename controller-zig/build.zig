@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     fx_build_options.addOption([]const u8, "git_commit", "669ef8a7f0bf6b13a1722bfd434fb9fc61d01511");
     fx_build_options.addOption([]const u8, "app_version", "0.0.0-local-studio");
     fx_build_options.addOption([]const u8, "update_channel", "stable");
+    fx_build_options.addOption(bool, "local_studio_mcp_only", true);
     const fx_module = b.createModule(.{
         .root_source_file = b.path(".managed/fx/src/local_studio.zig"),
         .target = target,

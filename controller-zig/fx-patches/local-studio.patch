@@ -242,3 +242,205 @@ index 0000000..b186a95
 +fn appendStatic(_: context_contract.StaticContextInput, _: std.mem.Allocator, _: *std.ArrayList(types.ChatMessage)) context_contract.ProviderError!void {}
 +
 +fn appendTransient(_: context_contract.TransientContextInput, _: std.mem.Allocator, _: *std.ArrayList(types.ChatMessage)) context_contract.ProviderError!void {}
+diff --git a/src/core/tooling/tool_runtime.zig b/src/core/tooling/tool_runtime.zig
+index 132d733..5922795 100644
+--- a/src/core/tooling/tool_runtime.zig
++++ b/src/core/tooling/tool_runtime.zig
+@@ -1,5 +1,6 @@
+ const std = @import("std");
+ const builtin = @import("builtin");
++const build_options = @import("build_options");
+ const agent_stream_provider = @import("../agent/stream_provider.zig");
+ const auth_runtime = @import("../auth/auth_runtime.zig");
+ const oauth_transport = @import("../auth/oauth_transport.zig");
+@@ -90,6 +91,7 @@ else
+     struct {};
+ 
+ const Allocator = std.mem.Allocator;
++const mcp_only = @hasDecl(build_options, "local_studio_mcp_only") and build_options.local_studio_mcp_only;
+ const ToolCall = types.ToolCall;
+ const ChatMessage = types.ChatMessage;
+ 
+@@ -310,6 +312,17 @@ fn providerDisablesTool(capabilities: provider_set.Bundle.Capabilities, name: []
+ }
+ 
+ pub fn validateToolCall(ctx: Context, arena: Allocator, call: ToolCall) !tool_contracts.ToolCallValidationResult {
++    if (comptime mcp_only) {
++        return switch (try tool_mcp_runtime.validateAdvertisedDynamicTool(.{
++            .is_registered_tool = false,
++            .advertised_dynamic_tool_names = ctx.advertised_dynamic_tool_names,
++            .runtime = mcpRuntimeCapabilities(ctx),
++        }, arena, call.name, call.arguments_json)) {
++            .valid => .valid,
++            .invalid => |reason| .{ .failure = reason },
++            .not_available => .not_registered,
++        };
++    }
+     if (providerDisablesTool(ctx.provider_capabilities, call.name)) {
+         return .{ .failure = try arena.dupe(u8, "Unsupported tool: vision") };
+     }
+@@ -342,6 +355,9 @@ pub fn validateToolCall(ctx: Context, arena: Allocator, call: ToolCall) !tool_co
+ }
+ 
+ pub fn checkToolAvailability(ctx: Context, arena: Allocator, call: ToolCall) !?[]const u8 {
++    if (comptime mcp_only) {
++        return null;
++    }
+     if (providerDisablesTool(ctx.provider_capabilities, call.name)) {
+         return try arena.dupe(u8, "Unsupported tool: vision");
+     }
+@@ -356,6 +372,13 @@ pub fn executeToolCallAuthorized(
+     ctx: Context,
+     request: tool_contracts.ToolExecutionRequest,
+ ) !ToolExecutionResult {
++    return if (comptime mcp_only)
++        executeMcpOnly(ctx, request)
++    else
++        executeToolCallAuthorizedFull(ctx, request);
++}
++
++fn executeToolCallAuthorizedFull(ctx: Context, request: tool_contracts.ToolExecutionRequest) !ToolExecutionResult {
+     var replay_continuation_transferred = request.command_replay_capture == null;
+     defer if (!replay_continuation_transferred) {
+         request.command_replay_capture.?.abort(request.result_allocator);
+@@ -454,6 +477,71 @@ pub fn executeToolCallAuthorized(
+     return result;
+ }
+ 
++fn executeMcpOnly(ctx: Context, request: tool_contracts.ToolExecutionRequest) !ToolExecutionResult {
++    if (request.live_authority) |authority| {
++        if (!containsName(authority.integrations, request.call.name)) return error.LiveToolAuthorityUnavailable;
++    }
++    const dynamic_tool = switch (tool_mcp_registry.resolve(
++        request.advertised_dynamic_tool_names,
++        mcpRuntimeCapabilities(ctx),
++        request.call.name,
++    )) {
++        .registered => |tool| tool,
++        .not_selected => return semanticFailure(try tool_mcp_runtime.notSelectedOutput(request.result_allocator, request.call.name)),
++        .unsupported => return semanticFailure(try std.fmt.allocPrint(request.result_allocator, "Unsupported tool: {s}", .{request.call.name})),
++    };
++    var progress_bridge = McpProgressBridge{ .ctx = ctx };
++    var call_status: ?tool_mcp_runtime.CallStatus = null;
++    var execution_error: ?anyerror = null;
++    var selected_sink = SelectedDynamicToolSinkState{ .allocator = request.result_allocator };
++    var notice_sink = ContextNoticeSinkState{ .allocator = request.result_allocator };
++    var dispatch_ctx = tool_dispatch.DispatchContext{
++        .allocator = request.result_allocator,
++        .permission_mode = request.permission_mode orelse ctx.permission_mode,
++        .max_tool_result_bytes = request.max_tool_result_bytes,
++        .cancel_flag = ctx.cancel_flag,
++        .tool_call_id = request.call.id,
++        .tool_call_name = request.call.name,
++        .mcp_ctx = ctx.mcp_ctx,
++        .mcp_call_tool = ctx.mcp_call_tool,
++        .mcp_search_tools = ctx.mcp_search_tools,
++        .mcp_tool_schema = ctx.mcp_tool_schema,
++        .mcp_call_feature = ctx.mcp_call_feature,
++        .mcp_access = if (request.live_authority) |authority| rebindMcpAuthorityGeneration(ctx.mcp_access, authority.generation) else ctx.mcp_access,
++        .mcp_input_responder = ctx.mcp_input_responder,
++        .mcp_permission_rules = if ((request.permission_mode orelse ctx.permission_mode) == .yolo) .{} else if (request.live_authority) |authority| authority.rules else ctx.permission_rules,
++        .mcp_call_options = .{
++            .cancel_flag = ctx.cancel_flag,
++            .progress = .{ .context = @ptrCast(&progress_bridge), .callback = emitMcpProgress },
++            .input_responder = ctx.mcp_input_responder,
++            .access = if (request.live_authority) |authority| rebindMcpAuthorityGeneration(ctx.mcp_access, authority.generation) else ctx.mcp_access,
++        },
++        .mcp_call_status_sink = &call_status,
++        .mcp_execution_error_sink = &execution_error,
++    };
++    attachSelectedDynamicToolSink(&dispatch_ctx, &selected_sink);
++    attachContextNoticeSink(&dispatch_ctx, &notice_sink);
++    const registry = tool_dispatch.Registry{ .tools = &.{dynamic_tool} };
++    const dispatched = try tool_dispatch.dispatchAuthorizedToolCall(dispatch_ctx, registry, request.call);
++    if (execution_error) |failure| {
++        dispatched.deinit(request.result_allocator);
++        return failure;
++    }
++    var execution = toolExecutionResultFromDispatch(dispatched);
++    execution.model_output = dispatched.body;
++    if (dispatched.status_detail) |detail| execution.status_detail = detail;
++    if (call_status == .input_required or
++        (execution.status == .failure and tool_mcp_feature_dispatch.isInputRequiredFailure(execution.model_output)))
++    {
++        execution.finish_turn = true;
++        execution.status_detail = "McpInputRequired";
++    }
++    execution.selected_dynamic_tool_name = selected_sink.name;
++    execution.selected_dynamic_tool_schema_json = selected_sink.schema_json;
++    execution.context_notices = notice_sink.notices.items;
++    return execution;
++}
++
+ fn rebindMcpAuthorityGeneration(
+     access: tool_mcp_runtime.Access,
+     authority_generation: u64,
+diff --git a/src/core/tooling/file_mutation.zig b/src/core/tooling/file_mutation.zig
+index c6156cd..51d9c18 100644
+--- a/src/core/tooling/file_mutation.zig
++++ b/src/core/tooling/file_mutation.zig
+@@ -1,5 +1,6 @@
+ const std = @import("std");
+ const builtin = @import("builtin");
++const build_options = @import("build_options");
+ const diff_mod = @import("../output/diff.zig");
+ const file_mutation_contract = @import("file_mutation_contract.zig");
+ const io_mod = @import("../shared/io.zig");
+@@ -21,6 +22,7 @@ else
+     struct {};
+ 
+ const Allocator = std.mem.Allocator;
++const mcp_only = @hasDecl(build_options, "local_studio_mcp_only") and build_options.local_studio_mcp_only;
+ const PreparedFileMutation = file_mutation_contract.PreparedFileMutation;
+ const PolicyEvaluatedFileTargets = file_mutation_contract.PolicyEvaluatedFileTargets;
+ 
+@@ -185,7 +187,10 @@ pub fn prepare(
+     input: file_mutation_contract.FileMutationInput,
+     policy_targets: file_mutation_contract.PolicyEvaluatedFileTargets,
+ ) FileMutationPrepareError!file_mutation_contract.PrepareResult {
+-    return prepareInternal(call_alloc, call, input, policy_targets, true);
++    return if (comptime mcp_only)
++        .{ .semantic_failure = "Filesystem tools are not compiled into Local Studio FX" }
++    else
++        prepareInternal(call_alloc, call, input, policy_targets, true);
+ }
+ 
+ /// Prepares a mutation whose decoded input and canonical target proof were
+@@ -196,7 +201,10 @@ pub fn prepareResolvedTarget(
+     input: file_mutation_contract.FileMutationInput,
+     policy_targets: file_mutation_contract.PolicyEvaluatedFileTargets,
+ ) FileMutationPrepareError!file_mutation_contract.PrepareResult {
+-    return prepareInternal(call_alloc, call, input, policy_targets, false);
++    return if (comptime mcp_only)
++        .{ .semantic_failure = "Filesystem tools are not compiled into Local Studio FX" }
++    else
++        prepareInternal(call_alloc, call, input, policy_targets, false);
+ }
+ 
+ fn prepareInternal(
+@@ -405,14 +413,17 @@ pub fn apply(
+     authorization: file_mutation_contract.FileExecutionAuthorization,
+     cancel_flag: *std.atomic.Value(bool),
+ ) FileMutationApplyError!ApplyResult {
+-    return applyWithTestControls(
+-        call_alloc,
+-        result_alloc,
+-        call,
+-        authorization,
+-        cancel_flag,
+-        .{},
+-    );
++    return if (comptime mcp_only)
++        rejectedWithoutResidue(.binding_mismatch)
++    else
++        applyWithTestControls(
++            call_alloc,
++            result_alloc,
++            call,
++            authorization,
++            cancel_flag,
++            .{},
++        );
+ }
+ 
+ fn applyWithTestControls(
