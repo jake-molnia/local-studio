@@ -101,10 +101,12 @@ fn pathExecutable(allocator: std.mem.Allocator, io: Io, environment: *const std.
         const candidate = try std.fs.path.join(allocator, &.{ directory, name });
         defer allocator.free(candidate);
         if (!executableFile(io, candidate)) continue;
-        return if (std.fs.path.isAbsolute(candidate))
+        const resolved = if (std.fs.path.isAbsolute(candidate))
             Io.Dir.realPathFileAbsoluteAlloc(io, candidate, allocator) catch continue
         else
             Io.Dir.cwd().realPathFileAlloc(io, candidate, allocator) catch continue;
+        defer allocator.free(resolved);
+        return try allocator.dupe(u8, resolved);
     }
     return null;
 }

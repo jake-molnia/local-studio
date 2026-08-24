@@ -18,16 +18,14 @@ let
   };
   system = pkgs.stdenv.hostPlatform.system;
   controllerPort = 8082;
-  agentRuntimePort = 8081;
   localNodePort = 8083;
   frontendPort = 3100;
   controllerUrl = "http://127.0.0.1:${toString controllerPort}";
-  agentRuntimeUrl = "http://127.0.0.1:${toString agentRuntimePort}";
   localNodeUrl = "http://127.0.0.1:${toString localNodePort}";
   frontendUrl = "http://127.0.0.1:${toString frontendPort}";
   localStudioState = "${config.devenv.state}/local-studio";
   headDataDir = "${localStudioState}/head";
-  agentRuntimeDataDir = "${localStudioState}/agent-runtime";
+  frontendDataDir = "${localStudioState}/frontend";
   localNodeDataDir = "${localStudioState}/local-node";
   modelsDir = "${localStudioState}/models";
   desktopUserDataDir = "${localStudioState}/electron";
@@ -35,7 +33,7 @@ let
   portPreflight = ''
     ${lib.getExe pkgs.python311} -c '
     import socket, sys
-    ports = [${lib.concatMapStringsSep ", " toString ([ controllerPort ] ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ agentRuntimePort localNodePort frontendPort ])}]
+    ports = [${lib.concatMapStringsSep ", " toString ([ controllerPort ] ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ localNodePort frontendPort ])}]
     busy = []
     sockets = []
     for port in ports:
@@ -95,8 +93,6 @@ in
       "controller/contracts/package.json"
       "frontend/package.json"
       "frontend/package-lock.json"
-      "services/agent-runtime/package.json"
-      "services/agent-runtime/bun.lock"
       "shared/package.json"
       "shared/bun.lock"
     ];
@@ -105,7 +101,6 @@ in
       "devenv:processes:head-node"
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-      "devenv:processes:agent-runtime"
       "devenv:processes:local-node"
       "devenv:processes:frontend"
       "devenv:processes:electron"
@@ -127,26 +122,6 @@ in
     restart.on = "never";
     ready = {
       exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null ${controllerUrl}/health";
-      period = 1;
-      timeout = 120;
-    };
-  };
-
-  processes.agent-runtime = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
-    cwd = "./services/agent-runtime";
-    exec = "exec bun --watch src/server.ts";
-    after = [ "devenv:processes:head-node@ready" ];
-    env = {
-      BACKEND_URL = localNodeUrl;
-      LOCAL_STUDIO_BACKEND_URL = localNodeUrl;
-      LOCAL_STUDIO_DATA_DIR = agentRuntimeDataDir;
-      LOCAL_STUDIO_DISABLE_LEGACY_SETTINGS_MIGRATION = "1";
-      LOCAL_STUDIO_FRONTEND_BASE = frontendUrl;
-      PORT = toString agentRuntimePort;
-    };
-    restart.on = "never";
-    ready = {
-      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null ${agentRuntimeUrl}/health";
       period = 1;
       timeout = 120;
     };
@@ -184,6 +159,7 @@ in
       LOCAL_STUDIO_DATA_DIR = localNodeDataDir;
       LOCAL_STUDIO_FRONTEND_BASE = frontendUrl;
       LOCAL_STUDIO_MODELS_DIR = modelsDir;
+      LOCAL_STUDIO_PI_BIN = "./frontend/node_modules/.bin/pi";
       LOCAL_STUDIO_PORT = toString localNodePort;
     };
     restart.on = "never";
@@ -199,15 +175,14 @@ in
     exec = "exec ./node_modules/.bin/next dev -p ${toString frontendPort}";
     after = [
       "devenv:processes:head-node@ready"
-      "devenv:processes:agent-runtime@ready"
       "devenv:processes:local-node@ready"
     ];
     env = {
       BACKEND_URL = localNodeUrl;
       LOCAL_STUDIO_BACKEND_URL = localNodeUrl;
-      LOCAL_STUDIO_DATA_DIR = agentRuntimeDataDir;
+      LOCAL_STUDIO_DATA_DIR = frontendDataDir;
       LOCAL_STUDIO_DISABLE_LEGACY_SETTINGS_MIGRATION = "1";
-      LOCAL_STUDIO_AGENT_RUNTIME_URL = agentRuntimeUrl;
+      LOCAL_STUDIO_CONTROLLER_URL = controllerUrl;
       LOCAL_STUDIO_PROXY_OVERRIDE_ALLOWLIST = "${localNodeUrl},${controllerUrl}";
       NEXT_PUBLIC_BACKEND_URL = localNodeUrl;
       NEXT_PUBLIC_LOCAL_STUDIO_CONTROLLER_URL = localNodeUrl;
