@@ -91,6 +91,11 @@ function createQuickPanelWindow(appUrl: string): BrowserWindow {
       webSecurity: true,
       allowRunningInsecureContent: false,
       navigateOnDragDrop: false,
+      backgroundThrottling: true,
+      enableWebSQL: false,
+      spellcheck: false,
+      v8CacheOptions: "code",
+      devTools: !app.isPackaged && !process.env.LOCAL_STUDIO_DESKTOP_DISABLE_DEVTOOLS,
     },
   });
 

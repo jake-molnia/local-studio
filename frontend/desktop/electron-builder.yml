@@ -39,6 +39,9 @@ extraResources:
       - "!**/dist-desktop/**"
       - "!**/*.log"
       - "!**/*.{map,ts,mts,cts}"
+      - "!**/{docs,doc,examples,example,test,tests,__tests__}/**"
+      - "!**/{README,Readme,readme,CHANGELOG,Changelog,changelog,CHANGES,Changes,changes,HISTORY,History,history}"
+      - "!**/{README,Readme,readme,CHANGELOG,Changelog,changelog,CHANGES,Changes,changes,HISTORY,History,history}.{md,markdown,txt}"
       - "!**/.next/cache/**"
       - "!**/.next/trace"
   - from: .next/static
