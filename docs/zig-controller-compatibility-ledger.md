@@ -1,6 +1,6 @@
 # Zig controller compatibility ledger
 
-This ledger freezes the observed Bun controller boundary for the Zig strangler migration. Route authority is machine-readable in `controller/contracts/http-routes.json`. Changes to observed behavior require an explicit compatibility decision and live acceptance evidence.
+This ledger records the observed Bun controller boundary used for the completed Zig migration. Route authority is machine-readable in `controller/contracts/http-routes.json`. Changes to observed behavior require an explicit compatibility decision and live acceptance evidence.
 
 ## Compatibility sources
 

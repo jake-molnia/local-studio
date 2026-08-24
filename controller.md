@@ -134,7 +134,7 @@ POST /v1/chat/completions   (proxy/openai-routes.ts)
 ### 3.2 Internal / workspace dependencies
 
 - **`@local-studio/contracts`** — the shared contract package (`controller/contracts/`, 9 files / 1,360 LOC) is imported as `@local-studio/contracts/*` by the controller. It defines engine args, recipes, rigs, system/runtime types, model capabilities, usage, observability, and controller event schemas. This is the single source of truth shared with `frontend/`.
-- **`services/agent-runtime`** — *separate* Bun service (not part of controller); the controller is not its active owner (agent sessions live there).
+- **`controller-zig`** — owns the agent harness, sessions, connectors, plugins, browser host, terminals, and automation scheduling used by the frontend and Electron app.
 - **Bun's builtin `bun:sqlite`** — backing store for every SQLite `*Store`.
 
 ### 3.3 Dev/quality tooling (`controller/package.json` + root scripts)

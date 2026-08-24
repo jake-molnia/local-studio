@@ -1,10 +1,10 @@
-# Zig controller strangler migration
+# Zig controller migration
 
 ## Migration objective
 
 Replace Local Studio-owned backend services with one `local-studio-controller` Zig executable while preserving the existing HTTP, persistence, filesystem, process-ownership, deployment-result, and frontend contracts. The executable supports `head`, `worker`, and `standalone` modes. The Head migrates first and interoperates with Bun Workers. Worker functionality then moves subsystem by subsystem into one compute architecture.
 
-The frontend and the minimum Electron UI host remain TypeScript. Standalone combines local Head and Worker responsibilities, serves the desktop's local services, and may enroll under a remote Head. Inference engines and agent harnesses such as Pi remain independently installed external programs. Zig discovers them and speaks their supported process or protocol boundary without reimplementing or owning their internal configuration. The Bun controller and Local Studio-owned TypeScript agent service are removed only after their Zig replacements complete live compatibility acceptance.
+The frontend and the minimum Electron UI host remain TypeScript. Standalone combines local Head and Worker responsibilities, serves the desktop's local services, and may enroll under a remote Head. Inference engines and agent harnesses such as Pi remain independently installed external programs. Zig discovers them and speaks their supported process or protocol boundary without reimplementing or owning their internal configuration. The Zig controller is the sole Local Studio-owned controller and agent-service implementation.
 
 ## Delivery rules
 

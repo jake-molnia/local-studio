@@ -53,8 +53,8 @@ The current source already supplies most of the gateway seam:
   and queries each provider's `/v1/models` endpoint.
 - Local model requests are forwarded to the controller's managed inference
   port.
-- `services/agent-runtime/src/pi-runtime-models.ts` already makes Pi treat a
-  controller as an OpenAI-compatible model provider.
+- The Zig agent harness makes Pi treat a controller as an OpenAI-compatible
+  model provider.
 
 There are two limitations that the design must not obscure:
 

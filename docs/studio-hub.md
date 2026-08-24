@@ -127,7 +127,7 @@ The first release is accepted after hands-on validation with a Head, at least on
 11. Worker-owned recipes, files, and settings remain intact;
 12. `npm run check` succeeds.
 
-The repository does not add automated test code for these scenarios. They are exercised against live controller, frontend, agent-runtime, and desktop processes.
+The repository does not add automated test code for these scenarios. They are exercised against live controller, frontend, and desktop processes.
 
 ## Local operation
 
