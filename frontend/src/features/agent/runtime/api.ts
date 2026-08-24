@@ -215,6 +215,7 @@ export function loadCanonicalSession(
 export type CompactSessionArgs = {
   sessionId: string;
   modelId: string;
+  modelRouteId?: string;
   thinkingLevel?: import("@/features/agent/contracts").AgentThinkingLevel;
   toolAccess?: AgentToolAccess;
   cwd?: string;
@@ -253,6 +254,7 @@ export type SubmitTurnArgs = {
   harness?: string;
   projectId?: string;
   modelId: string;
+  modelRouteId?: string;
   thinkingLevel?: import("@/features/agent/contracts").AgentThinkingLevel;
   toolAccess: AgentToolAccess;
   message: string;

@@ -37,6 +37,7 @@ export type WorkspacePaneView = {
   project: Project | null;
   cwd: string;
   modelId: string;
+  modelRouteId: string;
   model: AgentModel | null;
   gitSummary: ReturnType<ProjectsContextValue["gitSummary"]>;
   gitBranch: string | null;
@@ -65,7 +66,9 @@ function resolvePaneModelId(
     if (exact) return exact.id;
     const alias = models.find(
       (model) =>
-        model.rawId === candidate || model.name === candidate || model.id.endsWith(`/${candidate}`),
+        model.name === candidate ||
+        model.id.endsWith(`/${candidate}`) ||
+        model.routes.some((route) => route.id === candidate || route.rawModelId === candidate),
     );
     if (alias) return alias.id;
   }
@@ -88,6 +91,13 @@ function selectWorkspacePaneView(
   const session = activeSession(state, paneId);
   const project = projects.resolveProject(session);
   const modelId = resolvePaneModelId(session?.modelId, state.selectedModel, state.models);
+  const model = state.models.find((candidate) => candidate.id === modelId) ?? null;
+  const preferredRouteId = session?.modelRouteId || state.selectedRoute;
+  const modelRouteId =
+    model?.routes.find((route) => route.id === preferredRouteId)?.id ??
+    model?.defaultRouteId ??
+    model?.routes[0]?.id ??
+    "";
   const gitSummary = projects.gitSummary(project?.path);
   return {
     paneId,
@@ -96,7 +106,8 @@ function selectWorkspacePaneView(
     project,
     cwd: session?.cwd ?? project?.path ?? projects.agentCwd,
     modelId,
-    model: state.models.find((model) => model.id === modelId) ?? null,
+    modelRouteId,
+    model,
     gitSummary,
     gitBranch: paneGitBranch(gitSummary, project),
     isNewSession: Boolean(session && !session.piSessionId && session.messages.length === 0),
@@ -116,6 +127,7 @@ export function sameWorkspacePaneView(
     previous.project === next.project &&
     previous.cwd === next.cwd &&
     previous.modelId === next.modelId &&
+    previous.modelRouteId === next.modelRouteId &&
     previous.model === next.model &&
     previous.gitSummary === next.gitSummary &&
     previous.gitBranch === next.gitBranch &&
@@ -182,6 +194,7 @@ const WorkspacePane = memo(function WorkspacePane({
       <ChatPane
         paneId={view.paneId}
         modelId={view.modelId}
+        modelRouteId={view.modelRouteId}
         modelName={view.model?.name ?? view.modelId ?? null}
         modelSupportsVision={view.model?.vision ?? false}
         modelThinkingLevels={view.model?.thinkingLevels ?? ["off"]}
@@ -196,8 +209,9 @@ const WorkspacePane = memo(function WorkspacePane({
           <AgentModelPicker
             models={models}
             selectedModel={view.modelId}
+            selectedRoute={view.modelRouteId}
             defaultModel={defaultModel}
-            onSelect={(modelId) => handles.selectPaneModel(view.paneId, modelId)}
+            onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
             onSetDefault={handles.setDefaultModel}
             loading={modelsLoading}
             {...reasoning}

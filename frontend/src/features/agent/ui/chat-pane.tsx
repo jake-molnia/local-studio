@@ -180,6 +180,7 @@ function ChatTranscript({
 type Props = {
   paneId: string;
   modelId: string;
+  modelRouteId: string;
   modelName: string | null;
   modelSupportsVision: boolean;
   modelThinkingLevels: readonly AgentThinkingLevel[];
@@ -231,6 +232,7 @@ function renderComposerModelSelector(
 export function ChatPane({
   paneId,
   modelId,
+  modelRouteId,
   modelName,
   modelSupportsVision,
   modelThinkingLevels,
@@ -415,6 +417,7 @@ export function ChatPane({
     tabs,
     activeTabId,
     modelId,
+    modelRouteId,
     thinkingLevel,
     toolAccess: "full",
     cwd,
@@ -687,6 +690,7 @@ export function ChatPane({
         {automationDrawerOpen ? (
           <AutomationDrawer
             modelId={modelId}
+            modelRouteId={modelRouteId}
             cwd={cwd}
             prompt={lastUserPrompt}
             onClose={() => setAutomationDrawerOpen(false)}

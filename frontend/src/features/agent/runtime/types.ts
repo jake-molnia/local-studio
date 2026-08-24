@@ -40,6 +40,7 @@ export type Session = {
   projectId?: string;
   cwd?: string;
   modelId?: string;
+  modelRouteId?: string;
   thinkingLevel?: AgentThinkingLevel;
   title: string;
   messages: ChatMessage[];

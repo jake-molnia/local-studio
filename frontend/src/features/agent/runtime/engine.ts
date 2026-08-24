@@ -40,6 +40,7 @@ export type UseSessionEngineDeps = {
   tabs: Session[];
   activeTabId: SessionId;
   modelId: string;
+  modelRouteId: string;
   thinkingLevel: AgentThinkingLevel;
   toolAccess: AgentToolAccess;
   cwd: string;
@@ -91,6 +92,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
     tabs,
     activeTabId,
     modelId,
+    modelRouteId,
     thinkingLevel,
     toolAccess,
     cwd,
@@ -131,6 +133,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               api.submitTurnCommand({
                 sessionId: runtime,
                 modelId,
+                modelRouteId,
                 thinkingLevel,
                 toolAccess,
                 message,
@@ -179,6 +182,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       browserBackend,
       cwd,
       modelId,
+      modelRouteId,
       thinkingLevel,
       toolAccess,
       onPiSessionIdChange,
@@ -195,6 +199,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           browserBackend,
           cwd,
           modelId,
+          modelRouteId,
           thinkingLevel,
           toolAccess,
           onPiSessionIdChange,
@@ -207,6 +212,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
     [
       activeTabId,
       modelId,
+      modelRouteId,
       thinkingLevel,
       toolAccess,
       cwd,
@@ -313,6 +319,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
                 replayModelId ||
                 runtimeStatus?.modelId ||
                 modelId,
+              modelRouteId: session.modelRouteId || modelRouteId,
               title: meta?.title ?? title ?? session.title,
               startedAt: meta?.startedAt ?? startedAt ?? session.startedAt,
               tokenStats: tokenStats ?? undefined,
@@ -578,10 +585,7 @@ function mergeCanonicalAndRuntimeEvents(
   ]);
 }
 
-function reconcileReplayMessages(
-  current: ChatMessage[],
-  canonical: ChatMessage[],
-): ChatMessage[] {
+function reconcileReplayMessages(current: ChatMessage[], canonical: ChatMessage[]): ChatMessage[] {
   if (canonical.length === 0) return current;
   if (canonical.length >= current.length) return canonical;
   return current;

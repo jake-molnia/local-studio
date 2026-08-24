@@ -48,6 +48,7 @@ export type PromptStreamDeps = {
   browserBackend: BrowserBackend;
   cwd: string;
   modelId: string;
+  modelRouteId: string;
   thinkingLevel: AgentThinkingLevel;
   toolAccess: AgentToolAccess;
   onPiSessionIdChange?: (piSessionId: string) => void;
@@ -130,6 +131,7 @@ function appendOptimisticPrompt(
     ...session,
     cwd: session.harness === "fx" ? undefined : session.cwd || deps.cwd,
     modelId: session.modelId || deps.modelId,
+    modelRouteId: session.modelRouteId || deps.modelRouteId,
     startedAt: session.startedAt ?? new Date().toISOString(),
     input: "",
     error: "",
@@ -238,6 +240,7 @@ function promptTurnRequest(
     harness: context.selected.harness,
     projectId: context.selected.projectId,
     modelId: deps.modelId,
+    modelRouteId: context.selected.modelRouteId || deps.modelRouteId,
     thinkingLevel: deps.thinkingLevel,
     toolAccess: deps.toolAccess,
     message: args.prompt,

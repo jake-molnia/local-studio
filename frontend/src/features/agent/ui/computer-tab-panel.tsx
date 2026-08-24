@@ -139,6 +139,12 @@ function SideChatTab({
 }: ComputerTabPanelProps) {
   const modelId = sideChatSession.modelId ?? focusedSession?.modelId ?? activeModelId;
   const selectedModel = models.find((model) => model.id === modelId) ?? activeModel;
+  const modelRouteId =
+    sideChatSession.modelRouteId ??
+    focusedSession?.modelRouteId ??
+    selectedModel?.defaultRouteId ??
+    selectedModel?.routes[0]?.id ??
+    "";
   const cwd = sideChatSession.cwd ?? focusedSession?.cwd ?? activeProject?.path ?? "";
   const updateSession = useCallback<UpdateSession>(
     (sessionId, patch) =>
@@ -150,6 +156,7 @@ function SideChatTab({
       <ChatPane
         paneId="computer-side-chat"
         modelId={modelId}
+        modelRouteId={modelRouteId}
         modelName={selectedModel?.name ?? modelId}
         modelSupportsVision={selectedModel?.vision ?? false}
         modelThinkingLevels={selectedModel?.thinkingLevels ?? ["off"]}
@@ -161,8 +168,15 @@ function SideChatTab({
           <AgentModelPicker
             models={models}
             selectedModel={modelId}
-            onSelect={(nextModelId) =>
-              onUpdateSideChatTabs((tabs) => tabs.map((tab) => ({ ...tab, modelId: nextModelId })))
+            selectedRoute={modelRouteId}
+            onSelect={(nextModelId, nextRouteId) =>
+              onUpdateSideChatTabs((tabs) =>
+                tabs.map((tab) => ({
+                  ...tab,
+                  modelId: nextModelId,
+                  modelRouteId: nextRouteId,
+                })),
+              )
             }
             loading={modelsLoading}
             {...reasoning}
