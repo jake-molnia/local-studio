@@ -5,11 +5,7 @@ import { ErrorBox, Button } from "@/ui";
 import type { GitAction, GitState } from "@/features/agent/contracts";
 import { safeJson } from "@/features/agent/safe-json";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import {
-  parseUnifiedDiff,
-  type DiffFile,
-  type DiffViewMode,
-} from "@/features/agent/ui/git-diff-panel-model";
+import { parseUnifiedDiff, type DiffViewMode } from "@/features/agent/ui/git-diff-panel-model";
 import {
   GitPanelHeader,
   GitWorkflowBar,
@@ -128,7 +124,7 @@ function GitDiffPanelBody({
   payload,
 }: {
   cwd: string | null;
-  files: DiffFile[];
+  files: ReturnType<typeof parseUnifiedDiff>;
   viewMode: DiffViewMode;
   onViewMode: (mode: DiffViewMode) => void;
   initGit: () => Promise<void>;
