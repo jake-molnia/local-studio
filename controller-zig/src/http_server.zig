@@ -264,7 +264,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
 
     if (std.mem.eql(u8, route.path, "/health")) {
-        try request.respond("{\"status\":\"ok\"}", .{
+        try request.respond("{\"status\":\"ok\",\"service\":\"local-studio-controller\"}", .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;

@@ -1714,30 +1714,15 @@ async function afterPack(context) {
   ].find((file) => !existsSync(file));
   if (missingRuntimeFile)
     throw Error(`Packaged app is missing a Pi runtime dependency: ${missingRuntimeFile}`);
-  let agentRuntimeRoot = path.join(resourcesDir, "app", "agent-runtime"), agentRuntime = path.join(agentRuntimeRoot, "standalone.mjs"), missingAgentRuntimeFile = [
-    agentRuntime,
-    path.join(agentRuntimeRoot, "node_modules", "playwright-core", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "chromium-bidi", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "chromium-bidi", "node_modules", "zod", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "mitt", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "devtools-protocol", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "@silvia-odwyer", "photon-node", "package.json"),
-    path.join(agentRuntimeRoot, "node_modules", "undici", "package.json")
-  ].find((file) => !existsSync(file));
-  if (missingAgentRuntimeFile)
-    throw Error(`Packaged app is missing an agent runtime dependency: ${missingAgentRuntimeFile}`);
   let desktopRuntimeRoot = path.join(resourcesDir, "desktop-runtime", "node_modules", "@lydell"), missingDesktopRuntimeFile = [
     path.join(desktopRuntimeRoot, "node-pty", "package.json"),
     path.join(desktopRuntimeRoot, `node-pty-${process.platform}-${process.arch}`, "package.json")
   ].find((file) => !existsSync(file));
   if (missingDesktopRuntimeFile)
     throw Error(`Packaged app is missing a desktop runtime dependency: ${missingDesktopRuntimeFile}`);
-  let unwantedRuntimeFile = [standaloneBase, agentRuntimeRoot].flatMap((directory) => readdirSync10(directory, { recursive: !0, withFileTypes: !0 }).filter((entry) => entry.isFile() && /\.(?:map|[cm]?ts)$/.test(entry.name)).map((entry) => path.join(entry.parentPath, entry.name)))[0];
+  let unwantedRuntimeFile = [standaloneBase].flatMap((directory) => readdirSync10(directory, { recursive: !0, withFileTypes: !0 }).filter((entry) => entry.isFile() && /\.(?:map|[cm]?ts)$/.test(entry.name)).map((entry) => path.join(entry.parentPath, entry.name)))[0];
   if (unwantedRuntimeFile)
     throw Error(`Packaged app contains a non-runtime source artifact: ${unwantedRuntimeFile}`);
-  let agentRuntimeSource = readFileSync(agentRuntime, "utf8");
-  if (/["'](?:[A-Za-z]:\\|\/(?:Users|home|root)\/)[^"'\n]*node_modules[\\/]/.test(agentRuntimeSource))
-    throw Error("Packaged agent runtime contains a build-machine dependency path");
   if (electronPlatformName === "darwin") {
     let helperExecutable = path.join(path.dirname(resourcesDir), "Frameworks", `${productFilename} Helper.app`, "Contents", "MacOS", `${productFilename} Helper`);
     if (!existsSync(helperExecutable))
@@ -1746,7 +1731,7 @@ async function afterPack(context) {
   let packagedPiCli = path.join(resourcesDir, "app", "frontend", ".next", "standalone", "frontend", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
   if (!existsSync(packagedPiCli))
     throw Error(`Packaged app is missing its Pi CLI: ${packagedPiCli}`);
-  console.log(`  afterPack: embedded frontend, Zig controller, and agent runtime present, app.asar ${appArchiveBytes} bytes (${electronPlatformName})`);
+  console.log(`  afterPack: embedded frontend and Zig controller present, app.asar ${appArchiveBytes} bytes (${electronPlatformName})`);
 }
 
 var project_entry_default = afterPack, root5 = path11.resolve(path11.dirname(fileURLToPath11(import.meta.url)), "../.."), commands = new Map([

@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fork, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { DESKTOP_CONFIG } from "../configs";
 import { log } from "../helpers/logger";
 import { resolveStablePort } from "../helpers/ports";
@@ -27,17 +27,19 @@ process.once("exit", () => {
 });
 
 function agentRuntimeEntry(): string {
+  const executable =
+    process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller";
   return app.isPackaged
-    ? path.join(process.resourcesPath, "app", "agent-runtime", "standalone.mjs")
-    : path.resolve(app.getAppPath(), "..", "services", "agent-runtime", "dist", "standalone.mjs");
+    ? path.join(process.resourcesPath, "app", "controller", executable)
+    : path.resolve(app.getAppPath(), "..", "controller-zig", "zig-out", "bin", executable);
 }
 
 async function isAgentRuntimeHealthy(url: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_000) });
     if (!response.ok) return false;
-    const payload = (await response.json()) as { service?: unknown };
-    return payload.service === "local-studio-agent-runtime";
+    const payload = (await response.json()) as { service?: unknown; status?: unknown };
+    return payload.service === "local-studio-controller" && payload.status === "ok";
   } catch {
     return false;
   }
@@ -95,27 +97,29 @@ export async function startAgentRuntime(
 
   const port = await resolveStablePort(options.preferredPort);
   const url = `http://127.0.0.1:${port}`;
-  const child = fork(entry, {
-    stdio: "pipe",
-    detached: false,
-    env: {
-      ...process.env,
-      PATH: resolveAugmentedPath(),
-      PORT: String(port),
-      LOCAL_STUDIO_DATA_DIR: DESKTOP_CONFIG.userDataDir,
-      PI_CODING_AGENT_DIR: path.join(DESKTOP_CONFIG.userDataDir, "pi-agent"),
-      LOCAL_STUDIO_PROJECTS_FILE: path.join(DESKTOP_CONFIG.userDataDir, "projects.json"),
-      LOCAL_STUDIO_RESOURCES_PATH: process.resourcesPath,
-      LOCAL_STUDIO_AGENT_CWD: process.env.LOCAL_STUDIO_AGENT_CWD || app.getPath("home"),
-      LOCAL_STUDIO_FRONTEND_BASE: options.frontendUrl,
+  const child = spawn(
+    entry,
+    ["--mode", "standalone", "--host", "127.0.0.1", "--port", String(port)],
+    {
+      stdio: "pipe",
+      detached: false,
+      env: {
+        ...process.env,
+        PATH: resolveAugmentedPath(),
+        LOCAL_STUDIO_DATA_DIR: DESKTOP_CONFIG.userDataDir,
+        LOCAL_STUDIO_MODELS_DIR: path.join(DESKTOP_CONFIG.userDataDir, "models"),
+        LOCAL_STUDIO_RESOURCES_PATH: process.resourcesPath,
+        LOCAL_STUDIO_AGENT_CWD: process.env.LOCAL_STUDIO_AGENT_CWD || app.getPath("home"),
+        LOCAL_STUDIO_FRONTEND_BASE: options.frontendUrl,
+      },
     },
-  });
+  );
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
-    log.info(`agent-runtime: ${String(chunk).trim()}`);
+    log.info(`controller: ${String(chunk).trim()}`);
   });
   child.stderr?.on("data", (chunk: Buffer | string) => {
-    log.warn(`agent-runtime: ${String(chunk).trim()}`);
+    log.warn(`controller: ${String(chunk).trim()}`);
   });
   child.once("exit", (code, signal) => {
     log.warn(`Agent runtime exited code=${code ?? "null"} signal=${signal ?? "null"}`);
