@@ -20,6 +20,12 @@ pub fn payload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database)
     return output.toOwnedSlice();
 }
 
+pub fn fingerprint(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !u64 {
+    const document = try payload(allocator, io, database);
+    defer allocator.free(document);
+    return std.hash.Wyhash.hash(0, document);
+}
+
 pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session_id: []const u8, document: []const u8) ![]u8 {
     if (!validSessionId(session_id)) return error.InvalidSessionId;
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidSessionMetadata;

@@ -10,6 +10,7 @@ pub const routes = [_]http_routes.Route{
     .{ .method = .GET, .path = "/api/agent/runtime/status", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/runtime/events", .ownership = .head, .streaming = .always },
     .{ .method = .GET, .path = "/api/agent/runtime/transcript", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/api/agent/session-list-changed", .ownership = .head, .streaming = .always },
     .{ .method = .GET, .path = "/api/agent/sessions", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/sessions", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/sessions/all", .ownership = .head, .streaming = .never },

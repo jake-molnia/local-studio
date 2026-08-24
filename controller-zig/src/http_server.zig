@@ -743,6 +743,10 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         return false;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/session-list-changed")) {
+        serveSessionListChanged(allocator, io, database, request) catch return false;
+        return false;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/transcript")) {
         const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
@@ -3360,6 +3364,44 @@ fn serveControllerEvents(allocator: std.mem.Allocator, io: Io, client: *http.Cli
             runtime_at = now;
         }
         try io.sleep(.fromSeconds(5), .awake);
+    }
+}
+
+fn serveSessionListChanged(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, request: *http.Server.Request) !void {
+    var stream_buffer: [4096]u8 = undefined;
+    var body = try request.respondStreaming(&stream_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream; charset=utf-8" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var current = try agent_sessions.fingerprint(allocator, io, database);
+    var version: u64 = 0;
+    var heartbeat: usize = 0;
+    try body.writer.writeAll(": connected v0\n\n");
+    try body.writer.flush();
+    try body.flush();
+    while (true) {
+        try io.sleep(.fromSeconds(1), .awake);
+        heartbeat += 1;
+        const next = try agent_sessions.fingerprint(allocator, io, database);
+        if (next != current) {
+            current = next;
+            version += 1;
+            heartbeat = 0;
+            try body.writer.print("data: {{\"type\":\"session_list_changed\",\"version\":{d}}}\n\n", .{version});
+            try body.writer.flush();
+            try body.flush();
+        } else if (heartbeat >= 45) {
+            heartbeat = 0;
+            try body.writer.writeAll(": keep-alive\n\n");
+            try body.writer.flush();
+            try body.flush();
+        }
     }
 }
 

@@ -36,6 +36,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/session-list-changed",
+      "ownership": "head",
+      "streaming": "always"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/sessions",
       "ownership": "head",
       "streaming": "never"
