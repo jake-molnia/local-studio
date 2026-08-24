@@ -105,8 +105,12 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8) !Sto
         };
         errdefer account.deinit();
         if (entry.value_ptr.object.get("connections")) |connections| if (connections == .object) {
-            if (connections.object.get("gmail")) |value| if (value == .object) account.gmail = try parseConnection(allocator, value.object);
-            if (connections.object.get("google-calendar")) |value| if (value == .object) account.calendar = try parseConnection(allocator, value.object);
+            if (connections.object.get("gmail")) |value| {
+                if (value == .object) account.gmail = try parseConnection(allocator, value.object);
+            }
+            if (connections.object.get("google-calendar")) |value| {
+                if (value == .object) account.calendar = try parseConnection(allocator, value.object);
+            }
         };
         try store.accounts.append(allocator, account);
     }

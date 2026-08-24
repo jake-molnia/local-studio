@@ -44,6 +44,7 @@ const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_oauth = @import("services/agent_oauth.zig");
+const agent_google = @import("services/agent_google.zig");
 const agent_discovery = @import("services/agent_discovery.zig");
 const agent_plugins = @import("services/agent_plugins.zig");
 const agent_pr = @import("services/agent_pr.zig");
@@ -101,6 +102,7 @@ pub const HttpServer = struct {
     compute: compute_lifecycle.Manager,
     head_provider_state: head_providers.State,
     oauth: agent_oauth.State,
+    google: agent_google.State,
     harness: harness_runtime.Manager,
     pty: agent_pty.Manager,
     browser: agent_browser.Manager,
@@ -116,6 +118,8 @@ pub const HttpServer = struct {
         errdefer head_provider_state.deinit();
         var oauth = try agent_oauth.State.init(allocator, io, config.data_dir, config.environment);
         errdefer oauth.deinit();
+        var google = try agent_google.State.init(allocator, io, config.data_dir);
+        errdefer google.deinit();
         var harness = try harness_runtime.Manager.init(allocator, io, &config);
         errdefer harness.deinit();
         var pty = agent_pty.Manager.init(allocator, io, &config);
@@ -135,6 +139,7 @@ pub const HttpServer = struct {
             .compute = compute,
             .head_provider_state = head_provider_state,
             .oauth = oauth,
+            .google = google,
             .harness = harness,
             .pty = pty,
             .browser = browser,
@@ -146,6 +151,7 @@ pub const HttpServer = struct {
         server.compute.deinit();
         server.head_provider_state.deinit();
         server.oauth.deinit();
+        server.google.deinit();
         server.harness.deinit();
         server.pty.deinit();
         server.browser.deinit();
@@ -171,7 +177,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.oauth, &server.harness, &server.pty, &server.browser, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.oauth, &server.google, &server.harness, &server.pty, &server.browser, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -183,7 +189,7 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -205,7 +211,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, oauth, harness, pty, browser, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, oauth, google, harness, pty, browser, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -222,7 +228,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -457,6 +463,27 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         };
         const payload = response catch |failure| return respondOAuthFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.startsWith(u8, route.path, "/api/agent/accounts/google")) {
+        const document = if (request.head.method != .GET) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (mode != .standalone) remote: {
+            const suffix = request.head.target["/api/agent/accounts/google".len..];
+            const internal_path = try std.fmt.allocPrint(allocator, "/internal/node/v1/accounts/google{s}", .{suffix});
+            defer allocator.free(internal_path);
+            break :remote agent_google.forward(allocator, io, client, database, internal_path, request.head.method, document);
+        } else if (std.mem.eql(u8, route.path, "/api/agent/accounts/google/authorize"))
+            if (request.head.method == .POST) google.authorizePayload(client, database, document orelse return false) else google.cancelPayload()
+        else switch (request.head.method) {
+            .GET => google.accountPayload(),
+            .PUT => google.clientPayload(database, document orelse return false),
+            .DELETE => google.disconnectPayload(client, database, document orelse return false),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondGoogleFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -876,6 +903,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         };
         const payload = response catch |failure| return respondOAuthFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.startsWith(u8, route.path, "/internal/node/v1/accounts/google")) {
+        const document = if (request.head.method != .GET) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/accounts/google/authorize"))
+            if (request.head.method == .POST) google.authorizePayload(client, database, document orelse return false) else google.cancelPayload()
+        else switch (request.head.method) {
+            .GET => google.accountPayload(),
+            .PUT => google.clientPayload(database, document orelse return false),
+            .DELETE => google.disconnectPayload(client, database, document orelse return false),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondGoogleFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -2205,6 +2248,28 @@ fn respondOAuthFailure(request: *http.Server.Request, failure: anyerror) !bool {
         error.NodeRequestRejected => "The connector node rejected the OAuth request",
         error.OAuthProviderRejected => "GitHub refused the sign-in request",
         error.InvalidOAuthProviderResponse => "GitHub returned an invalid OAuth response",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondGoogleFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.InvalidGooglePayload, error.InvalidGoogleService, error.GoogleAccountKeyRequired => .bad_request,
+        error.GoogleAccountNotFound => .not_found,
+        error.GoogleClientRequired, error.ConnectorNodeRequired => .conflict,
+        error.NodeUnavailable, error.NodeRequestRejected => .bad_gateway,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.InvalidGooglePayload => "Invalid Google account request",
+        error.InvalidGoogleService => "account is required",
+        error.GoogleAccountKeyRequired => "accountKey is not a known account",
+        error.GoogleAccountNotFound => "Google account connection not found",
+        error.GoogleClientRequired => "Configure a Google OAuth client first",
+        error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
+        error.NodeUnavailable => "The connector node is unavailable",
+        error.NodeRequestRejected => "The connector node rejected the Google account request",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
