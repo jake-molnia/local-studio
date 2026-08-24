@@ -80,15 +80,42 @@ in
     ];
   };
 
+  tasks."local-studio:ports-available" = {
+    exec = ''
+      ${lib.getExe pkgs.python311} -c '
+      import socket, sys
+      ports = [${lib.concatMapStringsSep ", " toString ([ controllerPort ] ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ agentRuntimePort frontendPort ])}]
+      busy = []
+      sockets = []
+      for port in ports:
+          listener = socket.socket()
+          try:
+              listener.bind(("127.0.0.1", port))
+          except OSError:
+              busy.append(port)
+              listener.close()
+          else:
+              sockets.append(listener)
+      for listener in sockets:
+          listener.close()
+      if busy:
+          print("Local Studio development ports already in use: " + ", ".join(map(str, busy)) + ". Stop the existing dev stack before starting another one.", file=sys.stderr)
+          raise SystemExit(1)
+      '
+    '';
+    before = [
+      "devenv:processes:head-node"
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+      "devenv:processes:agent-runtime"
+      "devenv:processes:frontend"
+      "devenv:processes:electron"
+    ];
+  };
+
   processes.head-node = {
     cwd = "./controller";
-    exec = ''
-      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString controllerPort})); connection.close()' 2>/dev/null; then
-        echo "Port ${toString controllerPort} is already in use" >&2
-        exit 1
-      fi
-      exec bun run dev
-    '';
+    exec = "exec bun run dev";
     env.LOCAL_STUDIO_PORT = toString controllerPort;
     restart.on = "never";
     ready = {
@@ -100,13 +127,7 @@ in
 
   processes.agent-runtime = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
     cwd = "./services/agent-runtime";
-    exec = ''
-      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString agentRuntimePort})); connection.close()' 2>/dev/null; then
-        echo "Port ${toString agentRuntimePort} is already in use" >&2
-        exit 1
-      fi
-      exec bun --watch src/server.ts
-    '';
+    exec = "exec bun --watch src/server.ts";
     after = [ "devenv:processes:head-node@ready" ];
     env = {
       PORT = toString agentRuntimePort;
@@ -122,13 +143,7 @@ in
 
   processes.frontend = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
     cwd = "./frontend";
-    exec = ''
-      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString frontendPort})); connection.close()' 2>/dev/null; then
-        echo "Port ${toString frontendPort} is already in use" >&2
-        exit 1
-      fi
-      exec ./node_modules/.bin/next dev -p ${toString frontendPort}
-    '';
+    exec = "exec ./node_modules/.bin/next dev -p ${toString frontendPort}";
     after = [
       "devenv:processes:head-node@ready"
       "devenv:processes:agent-runtime@ready"

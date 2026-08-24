@@ -166,9 +166,9 @@ devenv processes restart electron
 ```
 
 The isolated desktop development stack uses `127.0.0.1:8082` for the controller,
-`127.0.0.1:8081` for the agent runtime, and `127.0.0.1:3100` for the frontend.
-Each process checks its fixed port before launch so an existing process fails
-visibly instead of silently moving the stack to incompatible ports.
+`127.0.0.1:8081` for the agent runtime, and `127.0.0.1:3100` for the frontend. A
+single preflight checks every required port before any process starts, so an
+existing stack fails immediately instead of producing partial ready states.
 
 ## Agent runtime
 
