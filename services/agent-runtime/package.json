@@ -29,7 +29,8 @@
   },
   "devDependencies": {
     "@types/node": "24.6.0",
-    "@types/proper-lockfile": "4.1.4"
+    "@types/proper-lockfile": "4.1.4",
+    "typescript": "5.9.3"
   },
   "overrides": {
     "brace-expansion": "5.0.9"
