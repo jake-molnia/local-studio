@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -44,6 +44,14 @@ const installationRoot = join(versionRoot, "toolchain");
 const executable = join(installationRoot, process.platform === "win32" ? "zig.exe" : "zig");
 const archive = join(versionRoot, basename(artifact.url));
 const verificationMarker = join(versionRoot, `.verified-${artifact.sha256}`);
+const fxCommit = "669ef8a7f0bf6b13a1722bfd434fb9fc61d01511";
+const fxSha256 = "477a81378ca3d486c0ca87f0a72c48e36f68d8e92a3ba135767a9558faedc06b";
+const fxUrl = `https://github.com/vercel-labs/fx/archive/${fxCommit}.tar.gz`;
+const fxCacheRoot = join(cacheRoot, "fx", fxCommit);
+const fxArchive = join(fxCacheRoot, `${fxCommit}.tar.gz`);
+const fxSourceRoot = join(projectRoot, "controller-zig", ".managed", "fx");
+const fxPatch = join(projectRoot, "controller-zig", "fx-patches", "local-studio.patch");
+const fxMaterializerVersion = "2";
 
 const digestFile = async (path) => {
   const digest = createHash("sha256");
@@ -91,6 +99,53 @@ const extract = async () => {
   await rename(temporary, installationRoot);
 };
 
+const downloadVerified = async (url, destination, expectedSha256) => {
+  const response = await fetch(url);
+  if (!response.ok || !response.body) throw new Error(`Failed to download ${url}: HTTP ${response.status}`);
+  const temporary = `${destination}.tmp-${process.pid}`;
+  const digest = createHash("sha256");
+  try {
+    await pipeline(
+      Readable.fromWeb(response.body),
+      new Transform({
+        transform(chunk, _encoding, callback) {
+          digest.update(chunk);
+          callback(null, chunk);
+        },
+      }),
+      createWriteStream(temporary, { mode: 0o600 }),
+    );
+    const actual = digest.digest("hex");
+    if (actual !== expectedSha256) throw new Error(`Checksum mismatch for ${url}: expected ${expectedSha256}, received ${actual}`);
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+};
+
+const ensureFxSource = async () => {
+  const patchDigest = createHash("sha256").update(await readFile(fxPatch)).digest("hex");
+  const fxMarker = join(fxSourceRoot, `.local-studio-${fxSha256}-${patchDigest}-${fxMaterializerVersion}`);
+  if (existsSync(fxMarker)) return;
+  await mkdir(fxCacheRoot, { recursive: true });
+  if (!existsSync(fxArchive) || (await digestFile(fxArchive)) !== fxSha256) {
+    await rm(fxArchive, { force: true });
+    await downloadVerified(fxUrl, fxArchive, fxSha256);
+  }
+  const temporary = `${fxSourceRoot}.tmp-${process.pid}`;
+  await rm(temporary, { recursive: true, force: true });
+  await mkdir(temporary, { recursive: true });
+  const extracted = spawnSync("tar", ["-xzf", fxArchive, "-C", temporary, "--strip-components=1"], { stdio: "inherit" });
+  if (extracted.error) throw extracted.error;
+  if (extracted.status !== 0) throw new Error(`Failed to extract FX source: tar exited ${extracted.status}`);
+  const patched = spawnSync("patch", ["--batch", "-p1", "-i", fxPatch], { cwd: temporary, stdio: "inherit" });
+  if (patched.error) throw patched.error;
+  if (patched.status !== 0) throw new Error(`Failed to apply Local Studio FX patch: patch exited ${patched.status}`);
+  await writeFile(join(temporary, `.local-studio-${fxSha256}-${patchDigest}-${fxMaterializerVersion}`), `${fxCommit}\n`, { mode: 0o600 });
+  await rm(fxSourceRoot, { recursive: true, force: true });
+  await rename(temporary, fxSourceRoot);
+};
+
 const ensureToolchain = async () => {
   await mkdir(versionRoot, { recursive: true });
   let verified = existsSync(verificationMarker);
@@ -122,6 +177,7 @@ if (arguments_[0] === "build-desktop") {
 }
 await ensureToolchain();
 if (arguments_.length === 0) arguments_.push("version");
+if (arguments_[0] === "build") await ensureFxSource();
 const result = spawnSync(executable, arguments_, {
   cwd: join(projectRoot, "controller-zig"),
   stdio: "inherit",
