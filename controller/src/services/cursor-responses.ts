@@ -8,6 +8,7 @@ import type {
   Message,
   Model,
   MutableModels,
+  ProviderStreams,
   TextContent,
   ThinkingLevel,
   Tool,
@@ -62,7 +63,10 @@ const contentText = (value: unknown): string =>
     .map((part) => part.text)
     .join("");
 
-const assistantMessage = (model: Model<Api>, content: AssistantMessage["content"]): AssistantMessage => ({
+const assistantMessage = (
+  model: Model<Api>,
+  content: AssistantMessage["content"],
+): AssistantMessage => ({
   role: "assistant",
   content,
   api: model.api,
@@ -262,7 +266,12 @@ const createEventPump = (input: {
   ): OutputSlot => {
     const existing = slots.get(contentIndex);
     if (existing) return existing;
-    const id = kind === "reasoning" ? `rs_${randomUUID()}` : kind === "message" ? `msg_${randomUUID()}` : `fc_${randomUUID()}`;
+    const id =
+      kind === "reasoning"
+        ? `rs_${randomUUID()}`
+        : kind === "message"
+          ? `msg_${randomUUID()}`
+          : `fc_${randomUUID()}`;
     const item: ResponseOutputItem =
       kind === "reasoning"
         ? { id, type: "reasoning", status: "in_progress", summary: [] }
@@ -290,129 +299,150 @@ const createEventPump = (input: {
     Effect.tryPromise({
       try: async () => {
         try {
-      emit({
-        type: "response.created",
-        response: responseBase(input.responseId, input.modelId, "in_progress", [], null),
-      });
-      let finalResponse: Record<string, unknown> | null = null;
-      for await (const event of input.stream) {
-        if (event.type === "thinking_start") {
-          ensureSlot(event.contentIndex, "reasoning");
-        } else if (event.type === "thinking_delta") {
-          const slot = ensureSlot(event.contentIndex, "reasoning");
-          slot.text += event.delta;
           emit({
-            type: "response.reasoning_summary_text.delta",
-            item_id: slot.id,
-            output_index: slot.outputIndex,
-            summary_index: 0,
-            delta: event.delta,
+            type: "response.created",
+            response: responseBase(input.responseId, input.modelId, "in_progress", [], null),
           });
-        } else if (event.type === "thinking_end") {
-          const slot = ensureSlot(event.contentIndex, "reasoning");
-          slot.text = event.content;
-          slot.item = {
-            id: slot.id,
-            type: "reasoning",
-            status: "completed",
-            summary: [{ type: "summary_text", text: slot.text }],
-          };
-          emit({ type: "response.output_item.done", output_index: slot.outputIndex, item: slot.item });
-        } else if (event.type === "text_start") {
-          ensureSlot(event.contentIndex, "message");
-        } else if (event.type === "text_delta") {
-          const slot = ensureSlot(event.contentIndex, "message");
-          slot.text += event.delta;
-          emit({
-            type: "response.output_text.delta",
-            item_id: slot.id,
-            output_index: slot.outputIndex,
-            content_index: 0,
-            delta: event.delta,
-          });
-        } else if (event.type === "text_end") {
-          const slot = ensureSlot(event.contentIndex, "message");
-          slot.text = event.content;
-          slot.item = {
-            id: slot.id,
-            type: "message",
-            status: "completed",
-            role: "assistant",
-            content: [{ type: "output_text", text: slot.text, annotations: [] }],
-          };
-          emit({ type: "response.output_item.done", output_index: slot.outputIndex, item: slot.item });
-        } else if (event.type === "toolcall_start") {
-          const block = event.partial.content[event.contentIndex];
-          ensureSlot(
-            event.contentIndex,
-            "function_call",
-            block?.type === "toolCall" ? block : undefined,
-          );
-        } else if (event.type === "toolcall_delta") {
-          const block = event.partial.content[event.contentIndex];
-          const slot = ensureSlot(
-            event.contentIndex,
-            "function_call",
-            block?.type === "toolCall" ? block : undefined,
-          );
-          slot.text += event.delta;
-          emit({
-            type: "response.function_call_arguments.delta",
-            item_id: slot.id,
-            output_index: slot.outputIndex,
-            delta: event.delta,
-          });
-        } else if (event.type === "toolcall_end") {
-          const slot = ensureSlot(event.contentIndex, "function_call", event.toolCall);
-          const argumentsJson = JSON.stringify(event.toolCall.arguments);
-          slot.text = argumentsJson;
-          slot.item = {
-            id: slot.id,
-            type: "function_call",
-            status: "completed",
-            call_id: event.toolCall.id,
-            name: event.toolCall.name,
-            arguments: argumentsJson,
-          };
-          emit({
-            type: "response.function_call_arguments.done",
-            item_id: slot.id,
-            output_index: slot.outputIndex,
-            arguments: argumentsJson,
-          });
-          emit({ type: "response.output_item.done", output_index: slot.outputIndex, item: slot.item });
-        } else if (event.type === "done") {
-          const output = terminalOutput(slots);
-          finalResponse = responseBase(
-            input.responseId,
-            input.modelId,
-            "completed",
-            output,
-            responseUsage(event.message),
-          );
-          emit({ type: "response.completed", response: finalResponse });
-          finish({ response: finalResponse, status: 200 });
-        } else if (event.type === "error") {
-          const response = {
-            ...responseBase(input.responseId, input.modelId, "failed", terminalOutput(slots), null),
-            error: { code: "cursor_error", message: event.error.errorMessage ?? "Cursor request failed" },
-          };
-          emit({ type: "response.failed", response });
+          let finalResponse: Record<string, unknown> | null = null;
+          for await (const event of input.stream) {
+            if (event.type === "thinking_start") {
+              ensureSlot(event.contentIndex, "reasoning");
+            } else if (event.type === "thinking_delta") {
+              const slot = ensureSlot(event.contentIndex, "reasoning");
+              slot.text += event.delta;
+              emit({
+                type: "response.reasoning_summary_text.delta",
+                item_id: slot.id,
+                output_index: slot.outputIndex,
+                summary_index: 0,
+                delta: event.delta,
+              });
+            } else if (event.type === "thinking_end") {
+              const slot = ensureSlot(event.contentIndex, "reasoning");
+              slot.text = event.content;
+              slot.item = {
+                id: slot.id,
+                type: "reasoning",
+                status: "completed",
+                summary: [{ type: "summary_text", text: slot.text }],
+              };
+              emit({
+                type: "response.output_item.done",
+                output_index: slot.outputIndex,
+                item: slot.item,
+              });
+            } else if (event.type === "text_start") {
+              ensureSlot(event.contentIndex, "message");
+            } else if (event.type === "text_delta") {
+              const slot = ensureSlot(event.contentIndex, "message");
+              slot.text += event.delta;
+              emit({
+                type: "response.output_text.delta",
+                item_id: slot.id,
+                output_index: slot.outputIndex,
+                content_index: 0,
+                delta: event.delta,
+              });
+            } else if (event.type === "text_end") {
+              const slot = ensureSlot(event.contentIndex, "message");
+              slot.text = event.content;
+              slot.item = {
+                id: slot.id,
+                type: "message",
+                status: "completed",
+                role: "assistant",
+                content: [{ type: "output_text", text: slot.text, annotations: [] }],
+              };
+              emit({
+                type: "response.output_item.done",
+                output_index: slot.outputIndex,
+                item: slot.item,
+              });
+            } else if (event.type === "toolcall_start") {
+              const block = event.partial.content[event.contentIndex];
+              ensureSlot(
+                event.contentIndex,
+                "function_call",
+                block?.type === "toolCall" ? block : undefined,
+              );
+            } else if (event.type === "toolcall_delta") {
+              const block = event.partial.content[event.contentIndex];
+              const slot = ensureSlot(
+                event.contentIndex,
+                "function_call",
+                block?.type === "toolCall" ? block : undefined,
+              );
+              slot.text += event.delta;
+              emit({
+                type: "response.function_call_arguments.delta",
+                item_id: slot.id,
+                output_index: slot.outputIndex,
+                delta: event.delta,
+              });
+            } else if (event.type === "toolcall_end") {
+              const slot = ensureSlot(event.contentIndex, "function_call", event.toolCall);
+              const argumentsJson = JSON.stringify(event.toolCall.arguments);
+              slot.text = argumentsJson;
+              slot.item = {
+                id: slot.id,
+                type: "function_call",
+                status: "completed",
+                call_id: event.toolCall.id,
+                name: event.toolCall.name,
+                arguments: argumentsJson,
+              };
+              emit({
+                type: "response.function_call_arguments.done",
+                item_id: slot.id,
+                output_index: slot.outputIndex,
+                arguments: argumentsJson,
+              });
+              emit({
+                type: "response.output_item.done",
+                output_index: slot.outputIndex,
+                item: slot.item,
+              });
+            } else if (event.type === "done") {
+              const output = terminalOutput(slots);
+              finalResponse = responseBase(
+                input.responseId,
+                input.modelId,
+                "completed",
+                output,
+                responseUsage(event.message),
+              );
+              emit({ type: "response.completed", response: finalResponse });
+              finish({ response: finalResponse, status: 200 });
+            } else if (event.type === "error") {
+              const response = {
+                ...responseBase(
+                  input.responseId,
+                  input.modelId,
+                  "failed",
+                  terminalOutput(slots),
+                  null,
+                ),
+                error: {
+                  code: "cursor_error",
+                  message: event.error.errorMessage ?? "Cursor request failed",
+                },
+              };
+              emit({ type: "response.failed", response });
+              finish(null);
+            }
+          }
+          input.controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          input.controller.close();
+          if (!settled) finish(null);
+          return finalResponse;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!input.signal.aborted) {
+            emit({ type: "error", code: "cursor_proxy_error", message });
+            input.controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          }
+          input.controller.close();
           finish(null);
-        }
-      }
-      input.controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      input.controller.close();
-      if (!settled) finish(null);
-      return finalResponse;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!input.signal.aborted) {
-        emit({ type: "error", code: "cursor_proxy_error", message });
-        input.controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      }
-      input.controller.close();
-      finish(null);
           return null;
         }
       },
@@ -429,56 +459,70 @@ export function createCursorResponses(
 ): Promise<HeadProviderResponse> {
   return models.getAuth(model).then((auth) => {
     if (!auth) throw new Error("Cursor is not connected on this controller");
-    const context = requestContext(model, request);
-    const responseId = `resp_${randomUUID()}`;
-    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
-    const readable = new ReadableStream<Uint8Array>({
-      start(controller): void {
-        streamController = controller;
-      },
-    });
-    if (!streamController) throw new Error("Cursor response stream failed to initialize");
-    let resolveCompletion: (completion: HeadProviderCompletion | null) => void = () => undefined;
-    const completion = new Promise<HeadProviderCompletion | null>((resolve) => {
-      resolveCompletion = resolve;
-    });
-    const reasoning = reasoningLevel(request);
-    const upstream = models.streamSimple(model, context, {
+    return createCursorResponsesFromStream(
+      models.streamSimple.bind(models),
+      model,
+      request,
       signal,
-      ...(typeof request["prompt_cache_key"] === "string"
-        ? { sessionId: request["prompt_cache_key"] }
-        : {}),
-      ...(reasoning ? { reasoning } : {}),
-    });
-    const pumping = createEventPump({
-      stream: upstream,
-      controller: streamController,
-      responseId,
-      modelId: model.id,
-      signal,
-      resolve: resolveCompletion,
-    });
-    if (request["stream"] === true) {
-      return {
-        response: new Response(readable, {
-          headers: {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-            "X-Accel-Buffering": "no",
-          },
-        }),
-        completion,
-      };
-    }
-    return new Response(readable)
-      .text()
-      .then(() => pumping)
-      .then((response) => ({
-        response: response
-          ? Response.json(response)
-          : Response.json({ error: { message: "Cursor request failed" } }, { status: 502 }),
-        completion,
-      }));
+    );
   });
+}
+
+export function createCursorResponsesFromStream(
+  streamSimple: ProviderStreams["streamSimple"],
+  model: Model<Api>,
+  request: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<HeadProviderResponse> {
+  const context = requestContext(model, request);
+  const responseId = `resp_${randomUUID()}`;
+  let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const readable = new ReadableStream<Uint8Array>({
+    start(controller): void {
+      streamController = controller;
+    },
+  });
+  if (!streamController) throw new Error("Cursor response stream failed to initialize");
+  let resolveCompletion: (completion: HeadProviderCompletion | null) => void = () => undefined;
+  const completion = new Promise<HeadProviderCompletion | null>((resolve) => {
+    resolveCompletion = resolve;
+  });
+  const reasoning = reasoningLevel(request);
+  const upstream = streamSimple(model, context, {
+    signal,
+    ...(typeof request["prompt_cache_key"] === "string"
+      ? { sessionId: request["prompt_cache_key"] }
+      : {}),
+    ...(reasoning ? { reasoning } : {}),
+  });
+  const pumping = createEventPump({
+    stream: upstream,
+    controller: streamController,
+    responseId,
+    modelId: model.id,
+    signal,
+    resolve: resolveCompletion,
+  });
+  if (request["stream"] === true) {
+    return Promise.resolve({
+      response: new Response(readable, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      }),
+      completion,
+    });
+  }
+  return new Response(readable)
+    .text()
+    .then(() => pumping)
+    .then((response) => ({
+      response: response
+        ? Response.json(response)
+        : Response.json({ error: { message: "Cursor request failed" } }, { status: 502 }),
+      completion,
+    }));
 }
