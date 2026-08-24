@@ -49,6 +49,8 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation) !void {
     try writer.writeAll("{\"harnesses\":[");
     try writePi(writer, pi);
     try writer.writeAll(",");
+    try writeFx(writer);
+    try writer.writeAll(",");
     try writeUnavailable(writer, "opencode", "OpenCode", "http-sse");
     try writer.writeAll(",");
     try writeUnavailable(writer, "codex", "Codex", "app-server");
@@ -58,11 +60,9 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation) !void {
 }
 
 pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
-    if (!std.mem.eql(u8, harness, "pi")) {
-        try writer.writeAll("[]");
-        return;
-    }
-    try writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
+    if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
+    if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    try writer.writeAll("[]");
 }
 
 fn managedPi(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !?Installation {
@@ -162,6 +162,12 @@ fn writePi(writer: *Io.Writer, installation: *const Installation) !void {
     if (installation.version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll("},\"capabilities\":");
     try writeCapabilities(writer, "pi");
+    try writer.writeByte('}');
+}
+
+fn writeFx(writer: *Io.Writer) !void {
+    try writer.writeAll("{\"id\":\"fx\",\"name\":\"FX\",\"status\":\"available\",\"transport\":\"embedded-acp\",\"installation\":{\"source\":\"embedded\",\"executable\":\"self\",\"version\":\"0.0.0-local-studio\"},\"capabilities\":");
+    try writeCapabilities(writer, "fx");
     try writer.writeByte('}');
 }
 

@@ -8,6 +8,14 @@ const harness_session_id = @import("harness_session_id.zig");
 const Io = std.Io;
 const max_event_bytes = 16 * 1024 * 1024;
 const max_events = 4000;
+const Harness = enum {
+    pi,
+    fx,
+
+    fn name(harness: Harness) []const u8 {
+        return @tagName(harness);
+    }
+};
 const LoggedEvent = struct {
     allocator: std.mem.Allocator,
     seq: u64,
@@ -21,6 +29,7 @@ const LoggedEvent = struct {
 };
 const Session = struct {
     allocator: std.mem.Allocator,
+    harness: Harness,
     id: []u8,
     native_id: []u8,
     harness_version: ?[]u8,
@@ -165,6 +174,7 @@ pub const Manager = struct {
             return manager.transcriptEnvelope(session_id, native_id, acknowledgement);
         }
         const session = active_session.?;
+        if (session.harness == .fx) return manager.fxTranscriptEnvelope(session_id, session);
         var command: Io.Writer.Allocating = .init(manager.allocator);
         defer command.deinit();
         const command_id = manager.commandId();
@@ -179,6 +189,26 @@ pub const Manager = struct {
         const acknowledgement = try manager.sendCommand(session, command_id[0..], command.writer.buffered());
         defer manager.allocator.free(acknowledgement);
         return manager.transcriptEnvelope(session_id, session.native_id, acknowledgement);
+    }
+
+    fn fxTranscriptEnvelope(manager: *Manager, session_id: []const u8, session: *Session) ![]u8 {
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        var output: Io.Writer.Allocating = .init(manager.allocator);
+        errdefer output.deinit();
+        try output.writer.writeAll("{\"sessionId\":");
+        try std.json.Stringify.value(session_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"harness\":\"fx\",\"nativeSessionId\":");
+        try std.json.Stringify.value(session.native_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"entries\":[");
+        for (session.events.items, 0..) |event, index| {
+            if (index > 0) try output.writer.writeByte(',');
+            try output.writer.writeAll(event.document);
+        }
+        try output.writer.writeAll("],\"leafId\":");
+        if (session.events.items.len > 0) try output.writer.print("\"{d}\"", .{session.event_seq}) else try output.writer.writeAll("null");
+        try output.writer.writeByte('}');
+        return output.toOwnedSlice();
     }
 
     fn transcriptEnvelope(manager: *Manager, session_id: []const u8, native_id: []const u8, acknowledgement: []const u8) ![]u8 {
@@ -291,23 +321,35 @@ pub const Manager = struct {
         if (parsed.value != .object) return error.InvalidTurnPayload;
         const object = parsed.value.object;
         const harness = optionalString(object, "harness") orelse "pi";
-        if (!std.mem.eql(u8, harness, "pi")) return error.HarnessDriverUnavailable;
-        if (!manager.piIsAvailable()) return error.HarnessUnavailable;
+        const harness_kind: Harness = if (std.mem.eql(u8, harness, "pi")) .pi else if (std.mem.eql(u8, harness, "fx")) .fx else return error.HarnessDriverUnavailable;
+        if (harness_kind == .pi and !manager.piIsAvailable()) return error.HarnessUnavailable;
+        if (harness_kind == .fx and !manager.model_route.available()) return error.HarnessUnavailable;
         const session_id = optionalString(object, "sessionId") orelse "default";
         const model_id = requiredString(object, "modelId") orelse return error.ModelIdRequired;
         const message = requiredString(object, "message") orelse return error.MessageRequired;
         if (!harness_session_id.validRuntime(session_id)) return error.InvalidSessionId;
         const mode = optionalString(object, "mode") orelse "prompt";
         if (!std.mem.eql(u8, mode, "prompt") and !std.mem.eql(u8, mode, "steer") and !std.mem.eql(u8, mode, "follow_up")) return error.InvalidTurnMode;
+        if (harness_kind == .fx and !std.mem.eql(u8, mode, "prompt")) return error.QueueMutationNotSupported;
         if (object.get("queueAction") != null) return error.QueueMutationNotSupported;
         const cwd = optionalString(object, "cwd");
         const thinking = optionalString(object, "thinkingLevel");
         const tool_access = optionalString(object, "toolAccess") orelse "read_only";
         const session = if (std.mem.eql(u8, mode, "prompt"))
-            try manager.ensureSession(session_id, optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
+            if (harness_kind == .fx)
+                try manager.ensureFxSession(session_id, model_id, cwd)
+            else
+                try manager.ensureSession(session_id, optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
         else
             try manager.existingActiveSession(session_id);
+        if (session.harness != harness_kind) return error.SessionHarnessMismatch;
+        if (harness_kind == .fx and session.active) return error.QueueMutationNotSupported;
         const was_active = session.active;
+        if (harness_kind == .fx) {
+            try manager.sendFxPrompt(session, message);
+            session.active = true;
+        }
+        if (harness_kind == .fx) return manager.turnResponse(session, was_active);
         var command: Io.Writer.Allocating = .init(manager.allocator);
         defer command.deinit();
         const command_id = manager.commandId();
@@ -349,10 +391,33 @@ pub const Manager = struct {
         return output.toOwnedSlice();
     }
 
+    fn turnResponse(manager: *Manager, session: *Session, was_active: bool) ![]u8 {
+        var output: Io.Writer.Allocating = .init(manager.allocator);
+        errdefer output.deinit();
+        try output.writer.writeAll("{\"type\":\"command\",\"outcome\":");
+        try std.json.Stringify.value(if (was_active) "queued" else "accepted", .{}, &output.writer);
+        try output.writer.writeAll(",\"runtimeSessionId\":");
+        try std.json.Stringify.value(session.id, .{}, &output.writer);
+        try output.writer.writeAll(",\"nativeSessionId\":");
+        try std.json.Stringify.value(session.native_id, .{}, &output.writer);
+        try output.writer.writeAll(",\"harness\":");
+        try std.json.Stringify.value(session.harness.name(), .{}, &output.writer);
+        try output.writer.writeAll(",\"harnessVersion\":");
+        if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        try output.writer.print(",\"active\":{},\"status\":", .{session.active});
+        try writeStatus(&output.writer, session);
+        try output.writer.writeByte('}');
+        return output.toOwnedSlice();
+    }
+
     pub fn abortPayload(manager: *Manager, document: []const u8) ![]u8 {
         const session_id = try sessionIdFromDocument(manager.allocator, document);
         defer manager.allocator.free(session_id);
         const session = try manager.existingSession(session_id);
+        if (session.harness == .fx) {
+            try manager.send(session, "{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{}}");
+            return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
+        }
         const command_id = manager.commandId();
         const command = try std.fmt.allocPrint(manager.allocator, "{{\"id\":\"{s}\",\"type\":\"abort\"}}", .{command_id[0..]});
         defer manager.allocator.free(command);
@@ -367,6 +432,7 @@ pub const Manager = struct {
         if (parsed.value != .object) return error.InvalidCompactPayload;
         const session_id = optionalString(parsed.value.object, "sessionId") orelse "default";
         const session = try manager.existingSession(session_id);
+        if (session.harness == .fx) return error.QueueMutationNotSupported;
         var command: Io.Writer.Allocating = .init(manager.allocator);
         defer command.deinit();
         const command_id = manager.commandId();
@@ -436,7 +502,7 @@ pub const Manager = struct {
             var sent = false;
             for (session.?.events.items) |event| if (event.seq > after) {
                 try body.writer.print("id: {d}\ndata: ", .{event.seq});
-                try harness_events.writeStreamEnvelope(manager.allocator, &body.writer, "pi", event.seq, event.document);
+                try harness_events.writeStreamEnvelope(manager.allocator, &body.writer, session.?.harness.name(), event.seq, event.document);
                 try body.writer.writeAll("\n\n");
                 after = event.seq;
                 sent = true;
@@ -510,6 +576,7 @@ pub const Manager = struct {
         errdefer manager.allocator.destroy(session);
         session.* = .{
             .allocator = manager.allocator,
+            .harness = .pi,
             .id = try manager.allocator.dupe(u8, session_id),
             .native_id = native_id,
             .harness_version = if (manager.pi.version) |value| try manager.allocator.dupe(u8, value) else null,
@@ -531,6 +598,94 @@ pub const Manager = struct {
         };
         return session;
     }
+
+    fn ensureFxSession(manager: *Manager, session_id: []const u8, model_id: []const u8, cwd_value: ?[]const u8) !*Session {
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        if (manager.sessions.get(session_id)) |session| {
+            if (!session.running) return error.HarnessExited;
+            if (session.harness != .fx) return error.SessionHarnessMismatch;
+            if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+            return session;
+        }
+        const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
+        defer if (resolved_cwd) |value| manager.allocator.free(value);
+        const cwd = cwd_value orelse resolved_cwd.?;
+        if (!std.fs.path.isAbsolute(cwd)) return error.CwdMustBeAbsolute;
+        const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "fx" });
+        errdefer manager.allocator.free(session_dir);
+        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, session_dir, @enumFromInt(0o700));
+        const log_directory = try std.fs.path.join(manager.allocator, &.{ session_dir, "logs" });
+        defer manager.allocator.free(log_directory);
+        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, log_directory, @enumFromInt(0o700));
+        const log_filename = try std.fmt.allocPrint(manager.allocator, "{s}.log", .{session_id});
+        defer manager.allocator.free(log_filename);
+        const log_path = try std.fs.path.join(manager.allocator, &.{ log_directory, log_filename });
+        defer manager.allocator.free(log_path);
+        var log_file = try Io.Dir.cwd().createFile(manager.io, log_path, .{ .permissions = @enumFromInt(0o600), .truncate = false });
+        defer log_file.close(manager.io);
+        const executable = try std.process.executablePathAlloc(manager.io, manager.allocator);
+        defer manager.allocator.free(executable);
+        var model_route = try manager.model_route.prepare(model_id);
+        defer model_route.deinit();
+        try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
+        var child = try std.process.spawn(manager.io, .{
+            .argv = &.{ executable, "fx-acp" },
+            .environ_map = &model_route.environment,
+            .cwd = .{ .path = cwd },
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .{ .file = log_file },
+            .pgid = 0,
+        });
+        errdefer child.kill(manager.io);
+        const initialized = try directFxRequest(manager.allocator, manager.io, &child, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":\"initialize\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}");
+        defer manager.allocator.free(initialized);
+        const created = try directFxRequest(manager.allocator, manager.io, &child, "new", "{\"jsonrpc\":\"2.0\",\"id\":\"new\",\"method\":\"session/new\",\"params\":{\"mcpServers\":[]}}");
+        defer manager.allocator.free(created);
+        const native_id = try fxSessionId(manager.allocator, created);
+        errdefer manager.allocator.free(native_id);
+        const session = try manager.allocator.create(Session);
+        errdefer manager.allocator.destroy(session);
+        session.* = .{
+            .allocator = manager.allocator,
+            .harness = .fx,
+            .id = try manager.allocator.dupe(u8, session_id),
+            .native_id = native_id,
+            .harness_version = try manager.allocator.dupe(u8, "0.0.0-local-studio"),
+            .model_id = try manager.allocator.dupe(u8, model_id),
+            .cwd = try manager.allocator.dupe(u8, cwd),
+            .session_dir = session_dir,
+            .child = child,
+        };
+        errdefer {
+            manager.allocator.free(session.id);
+            manager.allocator.free(session.harness_version.?);
+            manager.allocator.free(session.model_id);
+            manager.allocator.free(session.cwd);
+        }
+        try manager.sessions.put(manager.allocator, session.id, session);
+        manager.tasks.concurrent(manager.io, readHarness, .{ manager, session }) catch |failure| {
+            _ = manager.sessions.remove(session.id);
+            return failure;
+        };
+        return session;
+    }
+
+    fn sendFxPrompt(manager: *Manager, session: *Session, message: []const u8) !void {
+        const request_id = manager.commandId();
+        var document: Io.Writer.Allocating = .init(manager.allocator);
+        defer document.deinit();
+        try document.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+        try std.json.Stringify.value(request_id[0..], .{}, &document.writer);
+        try document.writer.writeAll(",\"method\":\"session/prompt\",\"params\":{\"sessionId\":");
+        try std.json.Stringify.value(session.native_id, .{}, &document.writer);
+        try document.writer.writeAll(",\"prompt\":[{\"type\":\"text\",\"text\":");
+        try std.json.Stringify.value(message, .{}, &document.writer);
+        try document.writer.writeAll("}]}}");
+        try manager.send(session, document.writer.buffered());
+    }
+
     fn existingSession(manager: *Manager, session_id: []const u8) !*Session {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
@@ -586,6 +741,7 @@ pub const Manager = struct {
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, line, .{}) catch return;
         defer parsed.deinit();
         if (parsed.value != .object) return;
+        if (session.harness == .fx) return manager.handleFxLine(session, line, parsed.value.object);
         const event_type = optionalString(parsed.value.object, "type") orelse return;
         if (std.mem.eql(u8, event_type, "response")) {
             const response_id = optionalString(parsed.value.object, "id") orelse return;
@@ -618,7 +774,72 @@ pub const Manager = struct {
             _ = session.events.orderedRemove(0);
         }
     }
+
+    fn handleFxLine(manager: *Manager, session: *Session, line: []const u8, object: std.json.ObjectMap) !void {
+        const method = optionalString(object, "method");
+        const response_id = optionalString(object, "id");
+        if (method == null and response_id == null) return;
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        if (response_id != null) session.active = false;
+        session.event_seq += 1;
+        var timestamp: [24]u8 = undefined;
+        _ = formatTimestamp(manager.io, &timestamp);
+        try session.events.append(manager.allocator, .{
+            .allocator = manager.allocator,
+            .seq = session.event_seq,
+            .document = try manager.allocator.dupe(u8, line),
+            .timestamp = timestamp,
+        });
+        if (session.events.items.len > max_events) {
+            session.events.items[0].deinit();
+            _ = session.events.orderedRemove(0);
+        }
+    }
 };
+
+fn directFxRequest(allocator: std.mem.Allocator, io: Io, child: *std.process.Child, request_id: []const u8, document: []const u8) ![]u8 {
+    try child.stdin.?.writeStreamingAll(io, document);
+    try child.stdin.?.writeStreamingAll(io, "\n");
+    var pending: std.ArrayList(u8) = .empty;
+    defer pending.deinit(allocator);
+    var chunk: [64 * 1024]u8 = undefined;
+    while (pending.items.len <= max_event_bytes) {
+        const count = child.stdout.?.readStreaming(io, &.{&chunk}) catch |failure| switch (failure) {
+            error.EndOfStream => return error.HarnessExited,
+            else => return failure,
+        };
+        if (count == 0) return error.HarnessExited;
+        try pending.appendSlice(allocator, chunk[0..count]);
+        while (std.mem.indexOfScalar(u8, pending.items, '\n')) |newline| {
+            const line = std.mem.trim(u8, pending.items[0..newline], " \t\r");
+            var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch {
+                dropPrefix(&pending, newline + 1);
+                continue;
+            };
+            const matches = parsed.value == .object and optionalString(parsed.value.object, "id") != null and std.mem.eql(u8, optionalString(parsed.value.object, "id").?, request_id);
+            parsed.deinit();
+            if (matches) return allocator.dupe(u8, line);
+            dropPrefix(&pending, newline + 1);
+        }
+    }
+    return error.HarnessResponseTooLarge;
+}
+
+fn fxSessionId(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHarnessResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidHarnessResponse;
+    const result = parsed.value.object.get("result") orelse return error.InvalidHarnessResponse;
+    if (result != .object) return error.InvalidHarnessResponse;
+    return allocator.dupe(u8, requiredString(result.object, "sessionId") orelse return error.InvalidHarnessResponse);
+}
+
+fn dropPrefix(buffer: *std.ArrayList(u8), count: usize) void {
+    const remaining = buffer.items[count..];
+    std.mem.copyForwards(u8, buffer.items[0..remaining.len], remaining);
+    buffer.items.len = remaining.len;
+}
 
 fn readHarness(manager: *Manager, session: *Session) Io.Cancelable!void {
     var pending: std.ArrayList(u8) = .empty;
@@ -655,30 +876,34 @@ fn readHarness(manager: *Manager, session: *Session) Io.Cancelable!void {
     session.active = false;
     if (term) |value| switch (value) {
         .exited => |code| {
-            if (code != 0) session.last_error = std.fmt.allocPrint(manager.allocator, "Pi exited with code {d}", .{code}) catch null;
+            if (code != 0) session.last_error = std.fmt.allocPrint(manager.allocator, "{s} exited with code {d}", .{ session.harness.name(), code }) catch null;
         },
         .signal => |signal| {
-            session.last_error = std.fmt.allocPrint(manager.allocator, "Pi exited on signal {d}", .{@intFromEnum(signal)}) catch null;
+            session.last_error = std.fmt.allocPrint(manager.allocator, "{s} exited on signal {d}", .{ session.harness.name(), @intFromEnum(signal) }) catch null;
         },
         else => {
-            session.last_error = manager.allocator.dupe(u8, "Pi exited unexpectedly") catch null;
+            session.last_error = std.fmt.allocPrint(manager.allocator, "{s} exited unexpectedly", .{session.harness.name()}) catch null;
         },
     };
 }
 
 fn writeStatus(writer: *Io.Writer, session: *const Session) !void {
-    try writer.print("{{\"running\":{},\"active\":{},\"harness\":\"pi\",\"modelId\":", .{ session.running, session.active });
+    try writer.print("{{\"running\":{},\"active\":{},\"harness\":", .{ session.running, session.active });
+    try std.json.Stringify.value(session.harness.name(), .{}, writer);
+    try writer.writeAll(",\"modelId\":");
     try std.json.Stringify.value(session.model_id, .{}, writer);
     try writer.writeAll(",\"cwd\":");
     try std.json.Stringify.value(session.cwd, .{}, writer);
-    try writer.writeAll(",\"piSessionId\":");
-    try std.json.Stringify.value(session.native_id, .{}, writer);
+    if (session.harness == .pi) {
+        try writer.writeAll(",\"piSessionId\":");
+        try std.json.Stringify.value(session.native_id, .{}, writer);
+    }
     try writer.writeAll(",\"nativeSessionId\":");
     try std.json.Stringify.value(session.native_id, .{}, writer);
     try writer.writeAll(",\"harnessVersion\":");
     if (session.harness_version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"capabilities\":");
-    try harness_catalog.writeCapabilities(writer, "pi");
+    try harness_catalog.writeCapabilities(writer, session.harness.name());
     try writer.writeAll(",\"agentDir\":");
     try std.json.Stringify.value(session.session_dir, .{}, writer);
     try writer.print(",\"eventSeq\":{d},\"lastError\":", .{session.event_seq});
@@ -697,8 +922,10 @@ fn writeEvents(writer: *Io.Writer, session: *const Session, after: u64) !void {
     var wrote = false;
     for (session.events.items) |event| if (event.seq > after) {
         if (wrote) try writer.writeByte(',');
-        try writer.print("{{\"seq\":{d},\"harness\":\"pi\",\"normalized\":", .{event.seq});
-        try harness_events.writeNormalized(session.allocator, writer, "pi", event.document);
+        try writer.print("{{\"seq\":{d},\"harness\":", .{event.seq});
+        try std.json.Stringify.value(session.harness.name(), .{}, writer);
+        try writer.writeAll(",\"normalized\":");
+        try harness_events.writeNormalized(session.allocator, writer, session.harness.name(), event.document);
         try writer.writeAll(",\"event\":");
         try writer.writeAll(event.document);
         try writer.writeAll(",\"native\":");

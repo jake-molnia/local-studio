@@ -26,6 +26,7 @@ pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness
         try writer.writeAll("null");
         return;
     }
+    if (std.mem.eql(u8, harness, "fx")) return writeAcpNormalized(writer, parsed.value.object);
     const native_type = stringField(parsed.value.object, "type") orelse {
         try writer.writeAll("null");
         return;
@@ -38,6 +39,35 @@ pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness
     try writer.writeAll(",\"nativeType\":");
     try std.json.Stringify.value(native_type, .{}, writer);
     try writer.writeByte('}');
+}
+
+fn writeAcpNormalized(writer: *Io.Writer, object: std.json.ObjectMap) !void {
+    const method = stringField(object, "method");
+    if (method) |value| if (std.mem.eql(u8, value, "session/update")) {
+        const params = object.get("params") orelse return writer.writeAll("null");
+        if (params != .object) return writer.writeAll("null");
+        const update = params.object.get("update") orelse return writer.writeAll("null");
+        if (update != .object) return writer.writeAll("null");
+        const native_type = stringField(update.object, "sessionUpdate") orelse return writer.writeAll("null");
+        const kind = if (std.mem.eql(u8, native_type, "agent_message_chunk"))
+            "message.delta"
+        else if (std.mem.eql(u8, native_type, "tool_call"))
+            "tool.started"
+        else if (std.mem.eql(u8, native_type, "tool_call_update"))
+            "tool.updated"
+        else
+            "session.updated";
+        try writer.writeAll("{\"type\":");
+        try std.json.Stringify.value(kind, .{}, writer);
+        try writer.writeAll(",\"harness\":\"fx\",\"nativeType\":");
+        try std.json.Stringify.value(native_type, .{}, writer);
+        try writer.writeByte('}');
+        return;
+    };
+    const kind = if (object.get("error") != null) "session.failed" else if (object.get("result") != null) "turn.completed" else return writer.writeAll("null");
+    try writer.writeAll("{\"type\":");
+    try std.json.Stringify.value(kind, .{}, writer);
+    try writer.writeAll(",\"harness\":\"fx\",\"nativeType\":\"jsonrpc_response\"}");
 }
 
 fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u8 {
