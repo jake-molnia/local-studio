@@ -149,6 +149,8 @@ fn continuationDocument(allocator: std.mem.Allocator, session: *const records.Se
         try output.writer.writeByte(':');
         try std.json.Stringify.value(field.value, .{}, &output.writer);
     }
+    try output.writer.writeAll(",\"modelRouteId\":");
+    try std.json.Stringify.value(session.model_route_id orelse model_id, .{}, &output.writer);
     try output.writer.writeAll(",\"nativeSessionId\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"message\":");

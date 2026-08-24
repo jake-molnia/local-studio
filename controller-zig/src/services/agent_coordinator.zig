@@ -90,6 +90,8 @@ pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.D
         if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
         try output.writer.writeAll(",\"modelId\":");
         if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        try output.writer.writeAll(",\"modelRouteId\":");
+        if (session.model_route_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
         const active = std.mem.eql(u8, session.status, "queued") or std.mem.eql(u8, session.status, "running");
         try output.writer.writeAll(",\"status\":{\"phase\":");
         try std.json.Stringify.value(session.status, .{}, &output.writer);
@@ -128,6 +130,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
 
     var existing = try lockedGet(allocator, io, database, session_id);
     defer if (existing) |*session| session.deinit();
+    const model_route_id = optionalString(object, "modelRouteId") orelse if (existing) |session| session.model_route_id orelse model_id else model_id;
     const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
     if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx")) return error.HarnessDriverUnavailable;
@@ -151,6 +154,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         .project_id = project_id,
         .project_path = project_path,
         .model_id = model_id,
+        .model_route_id = model_route_id,
         .status = "queued",
         .event_cursor = if (existing) |session| session.event_cursor else 0,
         .sharing_policy = if (existing) |session| session.sharing_policy else "private",
@@ -365,6 +369,8 @@ fn writeStatusEvent(writer: *Io.Writer, session: *const records.Session, phase: 
     } else try writer.writeAll("null");
     try writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"modelRouteId\":");
+    if (session.model_route_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.print(",\"eventSeq\":{d}}}}}\n\n", .{session.event_cursor});
 }
 
@@ -450,6 +456,8 @@ fn storedStatus(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database
     } else try output.writer.writeAll("null");
     try output.writer.print(",\"modelId\":", .{});
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"modelRouteId\":");
+    if (session.model_route_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.print(",\"eventSeq\":{d},\"phase\":", .{session.event_cursor});
     try std.json.Stringify.value(session.status, .{}, &output.writer);
     try output.writer.writeAll("},\"events\":[");

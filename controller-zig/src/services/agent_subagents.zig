@@ -54,6 +54,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     if (std.mem.startsWith(u8, parent.id, "subagent:") or try lockedIsChild(io, database, parent_id)) return error.SubagentNestingDenied;
     if (try lockedRunningCount(io, database, parent_id) >= 4) return error.TooManySubagents;
     const model_id = requiredString(object, "modelId") orelse parent.model_id orelse return error.ModelIdRequired;
+    const model_route_id = requiredString(object, "modelRouteId") orelse parent.model_route_id orelse model_id;
     const cwd = parent.project_path orelse return error.SubagentCwdRequired;
     const name_value = optionalString(object, "name");
     var random: [4]u8 = undefined;
@@ -69,7 +70,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     try lockedCreate(io, database, run_id, parent_id, name, task, runtime_id, cwd, started_at);
     const prompt = try taskPrompt(allocator, name, task);
     defer allocator.free(prompt);
-    const turn = try turnDocument(allocator, runtime_id, parent.harness, parent.node_id, parent.project_id, model_id, cwd, prompt);
+    const turn = try turnDocument(allocator, runtime_id, parent.harness, parent.node_id, parent.project_id, model_id, model_route_id, cwd, prompt);
     defer allocator.free(turn);
     const accepted = agent_coordinator.turnPayload(allocator, io, mode, client, database, harness, turn) catch |failure| {
         try settleFailure(io, database, parent_id, run_id, null, "", @errorName(failure));
@@ -162,7 +163,7 @@ fn taskPrompt(allocator: std.mem.Allocator, name: []const u8, task: []const u8) 
     return std.fmt.allocPrint(allocator, "You are \"{s}\", a subagent completing one task for a parent agent session.\nWork independently with the tools you have. When finished, end with a clear,\nself-contained final report — it is the only thing the parent will see.\n\n{s}", .{ name, task });
 }
 
-fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, harness: []const u8, node_id: []const u8, project_id: ?[]const u8, model_id: []const u8, cwd: []const u8, message: []const u8) ![]u8 {
+fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, harness: []const u8, node_id: []const u8, project_id: ?[]const u8, model_id: []const u8, model_route_id: []const u8, cwd: []const u8, message: []const u8) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"sessionId\":");
@@ -173,6 +174,8 @@ fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, harness: [
         try output.writer.writeByte(':');
         try std.json.Stringify.value(field.value, .{}, &output.writer);
     }
+    try output.writer.writeAll(",\"modelRouteId\":");
+    try std.json.Stringify.value(model_route_id, .{}, &output.writer);
     try output.writer.writeAll(",\"projectId\":");
     if (project_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"toolAccess\":\"full\",\"mode\":\"prompt\"}");

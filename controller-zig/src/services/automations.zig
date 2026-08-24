@@ -54,6 +54,7 @@ pub fn createPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Dat
     try std.json.Stringify.value(prompt, .{}, &output.writer);
     try output.writer.writeAll(",\"modelId\":");
     try std.json.Stringify.value(model_id, .{}, &output.writer);
+    try writeOptional(&output.writer, "modelRouteId", optionalString(object, "modelRouteId"));
     try output.writer.writeAll(",\"cwd\":");
     try std.json.Stringify.value(cwd, .{}, &output.writer);
     try writeOptional(&output.writer, "targetSessionId", optionalString(object, "targetSessionId"));
@@ -83,7 +84,7 @@ pub fn patchPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Data
     defer allocator.free(stored);
     var automation = try parseObject(allocator, stored);
     defer automation.deinit();
-    const fields = [_][]const u8{ "name", "prompt", "modelId", "cwd", "targetSessionId", "nodeId", "projectId", "schedule", "status", "unread" };
+    const fields = [_][]const u8{ "name", "prompt", "modelId", "modelRouteId", "cwd", "targetSessionId", "nodeId", "projectId", "schedule", "status", "unread" };
     for (fields) |field| if (body.value.object.get(field)) |value| {
         if ((std.mem.eql(u8, field, "name") or std.mem.eql(u8, field, "prompt") or std.mem.eql(u8, field, "modelId") or std.mem.eql(u8, field, "cwd")) and (value != .string or std.mem.trim(u8, value.string, " \t\r\n").len == 0)) return error.InvalidAutomationPayload;
         if (std.mem.eql(u8, field, "schedule")) try validateSchedule(value);
@@ -118,6 +119,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     const object = automation.value.object;
     const prompt = requiredString(object, "prompt") orelse return error.InvalidAutomationRecord;
     const model_id = requiredString(object, "modelId") orelse return error.InvalidAutomationRecord;
+    const model_route_id = optionalString(object, "modelRouteId") orelse model_id;
     const cwd = requiredString(object, "cwd") orelse return error.InvalidAutomationRecord;
     const target_session = optionalString(object, "targetSessionId");
     const node_id = optionalString(object, "nodeId");
@@ -127,7 +129,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     const suffix = std.fmt.bytesToHex(random, .lower);
     const session_id = try std.fmt.allocPrint(allocator, "automation:{s}:{s}", .{ automation_id, suffix[0..] });
     defer allocator.free(session_id);
-    const turn = try turnDocument(allocator, session_id, model_id, prompt, cwd, target_session, node_id, project_id);
+    const turn = try turnDocument(allocator, session_id, model_id, model_route_id, prompt, cwd, target_session, node_id, project_id);
     defer allocator.free(turn);
     var run_error: ?[]const u8 = null;
     const response = agent_coordinator.turnPayload(allocator, io, mode, client, database, harness, turn) catch |failure| failed: {
@@ -216,13 +218,15 @@ fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(
     return serialize(allocator, automation.value);
 }
 
-fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, model_id: []const u8, prompt: []const u8, cwd: []const u8, native_session: ?[]const u8, node_id: ?[]const u8, project_id: ?[]const u8) ![]u8 {
+fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, model_id: []const u8, model_route_id: []const u8, prompt: []const u8, cwd: []const u8, native_session: ?[]const u8, node_id: ?[]const u8, project_id: ?[]const u8) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"sessionId\":");
     try std.json.Stringify.value(session_id, .{}, &output.writer);
     try output.writer.writeAll(",\"modelId\":");
     try std.json.Stringify.value(model_id, .{}, &output.writer);
+    try output.writer.writeAll(",\"modelRouteId\":");
+    try std.json.Stringify.value(model_route_id, .{}, &output.writer);
     try output.writer.writeAll(",\"message\":");
     try std.json.Stringify.value(prompt, .{}, &output.writer);
     try output.writer.writeAll(",\"cwd\":");

@@ -341,7 +341,7 @@ pub const Manager = struct {
         if (harness_kind == .pi and !manager.piIsAvailable()) return error.HarnessUnavailable;
         if (harness_kind == .fx and !manager.model_route.available()) return error.HarnessUnavailable;
         const session_id = optionalString(object, "sessionId") orelse "default";
-        const model_id = requiredString(object, "modelId") orelse return error.ModelIdRequired;
+        const model_id = optionalString(object, "modelRouteId") orelse requiredString(object, "modelId") orelse return error.ModelIdRequired;
         const message = requiredString(object, "message") orelse return error.MessageRequired;
         if (!harness_session_id.validRuntime(session_id)) return error.InvalidSessionId;
         const mode = optionalString(object, "mode") orelse "prompt";

@@ -33,6 +33,7 @@ export const AutomationSchema = Schema.Struct({
   name: Schema.String,
   prompt: Schema.String,
   modelId: Schema.String,
+  modelRouteId: Schema.optional(Schema.NullOr(Schema.String)),
   cwd: Schema.String,
   /**
    * The pi session every run should continue, so the automation works inside a

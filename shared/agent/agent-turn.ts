@@ -73,6 +73,7 @@ export type AgentTurnRequest = {
   sessionId: string;
   harness: string;
   modelId: string;
+  modelRouteId?: string;
   thinkingLevel?: AgentThinkingLevel;
   message: string;
   images: AgentImageInput[];
@@ -132,6 +133,8 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
   if (!message.ok) return message;
   const modelId = stringField(body, "modelId", true);
   if (!modelId.ok) return modelId;
+  const modelRouteId = stringField(body, "modelRouteId");
+  if (!modelRouteId.ok) return modelRouteId;
   const thinkingLevel = body.thinkingLevel;
   if (thinkingLevel != null && !isAgentThinkingLevel(thinkingLevel)) {
     return { ok: false, error: "thinkingLevel must be a supported reasoning level" };
@@ -176,6 +179,7 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
       sessionId: sessionId.value ?? "default",
       harness: harness.value ?? "pi",
       modelId: modelId.value!,
+      ...(modelRouteId.value ? { modelRouteId: modelRouteId.value } : {}),
       ...(thinkingLevel ? { thinkingLevel } : {}),
       message: message.value!,
       images: images.value,
