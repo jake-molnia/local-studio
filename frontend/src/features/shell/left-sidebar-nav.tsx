@@ -20,6 +20,8 @@ export const customizeTab = {
   icon: SettingsIcon,
 } as const;
 
+export const SETTINGS_SIDEBAR_PORTAL_ID = "settings-sidebar-content";
+
 export function mobilePageTitle(pathname: string): string {
   if (pathname.startsWith("/agent/automations")) return "Automations";
   if (pathname.startsWith("/agent")) return "Tasks";
@@ -47,11 +49,7 @@ export function isRouteActive(pathname: string, href: string): boolean {
 }
 
 export function routeHidesAppSidebar(pathname: string): boolean {
-  return (
-    pathname.startsWith("/setup") ||
-    pathname.startsWith("/quick") ||
-    pathname.startsWith("/settings")
-  );
+  return pathname.startsWith("/setup") || pathname.startsWith("/quick");
 }
 
 export function routeOwnsMobileHeader(pathname: string): boolean {

@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentModel } from "@/features/agent/workspace/types";
+import { ChevronRight } from "@/ui/icon-registry";
 import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
 import { cx } from "@/ui/utils";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -46,7 +47,7 @@ type AgentModelPickerProps = {
   onOpenChange?: (open: boolean) => void;
 };
 
-type PickerView = "models" | "reasoning" | "provider";
+type PickerView = "inspector" | "models" | "reasoning" | "provider";
 
 const PANEL_GAP_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
@@ -87,7 +88,7 @@ export function AgentModelPicker({
   onOpenChange,
 }: AgentModelPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const [view, setView] = useState<PickerView>("models");
+  const [view, setView] = useState<PickerView>("inspector");
   const [present, setPresent] = useState(controlledOpen ?? false);
   const [query, setQuery] = useState("");
   const [selectedCompany, setSelectedCompany] = useState("openai");
@@ -116,6 +117,8 @@ export function AgentModelPicker({
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const activeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const nestedTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const nestedPanelRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const updateOpen = useCallback(
@@ -130,29 +133,44 @@ export function AgentModelPicker({
   const close = useCallback(
     (restoreFocus = false) => {
       updateOpen(false);
+      setView("inspector");
       setQuery("");
       if (restoreFocus) requestAnimationFrame(() => activeTriggerRef.current?.focus());
     },
     [updateOpen],
   );
 
-  const openView = useCallback(
-    (nextView: PickerView, trigger: HTMLButtonElement, pointer: boolean) => {
+  const togglePicker = useCallback(
+    (trigger: HTMLButtonElement, pointer: boolean) => {
       setOpenSource(pointer ? "pointer" : "keyboard");
       activeTriggerRef.current = trigger;
-      if (open && view === nextView) {
+      if (open) {
         close();
         return;
       }
+      setView("inspector");
+      updateOpen(true);
+    },
+    [close, open, updateOpen],
+  );
+
+  const openNested = useCallback(
+    (nextView: Exclude<PickerView, "inspector">, trigger: HTMLButtonElement) => {
+      nestedTriggerRef.current = trigger;
       if (nextView === "models") {
         setSelectedCompany(activeChoice?.company.key ?? companies[0]?.key ?? "local");
         setQuery("");
       }
       setView(nextView);
-      updateOpen(true);
     },
-    [activeChoice?.company.key, close, companies, open, updateOpen, view],
+    [activeChoice?.company.key, companies],
   );
+
+  const closeNested = useCallback(() => {
+    const trigger = nestedTriggerRef.current;
+    setView("inspector");
+    requestAnimationFrame(() => trigger?.focus());
+  }, []);
 
   useMountSubscription(() => {
     if (open) {
@@ -167,15 +185,21 @@ export function AgentModelPicker({
     if (!open) return;
     const onPointerDown = (event: globalThis.PointerEvent) => {
       if (!(event.target instanceof Node)) return;
-      if (anchorRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) {
+      if (
+        anchorRef.current?.contains(event.target) ||
+        panelRef.current?.contains(event.target) ||
+        nestedPanelRef.current?.contains(event.target)
+      ) {
         return;
       }
       close();
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key !== "Escape") return;
       event.preventDefault();
-      close(true);
+      if (view === "inspector") close(true);
+      else closeNested();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
@@ -183,7 +207,7 @@ export function AgentModelPicker({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [close, open]);
+  }, [close, closeNested, open, view]);
 
   useMountSubscription(() => {
     if (!open) return;
@@ -203,8 +227,12 @@ export function AgentModelPicker({
     const frame = requestAnimationFrame(() => {
       if (view === "models") {
         searchRef.current?.focus({ preventScroll: true });
-      } else if (openSource === "keyboard") {
+      } else if (view === "inspector" && openSource === "keyboard") {
         panelRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+      } else if (openSource === "keyboard") {
+        nestedPanelRef.current
+          ?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')
+          ?.focus();
       }
     });
     return () => cancelAnimationFrame(frame);
@@ -242,6 +270,37 @@ export function AgentModelPicker({
     };
   }, []);
 
+  const placeNestedPanel = useCallback((node: HTMLDivElement | null) => {
+    nestedPanelRef.current = node;
+    if (!node) return;
+    const place = () => {
+      const anchor = nestedTriggerRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+      const fitsRight =
+        anchor.right + PANEL_GAP_PX + width <= window.innerWidth - VIEWPORT_MARGIN_PX;
+      const desiredLeft = fitsRight
+        ? anchor.right + PANEL_GAP_PX
+        : anchor.left - width - PANEL_GAP_PX;
+      const maxLeft = Math.max(VIEWPORT_MARGIN_PX, window.innerWidth - width - VIEWPORT_MARGIN_PX);
+      const maxTop = Math.max(VIEWPORT_MARGIN_PX, window.innerHeight - height - VIEWPORT_MARGIN_PX);
+      node.style.left = `${Math.round(Math.min(maxLeft, Math.max(VIEWPORT_MARGIN_PX, desiredLeft)))}px`;
+      node.style.top = `${Math.round(Math.min(maxTop, Math.max(VIEWPORT_MARGIN_PX, anchor.top)))}px`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(node);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      nestedPanelRef.current = null;
+    };
+  }, []);
+
   const selectChoice = useCallback(
     (choice: ModelChoice) => {
       const route = routeForChoice(choice, activeRoute);
@@ -265,51 +324,65 @@ export function AgentModelPicker({
     >
       <ComposerPickerTrigger
         label={modelTriggerLabel(activeChoice, selectedModel, loading, choices.length)}
-        title={`Model: ${activeChoice?.label || selectedModel || "No models"}`}
+        title={`Model settings: ${activeChoice?.label || selectedModel || "No models"}`}
         company={activeChoice?.company}
         disabled={loading}
-        open={open && view === "models"}
+        open={open}
         notRunning={selectedModelNotRunning}
-        onToggle={(event) => openView("models", event.currentTarget, event.detail > 0)}
+        onToggle={(event) => togglePicker(event.currentTarget, event.detail > 0)}
       />
-      {supportsReasoning ? (
-        <ComposerPickerTrigger
-          label={REASONING_LABELS[effectiveReasoning]}
-          title={`Effort: ${REASONING_LABELS[effectiveReasoning]}`}
-          disabled={loading || reasoningDisabled}
-          open={open && view === "reasoning"}
-          notRunning={false}
-          compact
-          onToggle={(event) => openView("reasoning", event.currentTarget, event.detail > 0)}
-        />
-      ) : null}
-      {supportsProviderSelection && activeRoute ? (
-        <ComposerPickerTrigger
-          label={activeRoute.label}
-          title={`Provider: ${activeRoute.label}`}
-          disabled={loading}
-          open={open && view === "provider"}
-          notRunning={false}
-          compact
-          onToggle={(event) => openView("provider", event.currentTarget, event.detail > 0)}
-        />
-      ) : null}
       {present && typeof document !== "undefined"
         ? createPortal(
             <div
               ref={placePanel}
               className={cx(
-                `composer-popover fixed z-[300] max-w-[calc(100vw-1rem)] ${POPOVER_SURFACE_CLASS}`,
+                `composer-popover fixed z-[300] w-[12rem] max-w-[calc(100vw-1rem)] overflow-visible p-1 ${POPOVER_SURFACE_CLASS}`,
                 open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none",
-                view === "models"
-                  ? "h-[min(21.625rem,calc(100vh-1rem))] w-[22.5rem] overflow-hidden p-0"
-                  : "w-[11rem] overflow-hidden p-1",
               )}
+              role="menu"
+              aria-label="Model settings"
               aria-hidden={!open}
               data-open-source={openSource}
               data-model-picker-content
               onKeyDown={(event) => {
                 setOpenSource("keyboard");
+                handleMenuKeyDown(event, () => close(true));
+              }}
+              onPointerDown={stopToolbarEvent}
+              onMouseDown={stopToolbarEvent}
+            >
+              <PickerInspector
+                activeView={view}
+                modelLabel={modelTriggerLabel(activeChoice, selectedModel, loading, choices.length)}
+                effortLabel={supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null}
+                providerLabel={supportsProviderSelection && activeRoute ? activeRoute.label : null}
+                onOpen={openNested}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
+      {present && open && view !== "inspector" && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={placeNestedPanel}
+              className={cx(
+                `composer-popover fixed z-[301] max-w-[calc(100vw-1rem)] ${POPOVER_SURFACE_CLASS}`,
+                view === "models"
+                  ? "h-[min(21.625rem,calc(100vh-1rem))] w-[22.5rem] overflow-hidden p-0"
+                  : "w-[11rem] overflow-hidden p-1",
+              )}
+              role="menu"
+              aria-label={view === "models" ? "Models" : "Model options"}
+              data-model-picker-content
+              onKeyDown={(event) => {
+                setOpenSource("keyboard");
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeNested();
+                  return;
+                }
                 if (view === "models") {
                   handleModelPickerKeyDown(event, () => {
                     const first = filteredChoices(choices, selectedCompany, query)[0];
@@ -317,7 +390,7 @@ export function AgentModelPicker({
                   });
                   return;
                 }
-                handleMenuKeyDown(event, () => close(true));
+                handleMenuKeyDown(event, closeNested);
               }}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
@@ -375,6 +448,63 @@ export function AgentModelPicker({
             document.body,
           )
         : null}
+    </div>
+  );
+}
+
+function PickerInspector({
+  activeView,
+  modelLabel,
+  effortLabel,
+  providerLabel,
+  onOpen,
+}: {
+  activeView: PickerView;
+  modelLabel: string;
+  effortLabel: string | null;
+  providerLabel: string | null;
+  onOpen: (view: Exclude<PickerView, "inspector">, trigger: HTMLButtonElement) => void;
+}) {
+  const rows: Array<{
+    view: Exclude<PickerView, "inspector">;
+    label: string;
+    value: string;
+  }> = [
+    { view: "models", label: "Model", value: modelLabel },
+    ...(effortLabel ? [{ view: "reasoning" as const, label: "Effort", value: effortLabel }] : []),
+    ...(providerLabel
+      ? [{ view: "provider" as const, label: "Provider", value: providerLabel }]
+      : []),
+  ];
+  return (
+    <div className="grid gap-0.5">
+      {rows.map((row) => (
+        <button
+          key={row.view}
+          type="button"
+          role="menuitem"
+          aria-haspopup="menu"
+          aria-expanded={activeView === row.view}
+          onClick={(event) => onOpen(row.view, event.currentTarget)}
+          onPointerEnter={(event) => onOpen(row.view, event.currentTarget)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowRight") return;
+            event.preventDefault();
+            event.stopPropagation();
+            onOpen(row.view, event.currentTarget);
+          }}
+          className={cx(
+            "flex h-7 w-full items-center gap-2 rounded-[4px] px-2 text-left text-[length:var(--fs-sm)] text-(--fg) transition-colors hover:bg-(--hover) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring)",
+            activeView === row.view && "bg-(--hover)",
+          )}
+        >
+          <span className="min-w-0 flex-1">{row.label}</span>
+          <span className="max-w-[6rem] truncate text-[length:var(--fs-xs)] text-(--dim)">
+            {row.value}
+          </span>
+          <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)" />
+        </button>
+      ))}
     </div>
   );
 }

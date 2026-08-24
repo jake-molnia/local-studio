@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   AppPage,
   Button,
@@ -15,9 +15,10 @@ import {
   type SectionNavItem,
   type UiTone,
 } from "@/ui";
-import { ChevronDown, ChevronLeft, CloseIcon } from "@/ui/icon-registry";
+import { ChevronDown, ChevronLeft } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
-import { ProfileAvatar, useLocalProfile } from "@/features/shell/local-profile";
+import { SETTINGS_SIDEBAR_PORTAL_ID } from "@/features/shell/left-sidebar-nav";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 
 export type SettingsSectionId = string;
 export type SettingsSearchEntry = {
@@ -82,8 +83,12 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
   children,
 }: LayoutProps<Id>) {
   const [navigationQuery, setNavigationQuery] = useState("");
+  const [sidebarHost, setSidebarHost] = useState<HTMLElement | null>(null);
   const router = useRouter();
   const active = sections.find((section) => section.id === activeSection);
+  useMountSubscription(() => {
+    setSidebarHost(document.getElementById(SETTINGS_SIDEBAR_PORTAL_ID));
+  }, []);
   const searchResults = useMemo(() => {
     const query = navigationQuery.trim().toLowerCase();
     if (!query) return [];
@@ -137,20 +142,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
     });
   };
   const navigateBack = useCallback(() => {
-    const referrer = typeof document === "undefined" ? "" : document.referrer;
-    let sameOrigin = false;
-    if (referrer) {
-      try {
-        sameOrigin = new URL(referrer).origin === window.location.origin;
-      } catch {
-        sameOrigin = false;
-      }
-    }
-    if (sameOrigin && window.history.length > 1) {
-      router.back();
-      return;
-    }
-    router.push("/agent");
+    router.replace("/agent");
   }, [router]);
   const navigation = navigationQuery.trim() ? (
     searchResults.length ? (
@@ -224,31 +216,35 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
 
   if (takeover) {
     return (
-      <AppPage className="overflow-hidden">
-        <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[194px_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 flex-col border-r border-(--ui-separator) bg-(--sidebar-bg) lg:flex">
-            <div className="flex h-9 shrink-0 items-center px-2">
-              <button
-                type="button"
-                onClick={navigateBack}
-                className="inline-flex h-6 items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
-              >
-                <ChevronLeft className="h-3 w-3" />
-                Back
-              </button>
-            </div>
-            <div className="px-1.5 pb-1.5">
-              <SearchInput
-                value={navigationQuery}
-                onChange={updateNavigationQuery}
-                placeholder="Search Settings"
-                aria-label="Search Settings"
-                className="[&_input]:h-7 [&_input]:rounded-[4px] [&_input]:bg-(--ui-surface)"
-              />
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-1.5">{navigation}</div>
-            <SettingsTakeoverFooter loading={loading} onReload={onReload} />
-          </aside>
+      <>
+        {sidebarHost
+          ? createPortal(
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex h-9 shrink-0 items-center px-2">
+                  <button
+                    type="button"
+                    onClick={navigateBack}
+                    className="inline-flex h-6 items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
+                  >
+                    <ChevronLeft className="h-3 w-3" />
+                    Back
+                  </button>
+                </div>
+                <div className="px-1.5 pb-1.5">
+                  <SearchInput
+                    value={navigationQuery}
+                    onChange={updateNavigationQuery}
+                    placeholder="Search Settings"
+                    aria-label="Search Settings"
+                    className="[&_input]:h-7 [&_input]:rounded-[4px] [&_input]:bg-(--ui-surface)"
+                  />
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-1.5">{navigation}</div>
+              </div>,
+              sidebarHost,
+            )
+          : null}
+        <AppPage className="overflow-hidden">
           <section className="min-h-0 min-w-0 overflow-y-auto">
             <div className="border-b border-(--ui-separator) px-3 py-2 lg:hidden">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -277,8 +273,8 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
               {content}
             </div>
           </section>
-        </div>
-      </AppPage>
+        </AppPage>
+      </>
     );
   }
 
@@ -304,30 +300,6 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         <section className="min-w-0 pb-10">{content}</section>
       </div>
     </AppPage>
-  );
-}
-
-function SettingsTakeoverFooter({ loading, onReload }: { loading: boolean; onReload: () => void }) {
-  const [profile] = useLocalProfile();
-  return (
-    <div className="flex h-9 shrink-0 items-center gap-0.5 border-t border-(--ui-separator)/70 px-1.5">
-      <Link
-        href="/settings#profile"
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[4px] px-1.5 py-1 transition-colors hover:bg-(--ui-hover)"
-      >
-        <ProfileAvatar profile={profile} />
-        <span className="truncate text-[length:var(--fs-xs)] text-(--ui-fg)">{profile.name}</span>
-      </Link>
-      <RefreshIconButton onClick={onReload} loading={loading} label="Refresh settings" />
-      <Link
-        href="/agent"
-        aria-label="Close Settings"
-        title="Close Settings"
-        className="flex h-6 w-6 items-center justify-center rounded-[4px] bg-(--ui-active) text-(--ui-fg) transition-colors hover:bg-(--ui-hover)"
-      >
-        <CloseIcon className="h-3 w-3" />
-      </Link>
-    </div>
   );
 }
 

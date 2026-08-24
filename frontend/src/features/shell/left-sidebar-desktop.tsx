@@ -24,6 +24,7 @@ import {
   studioTabs,
   customizeTab,
   isRouteActive,
+  SETTINGS_SIDEBAR_PORTAL_ID,
 } from "@/features/shell/left-sidebar-nav";
 
 const HISTORY_STEPPER_CLASS =
@@ -92,6 +93,7 @@ export function DesktopSidebar({
   finishedSessions: number;
   onNewTask: () => void;
 }) {
+  const settingsMode = pathname.startsWith("/settings");
   return (
     <aside
       onPointerEnter={onRevealProjectsNav}
@@ -186,84 +188,92 @@ export function DesktopSidebar({
           </button>
         </div>
 
-        <nav
+        <div
+          role="navigation"
+          aria-label={settingsMode ? "Settings" : "Primary"}
           onKeyDown={handleDesktopSidebarKeyDown}
           className="sidebar-scroller flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-[var(--sidebar-padding-x)] py-1 [contain:layout_paint]"
         >
-          <div className="flex shrink-0 flex-col gap-[var(--sidebar-row-gap)]">
-            <Link
-              href="/agent?new=1&replace=1"
-              prefetch={false}
-              onPointerUp={(event) => event.currentTarget.blur()}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-                onNewTask();
-              }}
-              className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
-              title="New task"
-            >
-              <NewTaskIcon className="h-4 w-4 shrink-0 opacity-80" />
-              <span className="flex-1 truncate text-left text-[length:var(--fs-md)] font-medium">
-                New task
-              </span>
-              <kbd className="w-7 text-right text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
-                ⌘N
-              </kbd>
-            </Link>
-            <NavActionDesktop
-              label="Search"
-              Icon={SearchIcon}
-              shortcut="⌘K"
-              onClick={onOpenSearch}
-            />
-            {primaryTabs.map((tab) => (
-              <NavItemDesktop
-                key={tab.href}
-                href={tab.href}
-                label={tab.label}
-                Icon={tab.icon}
-                active={isRouteActive(pathname, tab.href)}
-              />
-            ))}
-            <NavItemDesktop
-              href={customizeTab.href}
-              label={customizeTab.label}
-              Icon={customizeTab.icon}
-              active={isRouteActive(pathname, customizeTab.href)}
-            />
-          </div>
-          {projectsNavReady ? (
-            ProjectsNavSection ? (
-              <ProjectsNavSection expanded={isExpanded} view={navView} />
-            ) : (
-              <ProjectsNavPlaceholder />
-            )
-          ) : null}
-          <details
-            className="group/studio mt-2 shrink-0 border-t border-(--border)/35 pt-1"
-            open={studioTabs.some((tab) => isRouteActive(pathname, tab.href)) || undefined}
-          >
-            <summary
-              onPointerUp={(event) => event.currentTarget.blur()}
-              className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1.5 rounded-[var(--sidebar-row-radius)] px-2 text-[length:var(--fs-sm)] font-medium text-(--dim)/65 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
-            >
-              <ChevronRight className="h-3 w-3 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
-              Studio
-            </summary>
-            <div className="flex flex-col gap-[var(--sidebar-row-gap)]">
-              {studioTabs.map((tab) => (
-                <NavItemDesktop
-                  key={tab.href}
-                  href={tab.href}
-                  label={tab.label}
-                  Icon={tab.icon}
-                  active={isRouteActive(pathname, tab.href)}
+          {settingsMode ? (
+            <div id={SETTINGS_SIDEBAR_PORTAL_ID} className="flex min-h-0 flex-1 flex-col" />
+          ) : (
+            <>
+              <div className="flex shrink-0 flex-col gap-[var(--sidebar-row-gap)]">
+                <Link
+                  href="/agent?new=1&replace=1"
+                  prefetch={false}
+                  onPointerUp={(event) => event.currentTarget.blur()}
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    onNewTask();
+                  }}
+                  className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
+                  title="New task"
+                >
+                  <NewTaskIcon className="h-4 w-4 shrink-0 opacity-80" />
+                  <span className="flex-1 truncate text-left text-[length:var(--fs-md)] font-medium">
+                    New task
+                  </span>
+                  <kbd className="w-7 text-right text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
+                    ⌘N
+                  </kbd>
+                </Link>
+                <NavActionDesktop
+                  label="Search"
+                  Icon={SearchIcon}
+                  shortcut="⌘K"
+                  onClick={onOpenSearch}
                 />
-              ))}
-            </div>
-          </details>
-        </nav>
+                {primaryTabs.map((tab) => (
+                  <NavItemDesktop
+                    key={tab.href}
+                    href={tab.href}
+                    label={tab.label}
+                    Icon={tab.icon}
+                    active={isRouteActive(pathname, tab.href)}
+                  />
+                ))}
+                <NavItemDesktop
+                  href={customizeTab.href}
+                  label={customizeTab.label}
+                  Icon={customizeTab.icon}
+                  active={isRouteActive(pathname, customizeTab.href)}
+                />
+              </div>
+              {projectsNavReady ? (
+                ProjectsNavSection ? (
+                  <ProjectsNavSection expanded={isExpanded} view={navView} />
+                ) : (
+                  <ProjectsNavPlaceholder />
+                )
+              ) : null}
+              <details
+                className="group/studio mt-2 shrink-0 border-t border-(--border)/35 pt-1"
+                open={studioTabs.some((tab) => isRouteActive(pathname, tab.href)) || undefined}
+              >
+                <summary
+                  onPointerUp={(event) => event.currentTarget.blur()}
+                  className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1.5 rounded-[var(--sidebar-row-radius)] px-2 text-[length:var(--fs-sm)] font-medium text-(--dim)/65 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
+                >
+                  <ChevronRight className="h-3 w-3 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
+                  Studio
+                </summary>
+                <div className="flex flex-col gap-[var(--sidebar-row-gap)]">
+                  {studioTabs.map((tab) => (
+                    <NavItemDesktop
+                      key={tab.href}
+                      href={tab.href}
+                      label={tab.label}
+                      Icon={tab.icon}
+                      active={isRouteActive(pathname, tab.href)}
+                    />
+                  ))}
+                </div>
+              </details>
+            </>
+          )}
+        </div>
 
         <div className="shrink-0 bg-(--sidebar-bg) px-[var(--sidebar-padding-x)] pb-2 pt-1">
           <ProfileFooter settingsActive={isRouteActive(pathname, "/settings")} />
