@@ -251,6 +251,7 @@ fn providerTarget(allocator: std.mem.Allocator, upstream: []const u8, target: []
 fn collectCapturedHeaders(captured: *const CapturedRequest, output: *[64]http.Header, forwarding: Forwarding) !usize {
     var count: usize = 0;
     for (captured.headers) |header| {
+        if (std.ascii.eqlIgnoreCase(header.name, "x-local-studio-model-route")) continue;
         if (forwarding.strip_credentials and (std.ascii.eqlIgnoreCase(header.name, "authorization") or std.ascii.eqlIgnoreCase(header.name, "x-api-key"))) continue;
         if (replacedByExtraHeader(header.name, forwarding.extra_request_headers)) continue;
         if (count == output.len) return error.TooManyForwardedHeaders;

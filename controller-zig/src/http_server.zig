@@ -41,6 +41,7 @@ const automations = @import("services/automations.zig");
 const head_connection = @import("services/head_connection.zig");
 const agent_enrollments = @import("services/agent_enrollments.zig");
 const agent_models = @import("services/agent_models.zig");
+const model_catalog = @import("services/model_catalog.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_oauth = @import("services/agent_oauth.zig");
@@ -1561,17 +1562,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveRuntimeJobCreate(allocator, configuration, runtime_jobs, runtime_cache, request, backend, true);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/models")) {
-        const worker_response = try worker_service.modelCatalogPayload(allocator, io, client, database);
-        defer allocator.free(worker_response);
-        var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
-        defer snapshot.deinit();
-        const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
-        defer allocator.free(provider_response);
-        const subscription_response = try head_provider_state.catalogPayload();
-        defer allocator.free(subscription_response);
-        const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
-        defer allocator.free(all_providers);
-        const response = try provider_routing.mergedModelCatalog(allocator, worker_response, all_providers);
+        const response = try headModelCatalogPayload(allocator, io, configuration, studio, head_provider_state, client, database);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -1579,19 +1570,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/models")) {
-        const local_response = try model_service.localCatalogPayload(allocator, io, database, recipe_column, llm_instance_path);
-        defer allocator.free(local_response);
-        const response = if (mode == .standalone) response: {
-            var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
-            defer snapshot.deinit();
-            const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
-            defer allocator.free(provider_response);
-            const subscription_response = try head_provider_state.catalogPayload();
-            defer allocator.free(subscription_response);
-            const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
-            defer allocator.free(all_providers);
-            break :response try provider_routing.mergedModelCatalog(allocator, local_response, all_providers);
-        } else try allocator.dupe(u8, local_response);
+        const response = try localModelCatalogPayload(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path);
         defer allocator.free(response);
         try request.respond(response, .{
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -2108,6 +2087,52 @@ fn respondDownloadError(request: *http.Server.Request, status: http.Status, deta
     try output.writeByte('}');
     try request.respond(output.buffered(), .{ .status = status, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
     return request.head.keep_alive;
+}
+
+fn headModelCatalogPayload(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database) ![]u8 {
+    const worker_response = try worker_service.modelCatalogPayload(allocator, io, client, database);
+    defer allocator.free(worker_response);
+    var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+    defer snapshot.deinit();
+    const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+    defer allocator.free(provider_response);
+    const subscription_response = try head_provider_state.catalogPayload();
+    defer allocator.free(subscription_response);
+    const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
+    defer allocator.free(all_providers);
+    return provider_routing.mergedModelCatalog(allocator, worker_response, all_providers);
+}
+
+fn localModelCatalogPayload(allocator: std.mem.Allocator, io: Io, configuration: *const Config, studio: *studio_settings.State, head_provider_state: *head_providers.State, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8) ![]u8 {
+    const local_response = try model_service.localCatalogPayload(allocator, io, database, recipe_column, llm_instance_path);
+    defer allocator.free(local_response);
+    if (configuration.mode != .standalone) return allocator.dupe(u8, local_response);
+    var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
+    defer snapshot.deinit();
+    const provider_response = try provider_catalog.payload(allocator, io, client, snapshot.providers);
+    defer allocator.free(provider_response);
+    const subscription_response = try head_provider_state.catalogPayload();
+    defer allocator.free(subscription_response);
+    const all_providers = try provider_routing.mergeProviderCatalogs(allocator, provider_response, subscription_response);
+    defer allocator.free(all_providers);
+    return provider_routing.mergedModelCatalog(allocator, local_response, all_providers);
+}
+
+const CanonicalRoute = struct {
+    known: bool,
+    route: ?[]u8,
+};
+
+fn resolveCanonicalRoute(allocator: std.mem.Allocator, runtime_catalog: []const u8, captured: *const reverse_proxy.CapturedRequest, requested_model: []const u8) !CanonicalRoute {
+    const canonical = try model_catalog.canonicalId(allocator, requested_model) orelse return .{ .known = false, .route = null };
+    defer allocator.free(canonical);
+    if (try model_catalog.routeForModel(allocator, runtime_catalog, canonical, requested_model)) |exact| return .{ .known = true, .route = exact };
+    var preferred: ?[]const u8 = null;
+    for (captured.headers) |header| if (std.ascii.eqlIgnoreCase(header.name, "x-local-studio-model-route")) {
+        preferred = std.mem.trim(u8, header.value, " \t\r\n");
+        break;
+    };
+    return .{ .known = true, .route = try model_catalog.routeForModel(allocator, runtime_catalog, canonical, preferred) };
 }
 
 fn respondProviderFailure(request: *http.Server.Request, failure: anyerror, provider_id: ?[]const u8) !bool {
@@ -2865,18 +2890,28 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     if (parsed.value != .object) return try respondModelRequired(request);
     const model_value = parsed.value.object.get("model") orelse return try respondModelRequired(request);
     if (model_value != .string) return try respondModelRequired(request);
-    const model_id = std.mem.trim(u8, model_value.string, " \t\r\n");
-    if (model_id.len == 0) return try respondModelRequired(request);
+    const requested_model_id = std.mem.trim(u8, model_value.string, " \t\r\n");
+    if (requested_model_id.len == 0) return try respondModelRequired(request);
+    const runtime_catalog = try headModelCatalogPayload(allocator, io, configuration, studio, head_provider_state, client, database);
+    defer allocator.free(runtime_catalog);
+    const catalog_route = try resolveCanonicalRoute(allocator, runtime_catalog, &captured, requested_model_id);
+    defer if (catalog_route.route) |value| allocator.free(value);
+    if (catalog_route.known and catalog_route.route == null) return try respondModelNotRunning(allocator, request, null, requested_model_id);
+    const model_id = catalog_route.route orelse requested_model_id;
+    var routed_body: ?[]u8 = null;
+    defer if (routed_body) |value| allocator.free(value);
+    if (!std.mem.eql(u8, model_id, requested_model_id)) routed_body = try provider_routing.rewriteModel(allocator, &parsed, model_id);
+    const inference_body = routed_body orelse body;
 
     const codex_prefix = "openai-codex/";
     if (std.mem.startsWith(u8, model_id, codex_prefix)) {
         const upstream_model = model_id[codex_prefix.len..];
-        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
+        if (!try head_providers.isCodexModel(allocator, upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Head");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, body, requested_stream, request) catch return false;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
         return false;
     }
 
@@ -2915,7 +2950,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     };
     defer worker.deinit();
     try worker_pool.acquire(io, worker.id);
-    reverse_proxy.serveWorkerBuffered(allocator, client, worker.address, worker.api_key, worker.id, body, &captured, request) catch |failure| {
+    reverse_proxy.serveWorkerBuffered(allocator, client, worker.address, worker.api_key, worker.id, inference_body, &captured, request) catch |failure| {
         worker_pool.release(io, worker.id);
         if (failure == error.WorkerStreamFailedAfterCommitment) return false;
         var alternate = worker_service.selectServing(allocator, io, client, database, worker_pool, model_id, worker.id) catch null orelse {
@@ -2928,7 +2963,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         };
         defer alternate.deinit();
         try worker_pool.acquire(io, alternate.id);
-        reverse_proxy.serveWorkerBuffered(allocator, client, alternate.address, alternate.api_key, alternate.id, body, &captured, request) catch |retry_failure| {
+        reverse_proxy.serveWorkerBuffered(allocator, client, alternate.address, alternate.api_key, alternate.id, inference_body, &captured, request) catch |retry_failure| {
             worker_pool.release(io, alternate.id);
             if (retry_failure == error.WorkerStreamFailedAfterCommitment) return false;
             try request.respond("{\"detail\":\"Worker is unavailable\"}", .{
@@ -2978,15 +3013,25 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         return request.head.keep_alive;
     }
 
-    const requested_provider_model = if (parsed.value.object.get("model")) |value| if (value == .string) std.mem.trim(u8, value.string, " \t\r\n") else "" else "";
+    const requested_model = if (parsed.value.object.get("model")) |value| if (value == .string) std.mem.trim(u8, value.string, " \t\r\n") else "" else "";
+    const runtime_catalog = try localModelCatalogPayload(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path);
+    defer allocator.free(runtime_catalog);
+    const catalog_route = try resolveCanonicalRoute(allocator, runtime_catalog, &captured, requested_model);
+    defer if (catalog_route.route) |value| allocator.free(value);
+    if (catalog_route.known and catalog_route.route == null) return try respondModelNotRunning(allocator, request, null, requested_model);
+    const requested_provider_model = catalog_route.route orelse requested_model;
+    var catalog_body: ?[]u8 = null;
+    defer if (catalog_body) |value| allocator.free(value);
+    if (!std.mem.eql(u8, requested_provider_model, requested_model)) catalog_body = try provider_routing.rewriteModel(allocator, &parsed, requested_provider_model);
+    const inference_body = catalog_body orelse body;
     const codex_prefix = "openai-codex/";
     if (std.mem.startsWith(u8, requested_provider_model, codex_prefix)) {
         const upstream_model = requested_provider_model[codex_prefix.len..];
-        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
+        if (!try head_providers.isCodexModel(allocator, upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, body, requested_stream, request) catch return false;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, inference_body, requested_stream, request) catch return false;
         return false;
     }
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
@@ -3007,13 +3052,13 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
     defer if (rewritten) |payload| allocator.free(payload);
     if (parsed.value.object.get("model")) |model_value| {
         if (model_value == .string) {
-            const requested_model = std.mem.trim(u8, model_value.string, " \t\r\n");
-            if (requested_model.len > 0) {
-                var resolution = try model_service.resolveRequestedModel(allocator, io, database, recipe_column, llm_instance_path, requested_model);
+            const resolved_model = std.mem.trim(u8, model_value.string, " \t\r\n");
+            if (resolved_model.len > 0) {
+                var resolution = try model_service.resolveRequestedModel(allocator, io, database, recipe_column, llm_instance_path, resolved_model);
                 defer resolution.deinit();
-                if (resolution.managed and !resolution.active) return try respondModelNotRunning(allocator, request, resolution.active_model, requested_model);
+                if (resolution.managed and !resolution.active) return try respondModelNotRunning(allocator, request, resolution.active_model, resolved_model);
                 if (resolution.canonical) |canonical| {
-                    if (!std.mem.eql(u8, canonical, requested_model)) {
+                    if (!std.mem.eql(u8, canonical, resolved_model)) {
                         try parsed.value.object.put(parsed.arena.allocator(), "model", .{ .string = canonical });
                         var output: Io.Writer.Allocating = .init(allocator);
                         errdefer output.deinit();
@@ -3024,7 +3069,7 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
             }
         }
     }
-    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request, null) catch return false;
+    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse inference_body, &captured, request, null) catch return false;
     return false;
 }
 
@@ -3055,26 +3100,36 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
     if (parsed.value != .object) return try respondInvalidProtocolBody(request, protocol);
 
     const model_value = parsed.value.object.get("model");
-    const requested_model = if (model_value != null and model_value.? == .string)
+    const original_model = if (model_value != null and model_value.? == .string)
         std.mem.trim(u8, model_value.?.string, " \t\r\n")
     else
         "";
-    if (protocol == .responses and requested_model.len == 0) {
+    if (protocol == .responses and original_model.len == 0) {
         try request.respond("{\"detail\":\"Responses request requires a model\"}", .{
             .status = .bad_request,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
     }
+    const runtime_catalog = try localModelCatalogPayload(allocator, io, configuration, studio, head_provider_state, client, database, recipe_column, llm_instance_path);
+    defer allocator.free(runtime_catalog);
+    const catalog_route = try resolveCanonicalRoute(allocator, runtime_catalog, &captured, original_model);
+    defer if (catalog_route.route) |value| allocator.free(value);
+    if (catalog_route.known and catalog_route.route == null) return try respondModelNotRunning(allocator, request, null, original_model);
+    const requested_model = catalog_route.route orelse original_model;
+    var catalog_body: ?[]u8 = null;
+    defer if (catalog_body) |value| allocator.free(value);
+    if (!std.mem.eql(u8, requested_model, original_model)) catalog_body = try provider_routing.rewriteModel(allocator, &parsed, requested_model);
+    const inference_body = catalog_body orelse body;
 
     const codex_prefix = "openai-codex/";
     if (protocol == .responses and std.mem.startsWith(u8, requested_model, codex_prefix)) {
         const upstream_model = requested_model[codex_prefix.len..];
-        if (!head_providers.isCodexModel(upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
+        if (!try head_providers.isCodexModel(allocator, upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, body, requested_stream, request) catch return false;
+        codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch return false;
         return false;
     }
 
@@ -3111,7 +3166,7 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         if (parsed.value.object.get("stream")) |stream_value| if (stream_value == .bool and stream_value.bool) "text/event-stream" else "application/json" else "application/json"
     else
         null;
-    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse body, &captured, request, accept) catch return false;
+    reverse_proxy.serveLocalBuffered(client, inference_origin, rewritten orelse inference_body, &captured, request, accept) catch return false;
     return false;
 }
 
