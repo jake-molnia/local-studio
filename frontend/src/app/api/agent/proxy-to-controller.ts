@@ -1,22 +1,22 @@
 import { readRequestBytesWithinLimit } from "@shared/agent/agent-turn-body";
 
 const HOP_BY_HOP_REQUEST_HEADERS = ["host", "connection", "content-length", "accept-encoding"];
-const DEFAULT_AGENT_RUNTIME_URL = "http://127.0.0.1:8081";
+const DEFAULT_CONTROLLER_URL = "http://127.0.0.1:8081";
 
-type AgentRuntimeProxyOptions = {
+type AgentControllerProxyOptions = {
   bodyLimitBytes?: number;
 };
 
-export function agentRuntimeBaseUrl(): string {
-  const raw = process.env.LOCAL_STUDIO_AGENT_RUNTIME_URL?.trim();
-  return (raw || DEFAULT_AGENT_RUNTIME_URL).replace(/\/+$/, "");
+export function controllerBaseUrl(): string {
+  const raw = process.env.LOCAL_STUDIO_CONTROLLER_URL?.trim();
+  return (raw || DEFAULT_CONTROLLER_URL).replace(/\/+$/, "");
 }
 
-export async function proxyToAgentRuntime(
+export async function proxyToController(
   request: Request,
-  options: AgentRuntimeProxyOptions = {},
+  options: AgentControllerProxyOptions = {},
 ): Promise<Response> {
-  const base = agentRuntimeBaseUrl();
+  const base = controllerBaseUrl();
   const url = new URL(request.url);
   const target = `${base}${url.pathname}${url.search}`;
 
