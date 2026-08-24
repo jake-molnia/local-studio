@@ -12,6 +12,7 @@
 
 # next.js
 /.next/
+/.next-codex-dev/
 /.next-dev/
 /out/
 
