@@ -4,7 +4,9 @@ const repository = @import("../repository/agent_connectors.zig");
 const sqlite = @import("../repository/sqlite.zig");
 const harness_nodes = @import("harness_nodes.zig");
 const node_transport = @import("node_transport.zig");
+const connector_runtime = @import("connector_runtime.zig");
 const mcp_client = @import("mcp_client.zig");
+const mcp_catalog = @import("mcp_catalog.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -79,7 +81,9 @@ pub fn listLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Databas
         if (index > 0) try output.writer.writeByte(',');
         try writeView(allocator, &output.writer, document);
     }
-    try output.writer.writeAll("]}");
+    try output.writer.writeAll("],\"catalog\":");
+    try mcp_catalog.write(&output.writer);
+    try output.writer.writeByte('}');
     return output.toOwnedSlice();
 }
 
@@ -92,7 +96,11 @@ pub fn upsertLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     if (!validId(id)) return error.InvalidConnectorId;
     const transport = stringField(object.*, "transport") orelse return error.ConnectorTransportRequired;
     if (!std.mem.eql(u8, transport, "stdio") and !std.mem.eql(u8, transport, "http")) return error.InvalidConnectorTransport;
-    if (std.mem.eql(u8, transport, "stdio") and stringField(object.*, "command") == null) return error.ConnectorCommandRequired;
+    if (std.mem.eql(u8, transport, "stdio") and stringField(object.*, "command") == null and object.get("runtime") == null) return error.ConnectorCommandRequired;
+    if (object.get("runtime")) |runtime| {
+        if (!std.mem.eql(u8, transport, "stdio")) return error.InvalidConnectorRuntime;
+        try connector_runtime.validate(runtime);
+    }
     if (std.mem.eql(u8, transport, "http")) {
         const url = stringField(object.*, "url") orelse return error.ConnectorUrlRequired;
         const uri = std.Uri.parse(url) catch return error.InvalidConnectorUrl;
@@ -465,7 +473,7 @@ fn validateGrantIds(model_id: []const u8, connector_id: []const u8) !void {
 
 fn executeConnector(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, connector: std.json.ObjectMap, operation: mcp_client.Operation) ![]u8 {
     const transport = stringField(connector, "transport") orelse return error.InvalidConnectorRecord;
-    if (std.mem.eql(u8, transport, "stdio")) return mcp_client.executeStdio(allocator, io, configuration.environment, connector, operation);
+    if (std.mem.eql(u8, transport, "stdio")) return mcp_client.executeStdio(allocator, io, configuration.environment, configuration.data_dir, connector, operation);
     if (std.mem.eql(u8, transport, "http")) return mcp_client.executeHttp(allocator, io, client, connector, operation);
     return error.UnsupportedMcpTransport;
 }
@@ -531,7 +539,9 @@ fn listLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
         if (index > 0) try output.writer.writeByte(',');
         try writeView(allocator, &output.writer, document);
     }
-    try output.writer.writeAll("]}");
+    try output.writer.writeAll("],\"catalog\":");
+    try mcp_catalog.write(&output.writer);
+    try output.writer.writeByte('}');
     return output.toOwnedSlice();
 }
 
@@ -572,7 +582,7 @@ fn restoreSecrets(incoming: *std.json.ObjectMap, stored: std.json.ObjectMap, rec
 }
 
 fn preserveFields(allocator: std.mem.Allocator, incoming: *std.json.ObjectMap, stored: std.json.ObjectMap) !void {
-    for ([_][]const u8{ "envSecret", "headerSecret", "cwd", "allowTools", "origin", "auth" }) |name| {
+    for ([_][]const u8{ "envSecret", "headerSecret", "cwd", "allowTools", "origin", "auth", "runtime", "protocolEra" }) |name| {
         if (incoming.get(name) == null) if (stored.get(name)) |value| try incoming.put(allocator, name, value);
     }
 }
@@ -593,6 +603,10 @@ fn validateOptionalFields(object: std.json.ObjectMap) !void {
         while (iterator.next()) |entry| if (entry.value_ptr.* != .bool) return error.InvalidConnectorPayload;
     };
     if (object.get("enabled")) |value| if (value != .bool) return error.InvalidConnectorPayload;
+    if (object.get("protocolEra")) |value| {
+        if (value != .string) return error.InvalidConnectorPayload;
+        if (!std.mem.eql(u8, value.string, "modern") and !std.mem.eql(u8, value.string, "auto") and !std.mem.eql(u8, value.string, "legacy")) return error.InvalidConnectorPayload;
+    }
 }
 
 fn secretKey(object: std.json.ObjectMap, flags_name: []const u8, key: []const u8) bool {

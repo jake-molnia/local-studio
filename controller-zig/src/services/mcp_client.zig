@@ -1,4 +1,5 @@
 const std = @import("std");
+const connector_runtime = @import("connector_runtime.zig");
 
 const Io = std.Io;
 const max_frame_bytes = 4 * 1024 * 1024;
@@ -11,6 +12,12 @@ const Era = enum {
     legacy,
 };
 
+const ProtocolPreference = enum {
+    modern,
+    modern_first,
+    legacy,
+};
+
 pub const Operation = union(enum) {
     tools,
     call: struct {
@@ -19,26 +26,17 @@ pub const Operation = union(enum) {
     },
 };
 
-pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, connector: std.json.ObjectMap, operation: Operation) ![]u8 {
-    const command = stringField(connector, "command") orelse return error.ConnectorCommandRequired;
-    var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
-    try argv.append(allocator, command);
-    if (connector.get("args")) |args| {
-        if (args != .array) return error.InvalidConnectorRecord;
-        for (args.array.items) |argument| {
-            if (argument != .string) return error.InvalidConnectorRecord;
-            try argv.append(allocator, argument.string);
-        }
-    }
+pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, data_dir: []const u8, connector: std.json.ObjectMap, operation: Operation) ![]u8 {
+    var launch_arena = std.heap.ArenaAllocator.init(allocator);
+    defer launch_arena.deinit();
+    const launch = try connector_runtime.resolve(launch_arena.allocator(), io, environment, connector);
     var child_environment = try minimalEnvironment(allocator, environment, connector);
     defer child_environment.deinit();
-    const cwd = stringField(connector, "cwd");
-    if (cwd) |value| if (!std.fs.path.isAbsolute(value)) return error.ConnectorCwdMustBeAbsolute;
+    try connector_runtime.addEnvironment(allocator, &child_environment, data_dir, launch.kind);
     var child = try std.process.spawn(io, .{
-        .argv = argv.items,
+        .argv = launch.argv,
         .environ_map = &child_environment,
-        .cwd = if (cwd) |value| .{ .path = value } else .inherit,
+        .cwd = if (launch.cwd) |value| .{ .path = value } else .inherit,
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .ignore,
@@ -47,7 +45,7 @@ pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const st
     defer child.kill(io);
     var connection = Connection{ .allocator = allocator, .io = io, .child = &child };
     defer connection.deinit();
-    const era = try discoverStdio(allocator, &connection);
+    const era = try discoverStdio(allocator, &connection, protocolPreference(connector));
     const request_id: i64 = if (era == .modern) 2 else 3;
     const document = try operationDocument(allocator, era, request_id, operation);
     defer allocator.free(document);
@@ -56,7 +54,7 @@ pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const st
 
 pub fn executeHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, operation: Operation) ![]u8 {
     const url = stringField(connector, "url") orelse return error.ConnectorUrlRequired;
-    var discovery = try discoverHttp(allocator, io, client, connector, url);
+    var discovery = try discoverHttp(allocator, io, client, connector, url, protocolPreference(connector));
     defer discovery.deinit();
     const request_id: i64 = if (discovery.era == .modern) 2 else 3;
     const document = try operationDocument(allocator, discovery.era, request_id, operation);
@@ -86,15 +84,19 @@ const Discovery = struct {
     }
 };
 
-fn discoverStdio(allocator: std.mem.Allocator, connection: *Connection) !Era {
+fn discoverStdio(allocator: std.mem.Allocator, connection: *Connection, preference: ProtocolPreference) !Era {
+    if (preference == .legacy) return initializeLegacyStdio(allocator, connection);
     const discovery_document = try modernDocument(allocator, 1, "server/discover", null, null);
     defer allocator.free(discovery_document);
     const discovered = connection.request(1, discovery_document) catch |failure| switch (failure) {
-        error.ModernMcpUnsupported => return initializeLegacyStdio(allocator, connection),
+        error.ModernMcpUnsupported => if (preference == .modern_first) return initializeLegacyStdio(allocator, connection) else return failure,
         else => return failure,
     };
     defer allocator.free(discovered);
-    if (!try supportsModern(allocator, discovered)) return initializeLegacyStdio(allocator, connection);
+    if (!try supportsModern(allocator, discovered)) {
+        if (preference == .modern_first) return initializeLegacyStdio(allocator, connection);
+        return error.ModernMcpUnsupported;
+    }
     return .modern;
 }
 
@@ -108,21 +110,26 @@ fn initializeLegacyStdio(allocator: std.mem.Allocator, connection: *Connection) 
     return .legacy;
 }
 
-fn discoverHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8) !Discovery {
+fn discoverHttp(allocator: std.mem.Allocator, io: Io, client: *http.Client, connector: std.json.ObjectMap, url: []const u8, preference: ProtocolPreference) !Discovery {
+    if (preference == .legacy) return initializeLegacyHttp(allocator, io, client, connector, url);
     const discovery_document = try modernDocument(allocator, 1, "server/discover", null, null);
     defer allocator.free(discovery_document);
     var response = try postHttp(allocator, io, client, connector, url, .modern, null, "server/discover", null, discovery_document);
     defer response.deinit();
     if (response.status >= 200 and response.status < 300) {
         const discovered = rpcResult(allocator, response.body, 1) catch |failure| switch (failure) {
-            error.ModernMcpUnsupported => return initializeLegacyHttp(allocator, io, client, connector, url),
+            error.ModernMcpUnsupported => if (preference == .modern_first) return initializeLegacyHttp(allocator, io, client, connector, url) else return failure,
             else => return failure,
         };
         defer allocator.free(discovered);
         if (try supportsModern(allocator, discovered)) return .{ .allocator = allocator, .era = .modern };
-        return initializeLegacyHttp(allocator, io, client, connector, url);
+        if (preference == .modern_first) return initializeLegacyHttp(allocator, io, client, connector, url);
+        return error.ModernMcpUnsupported;
     }
-    if (response.status == 400 and modernRejected(allocator, response.body, 1)) return initializeLegacyHttp(allocator, io, client, connector, url);
+    if (response.status == 400 and modernRejected(allocator, response.body, 1)) {
+        if (preference == .modern_first) return initializeLegacyHttp(allocator, io, client, connector, url);
+        return error.ModernMcpUnsupported;
+    }
     return error.McpHttpRejected;
 }
 
@@ -417,6 +424,13 @@ fn mcpErrorCode(object: std.json.ObjectMap) ?i64 {
 fn matchesId(object: std.json.ObjectMap, expected: i64) bool {
     const value = object.get("id") orelse return false;
     return value == .integer and value.integer == expected;
+}
+
+fn protocolPreference(connector: std.json.ObjectMap) ProtocolPreference {
+    const configured = stringField(connector, "protocolEra") orelse return .modern_first;
+    if (std.mem.eql(u8, configured, "modern")) return .modern;
+    if (std.mem.eql(u8, configured, "legacy")) return .legacy;
+    return .modern_first;
 }
 
 fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
