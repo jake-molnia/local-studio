@@ -11,6 +11,7 @@ import type { SessionActivity } from "@/features/agent/session-index";
 import type { SessionPref } from "@/features/agent/messages/prefs";
 import { hrefWithOpenNonce, visibleSessionAge } from "./helpers";
 import { PinButton, SessionStatusMark } from "./nav-chrome";
+import { useSidebarMinute } from "./sidebar-clock";
 
 const SESSION_MENU_CLASS = `ui-popover-enter absolute right-0 top-6 isolate z-[999] min-w-[180px] ${POPOVER_MENU_CLASS}`;
 
@@ -36,6 +37,8 @@ type SessionNavRowProps = {
   canDoubleClickRename?: boolean;
   showClearAction?: boolean;
   renameInputClass?: string;
+  card?: boolean;
+  secondaryLabel?: string;
 };
 
 export function SessionNavRow({
@@ -60,6 +63,8 @@ export function SessionNavRow({
   canDoubleClickRename = false,
   showClearAction = false,
   renameInputClass = "text-[length:var(--fs-md)]",
+  card = false,
+  secondaryLabel,
 }: SessionNavRowProps) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(initialDraft);
@@ -115,6 +120,8 @@ export function SessionNavRow({
         pinned={Boolean(pref.pinned)}
         timestamp={timestamp}
         label={label}
+        card={card}
+        secondaryLabel={secondaryLabel}
         onDragStart={onDragStart}
         onOpen={onOpen}
         onRememberTitle={onRememberTitle}
@@ -215,6 +222,8 @@ function SessionOpenTarget({
   pinned,
   timestamp,
   label,
+  card,
+  secondaryLabel,
   onDragStart,
   onOpen,
   onRememberTitle,
@@ -226,6 +235,8 @@ function SessionOpenTarget({
   pinned: boolean;
   timestamp?: string | null;
   label: string;
+  card: boolean;
+  secondaryLabel?: string;
   onDragStart: (event: DragEvent) => void;
   onOpen?: (href: string) => void;
   onRememberTitle?: () => void;
@@ -240,8 +251,18 @@ function SessionOpenTarget({
         },
       }
     : {};
-  const targetClass = "flex min-w-0 flex-1 items-center gap-1 pr-[52px]";
-  const content = <SessionRowContent activity={activity} timestamp={timestamp} label={label} />;
+  const targetClass = card
+    ? "flex min-w-0 flex-1 items-stretch pr-[52px] py-1.5"
+    : "flex min-w-0 flex-1 items-center gap-1 pr-[52px]";
+  const content = (
+    <SessionRowContent
+      activity={activity}
+      timestamp={timestamp}
+      label={label}
+      card={card}
+      secondaryLabel={secondaryLabel}
+    />
+  );
 
   if (href) {
     return (
@@ -288,12 +309,33 @@ function SessionRowContent({
   activity,
   timestamp,
   label,
+  card,
+  secondaryLabel,
 }: {
   activity: SessionActivity;
   timestamp?: string | null;
   label: string;
+  card: boolean;
+  secondaryLabel?: string;
 }) {
-  const age = visibleSessionAge(activity === "running", timestamp, activity === "finished");
+  if (card) {
+    return (
+      <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+        <span className="truncate text-[length:var(--fs-md)] font-medium leading-4 text-(--fg)">
+          {label}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-[length:var(--fs-2xs)] leading-4 text-(--hl2)/75">
+          <SessionStatusMark
+            activity={activity}
+            runningClass="flex w-3 shrink-0 justify-start"
+            dotClass="h-1.5 w-1.5 shrink-0 rounded-full"
+          />
+          <span className="min-w-0 truncate">{sessionActivityLabel(activity, secondaryLabel)}</span>
+          <SessionAge activity={activity} timestamp={timestamp} className="ml-auto pl-2" />
+        </span>
+      </span>
+    );
+  }
   return (
     <>
       <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-md)] font-normal leading-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
@@ -304,13 +346,36 @@ function SessionRowContent({
         runningClass="ml-auto flex w-8 shrink-0 justify-end"
         dotClass="h-1.5 w-1.5 shrink-0 rounded-full"
       />
-      {age ? (
-        <span className="shrink-0 pl-2 text-[length:var(--fs-2xs)] tabular-nums text-(--hl2)/70 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-0">
-          {age}
-        </span>
-      ) : null}
+      <SessionAge
+        activity={activity}
+        timestamp={timestamp}
+        className="pl-2 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-0"
+      />
     </>
   );
+}
+
+function sessionActivityLabel(activity: SessionActivity, fallback?: string) {
+  if (activity === "running") return "Working";
+  if (activity === "finished") return "Completed";
+  if (activity === "unseen") return "Unread activity";
+  return fallback || "Ready";
+}
+
+function SessionAge({
+  activity,
+  timestamp,
+  className,
+}: {
+  activity: SessionActivity;
+  timestamp?: string | null;
+  className?: string;
+}) {
+  useSidebarMinute();
+  const age = visibleSessionAge(activity === "running", timestamp, activity === "finished");
+  return age ? (
+    <span className={`shrink-0 tabular-nums text-(--hl2)/70 ${className ?? ""}`}>{age}</span>
+  ) : null;
 }
 
 function SessionOptionsMenu({

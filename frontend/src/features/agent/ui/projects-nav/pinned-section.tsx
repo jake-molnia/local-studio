@@ -88,6 +88,7 @@ export function PinnedSection({
             entry.session.focused,
           )}
           dragging={dragging}
+          card
         />
       );
     }
@@ -98,6 +99,7 @@ export function PinnedSection({
         session={entry.session}
         pref={prefs[entry.session.id] ?? {}}
         dragging={dragging}
+        card
       />
     );
   };
@@ -127,7 +129,7 @@ export function PinnedSection({
             items={pinned.entries.map((entry) => entry.id)}
             strategy={verticalListSortingStrategy}
           >
-            <SidebarRail animate={false}>
+            <SidebarRail animate={false} className="gap-1">
               {pinned.entries.map((entry) => (
                 <SortablePinnedEntry key={entry.id} id={entry.id}>
                   {(dragging) => renderEntry(entry, dragging)}

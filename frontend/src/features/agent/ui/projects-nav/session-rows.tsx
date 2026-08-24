@@ -346,6 +346,7 @@ export function ActiveSessionRow({
   onReorderDragEnd,
   onReorderDragOver,
   onReorderDrop,
+  card = false,
 }: {
   project: ProjectEntry;
   session: ActiveAgentSession;
@@ -356,11 +357,12 @@ export function ActiveSessionRow({
   onReorderDragEnd?: () => void;
   onReorderDragOver?: (event: DragEvent) => void;
   onReorderDrop?: (event: DragEvent) => void;
+  card?: boolean;
 }) {
   const label =
     cleanSessionTitle(pref.title) || cleanSessionTitle(session.title) || "Current session";
   const isFocused = session.focused === true;
-  const rowClass = `sidebar-virtual-row group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
+  const rowClass = `${card ? "sidebar-virtual-card min-h-[52px] border border-(--border)/55 bg-(--surface-2)/35 px-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "sidebar-virtual-row h-[var(--sidebar-row-height)] pl-2 pr-0"} group relative flex items-center rounded-[var(--sidebar-row-radius)] transition-[color,background-color,opacity,border-color,box-shadow] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "border-(--accent)/25 bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
 
   return (
     <SessionNavRow
@@ -424,6 +426,8 @@ export function ActiveSessionRow({
       timestamp={session.updatedAt || session.startedAt}
       canDoubleClickRename
       renameInputClass="text-[length:var(--fs-xs)]"
+      card={card}
+      secondaryLabel={project.name}
     />
   );
 }
@@ -438,6 +442,7 @@ export function SessionRow({
   onReorderDragEnd,
   onReorderDragOver,
   onReorderDrop,
+  card = false,
 }: {
   project: ProjectEntry;
   session: SessionSummary;
@@ -448,6 +453,7 @@ export function SessionRow({
   onReorderDragEnd?: () => void;
   onReorderDragOver?: (event: DragEvent) => void;
   onReorderDrop?: (event: DragEvent) => void;
+  card?: boolean;
 }) {
   const label =
     cleanSessionTitle(pref.title) ||
@@ -461,7 +467,7 @@ export function SessionRow({
       initialDraft={cleanSessionTitle(pref.title) || cleanSessionTitle(session.firstUserMessage)}
       activity={activity}
       timestamp={session.updatedAt || session.startedAt}
-      rowClass={`sidebar-virtual-row group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
+      rowClass={`${card ? "sidebar-virtual-card min-h-[52px] border border-(--border)/55 bg-(--surface-2)/35 px-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "sidebar-virtual-row h-[var(--sidebar-row-height)] pl-2 pr-0"} group relative flex items-center rounded-[var(--sidebar-row-radius)] transition-[color,background-color,opacity,border-color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
       renameRowClass="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] bg-(--surface)/40 pl-2 pr-1"
       href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&replace=1`}
       onPatchPref={(patch) => patchSessionPref(session.id, patch)}
@@ -490,6 +496,8 @@ export function SessionRow({
       onDrop={onReorderDrop}
       onContextMenu
       showClearAction
+      card={card}
+      secondaryLabel={project.name}
     />
   );
 }

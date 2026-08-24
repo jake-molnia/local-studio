@@ -78,13 +78,15 @@ export function PinButton({
 export function SidebarRail({
   children,
   animate = true,
+  className = "",
 }: {
   children: ReactNode;
   animate?: boolean;
+  className?: string;
 }) {
   const [animationRef] = useAutoAnimate<HTMLDivElement>({ duration: 150, easing: "ease-out" });
   return (
-    <div ref={animate ? animationRef : undefined} className="flex flex-col">
+    <div ref={animate ? animationRef : undefined} className={`flex flex-col ${className}`}>
       {children}
     </div>
   );
