@@ -52,7 +52,7 @@ export function mainWindowAppearanceOptions(): Electron.BrowserWindowConstructor
     return {
       transparent: true,
       backgroundColor: "#00000000",
-      titleBarStyle: "hiddenInset",
+      titleBarStyle: "hidden",
       ...(vibrancy ? { vibrancy, visualEffectState: "followWindow" as const } : {}),
     };
   }
