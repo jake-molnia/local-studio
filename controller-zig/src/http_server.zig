@@ -43,6 +43,7 @@ const agent_enrollments = @import("services/agent_enrollments.zig");
 const agent_models = @import("services/agent_models.zig");
 const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
+const agent_discovery = @import("services/agent_discovery.zig");
 const agent_plugins = @import("services/agent_plugins.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
 const agent_pty = @import("services/agent_pty.zig");
@@ -436,6 +437,24 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/skills") or std.mem.eql(u8, route.path, "/api/agent/skills/load") or std.mem.eql(u8, route.path, "/api/agent/prompt-templates") or std.mem.eql(u8, route.path, "/api/agent/prompt-templates/load")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const path = if (std.mem.endsWith(u8, route.path, "/load")) try queryParameter(allocator, request.head.target, "path") else null;
+        defer if (path) |value| allocator.free(value);
+        const response = if (std.mem.eql(u8, route.path, "/api/agent/skills"))
+            agent_discovery.skillsPayload(allocator, io, mode, configuration, client, database, node_id)
+        else if (std.mem.eql(u8, route.path, "/api/agent/skills/load"))
+            agent_discovery.skillPayload(allocator, io, mode, configuration, client, database, node_id, path orelse return respondDiscoveryFailure(request, error.DiscoveryPathRequired))
+        else if (std.mem.eql(u8, route.path, "/api/agent/prompt-templates"))
+            agent_discovery.templatesPayload(allocator, io, mode, configuration, client, database, node_id)
+        else
+            agent_discovery.templatePayload(allocator, io, mode, configuration, client, database, node_id, path orelse return respondDiscoveryFailure(request, error.DiscoveryPathRequired));
+        const payload = response catch |failure| return respondDiscoveryFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/plugins") or std.mem.eql(u8, route.path, "/api/agent/plugins/source")) {
         const node_id = try queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
@@ -765,6 +784,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = try agent_connectors.sshPathLocal(allocator, io);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/skills") or std.mem.eql(u8, route.path, "/internal/node/v1/skills/load") or std.mem.eql(u8, route.path, "/internal/node/v1/prompt-templates") or std.mem.eql(u8, route.path, "/internal/node/v1/prompt-templates/load")) {
+        const path = if (std.mem.endsWith(u8, route.path, "/load")) try queryParameter(allocator, request.head.target, "path") else null;
+        defer if (path) |value| allocator.free(value);
+        const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/skills"))
+            agent_discovery.skillsLocal(allocator, io, configuration)
+        else if (std.mem.eql(u8, route.path, "/internal/node/v1/skills/load"))
+            agent_discovery.skillLocal(allocator, io, configuration, path orelse return respondDiscoveryFailure(request, error.DiscoveryPathRequired))
+        else if (std.mem.eql(u8, route.path, "/internal/node/v1/prompt-templates"))
+            agent_discovery.templatesLocal(allocator, io, configuration)
+        else
+            agent_discovery.templateLocal(allocator, io, configuration, path orelse return respondDiscoveryFailure(request, error.DiscoveryPathRequired));
+        const payload = response catch |failure| return respondDiscoveryFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/plugins") or std.mem.eql(u8, route.path, "/internal/node/v1/plugins/source")) {
@@ -2111,6 +2146,24 @@ fn respondPluginFailure(request: *http.Server.Request, failure: anyerror) !bool 
         error.PluginReadOnly => "Plugin is a directory, not a single file",
         error.PluginNodeRequired => "No enrolled node offers harness plugin storage",
         error.PluginNodeUnavailable => "The plugin node is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondDiscoveryFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.DiscoveryPathRequired => .bad_request,
+        error.DiscoveryNotFound => .not_found,
+        error.DiscoveryNodeRequired => .conflict,
+        error.DiscoveryNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.DiscoveryPathRequired => "path is required",
+        error.DiscoveryNotFound => "Skill or prompt template not found",
+        error.DiscoveryNodeRequired => "No enrolled node offers harness discovery",
+        error.DiscoveryNodeUnavailable => "The discovery node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
