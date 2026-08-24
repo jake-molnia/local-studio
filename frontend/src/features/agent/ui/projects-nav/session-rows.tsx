@@ -18,7 +18,7 @@ import {
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { useProjectSessionsReloadEffect } from "@/features/agent/ui/projects-nav/use-projects-nav-effects";
 import { workspaceCommands } from "@/features/agent/workspace/commands";
-import type { Project as ProjectEntry } from "@/features/agent/projects/types";
+import { isChatsProject, type Project as ProjectEntry } from "@/features/agent/projects/types";
 import { ChatIcon, Folder, FolderOpen, PlusIcon, TrashIcon } from "@/ui/icons";
 import {
   mergeActiveSessionPref,
@@ -84,7 +84,7 @@ export function ProjectRow({
   return (
     <div className="flex flex-col">
       <div
-        className={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] px-2 text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
+        className={`sidebar-virtual-row group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] px-2 text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
         draggable={reorderDraggable}
         onDragStart={onReorderDragStart}
         onDragEnd={onReorderDragEnd}
@@ -193,7 +193,9 @@ export function ProjectSessions({
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=7d&limit=${visibleLimit + 9}`,
+        isChatsProject(project)
+          ? `/api/agent/sessions?projectId=${encodeURIComponent(project.id)}&since=7d&limit=${visibleLimit + 9}`
+          : `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=7d&limit=${visibleLimit + 9}`,
         { cache: "no-store" },
       );
       const payload = await safeJson<{ sessions?: SessionSummary[] }>(response);
@@ -357,7 +359,7 @@ export function ActiveSessionRow({
   const label =
     cleanSessionTitle(pref.title) || cleanSessionTitle(session.title) || "Current session";
   const isFocused = session.focused === true;
-  const rowClass = `group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
+  const rowClass = `sidebar-virtual-row group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
 
   return (
     <SessionNavRow
@@ -458,7 +460,7 @@ export function SessionRow({
       initialDraft={cleanSessionTitle(pref.title) || cleanSessionTitle(session.firstUserMessage)}
       activity={activity}
       timestamp={session.updatedAt || session.startedAt}
-      rowClass={`group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
+      rowClass={`sidebar-virtual-row group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-0 transition-[color,background-color,opacity] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
       renameRowClass="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] bg-(--surface)/40 pl-2 pr-1"
       href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&replace=1`}
       onPatchPref={(patch) => patchSessionPref(session.id, patch)}

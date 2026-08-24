@@ -35,6 +35,13 @@ import { WorkbenchTabStrip } from "@/features/workbench/workbench-tab-strip";
 
 type PaletteMode = "search" | null;
 
+type SidebarResizeInteraction = {
+  cleanup: () => void;
+  frame: number | null;
+  pendingWidth: number;
+  sidebar: HTMLElement;
+};
+
 const SIDEBAR_MIN_WIDTH = 194;
 const SIDEBAR_MAX_WIDTH = 360;
 function clampSidebarWidth(width: number): number {
@@ -80,7 +87,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     null,
   );
   const [SessionsCommand, setSessionsCommand] = useState<SessionsCommandComponent | null>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const resizeInteractionRef = useRef<SidebarResizeInteraction | null>(null);
 
   useMountSubscription(() => {
     if (!mobileMenuOpen) return;
@@ -115,7 +122,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
 
   useMountSubscription(() => {
     return () => {
-      resizeCleanupRef.current?.();
+      resizeInteractionRef.current?.cleanup();
     };
   }, []);
 
@@ -154,26 +161,45 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = clampedSidebarWidth;
+      const sidebar = event.currentTarget.closest<HTMLElement>("aside");
+      if (!sidebar) return;
       const previousCursor = document.body.style.cursor;
       const previousUserSelect = document.body.style.userSelect;
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
       setSidebarResizing(true);
 
+      const interaction: SidebarResizeInteraction = {
+        cleanup: () => undefined,
+        frame: null,
+        pendingWidth: startWidth,
+        sidebar,
+      };
+
       const cleanup = () => {
+        if (resizeInteractionRef.current !== interaction) return;
+        if (interaction.frame !== null) cancelAnimationFrame(interaction.frame);
+        interaction.sidebar.style.width = `${interaction.pendingWidth}px`;
         document.body.style.cursor = previousCursor;
         document.body.style.userSelect = previousUserSelect;
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", cleanup);
-        resizeCleanupRef.current = null;
+        resizeInteractionRef.current = null;
+        setSidebarWidth(interaction.pendingWidth);
         setSidebarResizing(false);
       };
       const onMouseMove = (moveEvent: MouseEvent) => {
-        setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+        interaction.pendingWidth = clampSidebarWidth(startWidth + moveEvent.clientX - startX);
+        if (interaction.frame !== null) return;
+        interaction.frame = requestAnimationFrame(() => {
+          interaction.frame = null;
+          interaction.sidebar.style.width = `${interaction.pendingWidth}px`;
+        });
       };
 
-      resizeCleanupRef.current?.();
-      resizeCleanupRef.current = cleanup;
+      interaction.cleanup = cleanup;
+      resizeInteractionRef.current?.cleanup();
+      resizeInteractionRef.current = interaction;
       window.addEventListener("mousemove", onMouseMove);
       window.addEventListener("mouseup", cleanup);
     },

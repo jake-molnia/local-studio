@@ -160,6 +160,11 @@ a.nav-link:hover,
   scroll-behavior: smooth;
 }
 
+.sidebar-virtual-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--sidebar-row-height);
+}
+
 /* Focus */
 :focus-visible {
   outline: 1px solid var(--focus-ring, var(--accent));
