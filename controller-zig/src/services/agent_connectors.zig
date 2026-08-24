@@ -7,6 +7,7 @@ const node_transport = @import("node_transport.zig");
 const connector_runtime = @import("connector_runtime.zig");
 const mcp_client = @import("mcp_client.zig");
 const mcp_catalog = @import("mcp_catalog.zig");
+const google_workspace = @import("google_workspace.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -595,6 +596,7 @@ fn validateGrantIds(model_id: []const u8, connector_id: []const u8) !void {
 }
 
 fn executeConnector(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, connector: std.json.ObjectMap, operation: mcp_client.Operation) ![]u8 {
+    if (google_workspace.owns(connector)) return google_workspace.execute(allocator, io, client, configuration.data_dir, connector, operation);
     const transport = stringField(connector, "transport") orelse return error.InvalidConnectorRecord;
     if (std.mem.eql(u8, transport, "stdio")) return mcp_client.executeStdio(allocator, io, configuration.environment, configuration.data_dir, connector, operation);
     if (std.mem.eql(u8, transport, "http")) return mcp_client.executeHttp(allocator, io, client, connector, operation);
