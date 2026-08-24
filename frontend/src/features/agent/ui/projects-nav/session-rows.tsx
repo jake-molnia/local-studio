@@ -32,7 +32,8 @@ import { PinButton, SidebarRail } from "./nav-chrome";
 import { SessionNavRow } from "./session-nav-row";
 import type { ActiveAgentSession, SessionSummary } from "./types";
 
-const SESSIONS_PAGE_SIZE = 5;
+const SESSIONS_INITIAL_LIMIT = 10;
+const SESSIONS_PAGE_SIZE = 25;
 
 export function ProjectRow({
   project,
@@ -183,7 +184,7 @@ export function ProjectSessions({
 }) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [visibleLimit, setVisibleLimit] = useState(SESSIONS_PAGE_SIZE);
+  const [visibleLimit, setVisibleLimit] = useState(SESSIONS_INITIAL_LIMIT);
   const activity = useSessionActivity();
   const projectActiveSessions = useMemo(
     () => activeSessions.filter((session) => session.projectId === project.id),
@@ -194,8 +195,8 @@ export function ProjectSessions({
     try {
       const response = await fetch(
         isChatsProject(project)
-          ? `/api/agent/sessions?projectId=${encodeURIComponent(project.id)}&since=7d&limit=${visibleLimit + 9}`
-          : `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=7d&limit=${visibleLimit + 9}`,
+          ? `/api/agent/sessions?projectId=${encodeURIComponent(project.id)}&since=7d&limit=${visibleLimit + SESSIONS_PAGE_SIZE}`
+          : `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=7d&limit=${visibleLimit + SESSIONS_PAGE_SIZE}`,
         { cache: "no-store" },
       );
       const payload = await safeJson<{ sessions?: SessionSummary[] }>(response);

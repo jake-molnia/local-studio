@@ -18,8 +18,8 @@ import { Folder } from "@/ui/icons";
 import type { SessionPrefs } from "@/features/agent/messages/prefs";
 import type { AggregatedSession } from "@shared/agent/session-summary";
 
-/** The nav lists the 20 most recently prompted sessions, newest first. */
-const RECENT_LIMIT = 20;
+const RECENT_INITIAL_LIMIT = 10;
+const RECENT_PAGE_SIZE = 25;
 /** Enough of the last prompt to recognise the thread without wrapping past two
  *  lines at the widest sidebar setting. */
 const PREVIEW_CHARS = 120;
@@ -63,6 +63,7 @@ function rowPreview(session: AggregatedSession, title: string): string {
 export function RecentSessionsSection() {
   const [sessions, setSessions] = useState<AggregatedSession[] | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [visibleLimit, setVisibleLimit] = useState(RECENT_INITIAL_LIMIT);
   const prefs = useProjectsNavSessionPrefs();
 
   useMountSubscription(() => {
@@ -93,20 +94,20 @@ export function RecentSessionsSection() {
     });
   }, []);
 
-  const groups = useMemo(() => {
+  const { groups, hasMore } = useMemo(() => {
     const visible = (sessions ?? []).filter(
       (session) => !session.archived && !session.parentSessionId && !prefs[session.id]?.hidden,
     );
-    const ordered = orderByRecency(visible).slice(0, RECENT_LIMIT);
+    const ordered = orderByRecency(visible);
     const buckets: { label: string; sessions: AggregatedSession[] }[] = [];
-    for (const session of ordered) {
+    for (const session of ordered.slice(0, visibleLimit)) {
       const label = dayLabel(recentsTimestamp(session));
       const tail = buckets.at(-1);
       if (tail?.label === label) tail.sessions.push(session);
       else buckets.push({ label, sessions: [session] });
     }
-    return buckets;
-  }, [sessions, prefs]);
+    return { groups: buckets, hasMore: ordered.length > visibleLimit };
+  }, [sessions, prefs, visibleLimit]);
 
   if (sessions === null) {
     return <div className="px-2 py-1 text-[length:var(--fs-sm)] text-(--dim)">Loading…</div>;
@@ -127,6 +128,15 @@ export function RecentSessionsSection() {
           ))}
         </div>
       ))}
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={() => setVisibleLimit((limit) => limit + RECENT_PAGE_SIZE)}
+          className="mt-1 flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] px-2 text-left text-[length:var(--fs-sm)] text-(--dim) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
+        >
+          Show more
+        </button>
+      ) : null}
     </SidebarRail>
   );
 }
