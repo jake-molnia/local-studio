@@ -174,6 +174,7 @@ if (arguments_[0] === "build-desktop") {
     process.exit(0);
   }
   arguments_[0] = "build";
+  arguments_.push("-Doptimize=ReleaseSafe");
 }
 await ensureToolchain();
 if (arguments_.length === 0) arguments_.push("version");
