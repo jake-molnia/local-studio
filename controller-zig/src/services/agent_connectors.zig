@@ -205,6 +205,69 @@ pub fn disconnectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sql
     try repository.save(database, "github", false, document);
 }
 
+pub fn connectGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, service: []const u8, account_key: []const u8, email: []const u8) !void {
+    const slug = if (std.mem.eql(u8, service, "gmail")) "gmail" else if (std.mem.eql(u8, service, "google-calendar")) "calendar" else return error.InvalidGoogleService;
+    const id = try std.fmt.allocPrint(allocator, "account-google-{s}-{s}", .{ slug, account_key });
+    defer allocator.free(id);
+    const endpoint = if (std.mem.eql(u8, service, "gmail")) "https://gmail.googleapis.com/gmail/v1" else "https://www.googleapis.com/calendar/v3";
+    const name = try std.fmt.allocPrint(allocator, "{s} · {s}", .{ if (std.mem.eql(u8, service, "gmail")) "Gmail" else "Google Calendar", email });
+    defer allocator.free(name);
+    const account = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ account_key, service });
+    defer allocator.free(account);
+    var document: Io.Writer.Allocating = .init(allocator);
+    defer document.deinit();
+    try document.writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(id, .{}, &document.writer);
+    try document.writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(name, .{}, &document.writer);
+    try document.writer.writeAll(",\"transport\":\"http\",\"url\":");
+    try std.json.Stringify.value(endpoint, .{}, &document.writer);
+    try document.writer.writeAll(",\"auth\":{\"type\":\"oauth\",\"provider\":\"google-workspace\",\"account\":");
+    try std.json.Stringify.value(account, .{}, &document.writer);
+    try document.writer.writeAll("},\"origin\":{\"kind\":\"account-adapter\",\"id\":");
+    try std.json.Stringify.value(account, .{}, &document.writer);
+    try document.writer.writeAll(",\"binding\":\"google-workspace\"},\"enabled\":true,\"allowTools\":");
+    try document.writer.writeAll(if (std.mem.eql(u8, service, "gmail")) "[\"list_drafts\",\"get_thread\",\"get_message\",\"search_threads\",\"list_labels\"]" else "[\"list_events\",\"get_event\",\"list_calendars\",\"suggest_time\"]");
+    try document.writer.writeByte('}');
+    const response = try upsertLocal(allocator, io, database, document.writer.buffered());
+    allocator.free(response);
+}
+
+pub fn disconnectGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, service: []const u8, account_key: []const u8) !void {
+    const slug = if (std.mem.eql(u8, service, "gmail")) "gmail" else if (std.mem.eql(u8, service, "google-calendar")) "calendar" else return error.InvalidGoogleService;
+    const id = try std.fmt.allocPrint(allocator, "account-google-{s}-{s}", .{ slug, account_key });
+    defer allocator.free(id);
+    try database.lock(io);
+    defer database.unlock(io);
+    const stored_document = (try repository.get(allocator, database, id)) orelse return;
+    defer allocator.free(stored_document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, stored_document, .{}) catch return error.InvalidConnectorRecord;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorRecord;
+    try parsed.value.object.put(parsed.arena.allocator(), "enabled", .{ .bool = false });
+    const next = try stringify(allocator, parsed.value);
+    defer allocator.free(next);
+    try repository.save(database, id, false, next);
+}
+
+pub fn clearGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    var connectors = try repository.list(allocator, database);
+    defer connectors.deinit();
+    for (connectors.documents) |document| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const id = stringField(parsed.value.object, "id") orelse continue;
+        if (!std.mem.startsWith(u8, id, "account-google-")) continue;
+        try parsed.value.object.put(parsed.arena.allocator(), "enabled", .{ .bool = false });
+        const next = try stringify(allocator, parsed.value);
+        defer allocator.free(next);
+        try repository.save(database, id, false, next);
+    }
+}
+
 fn removeOAuthEnv(object: *std.json.ObjectMap) void {
     for ([_][]const u8{ "env", "envSecret" }) |name| {
         const record = object.getPtr(name) orelse continue;
