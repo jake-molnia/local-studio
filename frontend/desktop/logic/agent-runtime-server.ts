@@ -2,7 +2,7 @@ import { app } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { DESKTOP_CONFIG } from "../configs";
+import { DESKTOP_CONFIG, resolveDevelopmentFrontendDir } from "../configs";
 import { log } from "../helpers/logger";
 import { resolveStablePort } from "../helpers/ports";
 import { resolveAugmentedPath } from "../helpers/resolve-path";
@@ -31,7 +31,14 @@ function agentRuntimeEntry(): string {
     process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller";
   return app.isPackaged
     ? path.join(process.resourcesPath, "app", "controller", executable)
-    : path.resolve(app.getAppPath(), "..", "controller-zig", "zig-out", "bin", executable);
+    : path.resolve(
+        resolveDevelopmentFrontendDir(),
+        "..",
+        "controller-zig",
+        "zig-out",
+        "bin",
+        executable,
+      );
 }
 
 async function isAgentRuntimeHealthy(url: string): Promise<boolean> {
