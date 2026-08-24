@@ -15,7 +15,7 @@
 import {
   OAUTH_CONNECTOR_PROVIDERS,
   type OAuthConnectorAuthDefinition,
-} from "@local-studio/agent-runtime/oauth-connector-contract";
+} from "@shared/agent/oauth-connector-contract";
 
 export const SSH_SERVER_PLACEHOLDER = "{{SSH_REMOTE_SERVER}}";
 

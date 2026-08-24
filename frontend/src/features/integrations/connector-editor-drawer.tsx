@@ -7,7 +7,7 @@ import {
   ConnectorTestResponseSchema,
   ConnectorsResponseSchema,
   type ConnectorView,
-} from "@local-studio/agent-runtime/connector-contract";
+} from "@shared/agent/connector-contract";
 import { Alert, Button, Checkbox, FormField, Input, SegmentedControl, Spinner } from "@/ui";
 import { Eye, EyeOff, Plus, Trash2, TriangleAlert } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";

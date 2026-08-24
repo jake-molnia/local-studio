@@ -9,7 +9,7 @@ import type {
   ProviderView,
   ProvidersResponse,
   ProviderLoginStartResponse,
-} from "@local-studio/agent-runtime/provider-hub-contract";
+} from "@shared/agent/provider-hub-contract";
 import { Input, ModelButton, RefreshIconButton, SearchInput, Spinner, StatusPill } from "@/ui";
 import { ExternalLink, LogOut } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";

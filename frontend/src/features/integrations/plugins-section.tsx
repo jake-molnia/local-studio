@@ -8,7 +8,7 @@ import {
   PluginsResponseSchema,
   isValidPluginId,
   type PluginRow,
-} from "@local-studio/agent-runtime/plugin-contract";
+} from "@shared/agent/plugin-contract";
 import { Alert, Button, FormField, Input, RefreshIconButton, SearchInput, StatusPill } from "@/ui";
 import { Plus, Trash2 } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";

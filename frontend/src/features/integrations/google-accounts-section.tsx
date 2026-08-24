@@ -5,12 +5,12 @@ import { Schema } from "effect";
 import {
   GoogleAccountResponseSchema,
   type GoogleAccountView,
-} from "@local-studio/agent-runtime/google-account-contract";
+} from "@shared/agent/google-account-contract";
 import {
   GOOGLE_WORKSPACE_BINDINGS,
   GOOGLE_WORKSPACE_PLUGIN_IDS,
   type GoogleWorkspacePluginId,
-} from "@local-studio/agent-runtime/google-workspace-binding";
+} from "@shared/agent/google-workspace-binding";
 import { Alert, RefreshIconButton } from "@/ui";
 import { ResourceLogo } from "@/ui/resource-logo";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";

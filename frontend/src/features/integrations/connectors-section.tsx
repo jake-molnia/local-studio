@@ -2,10 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Schema } from "effect";
-import {
-  ConnectorsResponseSchema,
-  type ConnectorView,
-} from "@local-studio/agent-runtime/connector-contract";
+import { ConnectorsResponseSchema, type ConnectorView } from "@shared/agent/connector-contract";
 import { Button, RefreshIconButton, SearchInput, Spinner, StatusPill } from "@/ui";
 import { Plus, Trash2 } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";
