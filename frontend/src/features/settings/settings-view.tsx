@@ -24,12 +24,10 @@ import {
 import type { CompatibilityReport, ConfigData } from "@/lib/types";
 import type { ApiConnectionSettings, ConnectionStatus } from "./types";
 import { ApiConnectionSection } from "./api-connection-section";
-import { ArchivedChatsSettings, SetupChecksSettings } from "./agent-settings-sections";
+import { ArchivedChatsSettings } from "./agent-settings-sections";
 import { AppVersionSection } from "./app-version-section";
 import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
-import { EnginesSection } from "./engines-section";
-import { ServicesSettings, SystemDetails, SystemOverview } from "./system-settings-section";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ProfileSettings } from "./profile-settings";
 import { useConfigure } from "@/features/configure/use-configure";
@@ -37,12 +35,13 @@ import { MachinesSection } from "@/features/configure/machines-section";
 import UsagePage from "@/features/usage/usage-page";
 import { LogsView } from "@/features/logs/logs-view";
 import { useLogs, type LogsTarget } from "@/features/logs/use-logs";
-import { ServerContent } from "@/features/logs/server-view";
 import { ErrorBox } from "@/ui";
 import { cx } from "@/ui/utils";
 import { legacySettingsHash } from "./settings-navigation";
 import {
   LocalMachineStatus,
+  LocalMachineControllerSettings,
+  LocalMachineSystemTelemetry,
   MachineControllerSettings,
   MachineStatusSettings,
   MachineSystemSettings,
@@ -62,7 +61,7 @@ interface SettingsViewProps {
   onApiSettingsChange: (nextSettings: ApiConnectionSettings) => void;
   onTestConnection: () => void;
   onSaveSettings: () => void;
-  onSystemSectionActive: () => void;
+  onControllerSectionActive: () => void;
 }
 const sectionIcon = (Icon: LucideIcon) => <Icon className="h-3.5 w-3.5" />;
 const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = {
@@ -261,7 +260,7 @@ export function SettingsView({
   onApiSettingsChange,
   onTestConnection,
   onSaveSettings,
-  onSystemSectionActive,
+  onControllerSectionActive,
 }: SettingsViewProps) {
   const configure = useConfigure();
   const machineNodes = useMemo(() => configure.rigs.flatMap((rig) => rig.nodes), [configure.rigs]);
@@ -325,9 +324,9 @@ export function SettingsView({
     const view = machineViewFromSection(section);
     return nodeId === "local" && view ? machineSectionId(configure.localNodeId, view) : section;
   };
-  const activatesLocalSystem = (section: string): boolean =>
+  const activatesLocalController = (section: string): boolean =>
     machineNodeIdFromSection(section) === configure.localNodeId &&
-    machineViewFromSection(section) === "system";
+    machineViewFromSection(section) === "controller";
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
@@ -341,15 +340,15 @@ export function SettingsView({
         (sections.some((section) => section.id === normalizedHash) ? normalizedHash : null);
       if (!normalized) return;
       setActiveSection(normalized);
-      if (activatesLocalSystem(normalized)) onSystemSectionActive();
+      if (activatesLocalController(normalized)) onControllerSectionActive();
     };
     onHashChange();
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, [onSystemSectionActive, sections]);
+  }, [onControllerSectionActive, sections]);
   const selectSection = (section: SettingsSectionId) => {
     setActiveSection(section);
-    if (activatesLocalSystem(section)) onSystemSectionActive();
+    if (activatesLocalController(section)) onControllerSectionActive();
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${section}`);
     }
@@ -412,7 +411,13 @@ export function SettingsView({
       ) : null}
       {activeMachineView === "controller" && activeMachineNode ? (
         activeMachineNode.id === configure.localNodeId ? (
-          <ServerContent embedded />
+          <LocalMachineControllerSettings
+            data={data}
+            compatibilityReport={compatibilityReport}
+            apiSettings={apiSettings}
+            loading={loading}
+            error={error}
+          />
         ) : (
           <MachineControllerSettings
             node={activeMachineNode}
@@ -423,23 +428,7 @@ export function SettingsView({
       ) : null}
       {activeMachineView === "system" && activeMachineNode ? (
         activeMachineNode.id === configure.localNodeId ? (
-          <div className="space-y-5">
-            <SystemOverview
-              data={data}
-              compatibilityReport={compatibilityReport}
-              loading={loading}
-              error={error}
-            />
-            <SetupChecksSettings />
-            <EnginesSection runtime={data?.runtime ?? null} />
-            <ServicesSettings
-              data={data}
-              apiSettings={apiSettings}
-              loading={loading}
-              error={error}
-            />
-            <SystemDetails data={data} compatibilityReport={compatibilityReport} />
-          </div>
+          <LocalMachineSystemTelemetry />
         ) : (
           <MachineSystemSettings node={activeMachineNode} />
         )

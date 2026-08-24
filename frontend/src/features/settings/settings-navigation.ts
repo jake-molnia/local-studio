@@ -19,7 +19,7 @@ export const legacySettingsHash = (hash: string): string | null => {
   if (hash === "status") return "machine:local:status";
   if (hash === "controller") return "machine:local:controller";
   if (["system", "engines", "services", "setup"].includes(hash)) {
-    return "machine:local:system";
+    return hash === "system" ? "machine:local:system" : "machine:local:controller";
   }
   if (hash === "rig" || hash === "machines") return "machines";
   if (hash === "usage") return "usage";
