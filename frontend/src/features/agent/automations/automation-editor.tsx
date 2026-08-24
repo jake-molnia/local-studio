@@ -82,9 +82,15 @@ export function AutomationEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useMountSubscription(() => {
-    if (draft.modelId || models.length === 0) return;
-    setDraft((current) => ({ ...current, modelId: models[0]?.id ?? "" }));
-  }, [draft.modelId, models]);
+    if (models.length === 0) return;
+    const model = models.find((candidate) => candidate.id === draft.modelId) ?? models[0];
+    const readyRoutes = model?.routes.filter((route) => route.status === "ready") ?? [];
+    const routeId = readyRoutes.some((route) => route.id === draft.modelRouteId)
+      ? draft.modelRouteId
+      : (model?.defaultRouteId ?? readyRoutes[0]?.id ?? "");
+    if (draft.modelId === model?.id && draft.modelRouteId === routeId) return;
+    setDraft((current) => ({ ...current, modelId: model?.id ?? "", modelRouteId: routeId }));
+  }, [draft.modelId, draft.modelRouteId, models]);
 
   const updateSchedule = (schedule: AutomationSchedule) => {
     setDraft((current) => ({ ...current, schedule }));
@@ -163,9 +169,15 @@ export function AutomationEditor({
               <FormField label="Model" required>
                 <Select
                   value={draft.modelId}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, modelId: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const model = models.find((candidate) => candidate.id === event.target.value);
+                    const readyRoute = model?.routes.find((route) => route.status === "ready");
+                    setDraft((current) => ({
+                      ...current,
+                      modelId: event.target.value,
+                      modelRouteId: model?.defaultRouteId ?? readyRoute?.id ?? "",
+                    }));
+                  }}
                 >
                   {models.length === 0 ? <option value="">No models available</option> : null}
                   {models.map((model) => (
@@ -173,6 +185,22 @@ export function AutomationEditor({
                       {model.name}
                     </option>
                   ))}
+                </Select>
+              </FormField>
+              <FormField label="Route" required>
+                <Select
+                  value={draft.modelRouteId}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, modelRouteId: event.target.value }))
+                  }
+                >
+                  {(models.find((model) => model.id === draft.modelId)?.routes ?? [])
+                    .filter((route) => route.status === "ready")
+                    .map((route) => (
+                      <option key={route.id} value={route.id}>
+                        {route.label}
+                      </option>
+                    ))}
                 </Select>
               </FormField>
               <FormField

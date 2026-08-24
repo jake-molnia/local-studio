@@ -6,6 +6,7 @@ export type AutomationDraft = {
   name: string;
   prompt: string;
   modelId: string;
+  modelRouteId: string;
   cwd: string;
   /** Session every run continues; null starts a fresh one each time. */
   targetSessionId: string | null;
@@ -16,6 +17,7 @@ export const NEW_AUTOMATION_DRAFT: AutomationDraft = {
   name: "",
   prompt: "",
   modelId: "",
+  modelRouteId: "",
   cwd: "",
   targetSessionId: null,
   schedule: { kind: "daily", time: "08:00" },
@@ -28,6 +30,7 @@ export function draftFromAutomation(automation: Automation): AutomationDraft {
     name: automation.name,
     prompt: automation.prompt,
     modelId: automation.modelId,
+    modelRouteId: automation.modelRouteId ?? automation.modelId,
     cwd: automation.cwd,
     targetSessionId: automation.targetSessionId ?? null,
     schedule: automation.schedule,
@@ -78,5 +81,7 @@ export function filterAutomations(
 }
 
 export function draftIsValid(draft: AutomationDraft): boolean {
-  return Boolean(draft.name.trim() && draft.prompt.trim() && draft.modelId.trim());
+  return Boolean(
+    draft.name.trim() && draft.prompt.trim() && draft.modelId.trim() && draft.modelRouteId.trim(),
+  );
 }

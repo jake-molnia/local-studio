@@ -5,15 +5,7 @@ import {
   type Automation,
 } from "@shared/agent/automation";
 import type { AutomationDraft } from "./automation-model";
-
-const AgentModelSchema = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-});
-
-const AgentModelsResponseSchema = Schema.Struct({
-  models: Schema.Array(AgentModelSchema),
-});
+import { ModelCatalogResponseSchema, type ModelOffer } from "@local-studio/contracts/model-catalog";
 
 const RunResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
@@ -24,7 +16,7 @@ const DeleteResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
 });
 
-export type AutomationModel = typeof AgentModelSchema.Type;
+export type AutomationModel = ModelOffer;
 
 async function errorMessage(response: Response): Promise<string> {
   const fallback = `Request failed with HTTP ${response.status}`;
@@ -68,8 +60,8 @@ export function listAutomations(): Effect.Effect<Automation[], Error> {
 
 export function listAutomationModels(): Effect.Effect<AutomationModel[], Error> {
   return Effect.map(
-    requestJson("/api/agent/models", Schema.decodeUnknownSync(AgentModelsResponseSchema)),
-    ({ models }) => [...models],
+    requestJson("/api/agent/models", Schema.decodeUnknownSync(ModelCatalogResponseSchema)),
+    ({ models }) => models.filter((model) => model.available),
   );
 }
 
