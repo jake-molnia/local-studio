@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Menu, PanelLeftHollow, Plus } from "@/ui/icon-registry";
+import { Menu, Plus } from "@/ui/icon-registry";
 import { uniqueOpenSessions, useOpenSessions } from "@/features/agent/session-index";
 import { useProjects } from "@/features/agent/projects/context";
 import { CHATS_PROJECT_ID } from "@/features/agent/projects/types";
@@ -73,7 +73,6 @@ function ProjectWorkbenchTabStrip() {
   const router = useRouter();
   const setMobileNavOpen = useAppStore((store) => store.setMobileNavOpen);
   const sidebarExpanded = useAppStore((store) => store.desktopSidebarPinnedOpen);
-  const setSidebarExpanded = useAppStore((store) => store.setDesktopSidebarPinnedOpen);
   const projects = useProjects();
   const computer = useComputerTools();
   const tools = useToolsActions();
@@ -545,18 +544,6 @@ function ProjectWorkbenchTabStrip() {
 
   return (
     <header className="workbench-tab-strip relative flex h-[var(--workbench-tab-height)] shrink-0 border-b border-(--border) bg-(--color-header)">
-      {!sidebarExpanded ? (
-        <button
-          type="button"
-          data-ui-control="compact"
-          onClick={() => setSidebarExpanded(true)}
-          className="absolute left-1 top-1/2 z-30 hidden h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[5px] text-(--dim) transition-[background-color,color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) md:flex"
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-        >
-          <PanelLeftHollow className="h-3.5 w-3.5" strokeWidth={1.75} />
-        </button>
-      ) : null}
       <button
         type="button"
         data-ui-control="compact"

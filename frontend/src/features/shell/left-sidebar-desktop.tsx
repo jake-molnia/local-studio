@@ -128,7 +128,7 @@ export function DesktopSidebar({
           />
         </div>
       ) : null}
-      {!isExpanded && pathname !== "/agent" ? (
+      {!isExpanded ? (
         <div className="absolute left-2 top-2 z-[70] flex h-7 w-7 shrink-0 items-center justify-center">
           <button
             onClick={() => onSetPinnedOpen(true)}
