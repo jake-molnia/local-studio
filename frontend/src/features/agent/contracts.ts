@@ -28,7 +28,6 @@ export type {
 import {
   objectRecord,
   stringField,
-  stringArray,
   type ParseResult,
   type AgentTurnRuntimeStatus,
   type AgentTurnCommandResult,
@@ -63,47 +62,6 @@ export type GitAction =
   | { action: "create_branch"; branch: string }
   | { action: "add_worktree"; branch: string; path: string }
   | { action: "remove_worktree"; path: string };
-
-export function parseGitAction(input: unknown): ParseResult<GitAction> {
-  const body = objectRecord(input);
-  if (!body || typeof body.action !== "string") {
-    return { ok: false, error: "action is required" };
-  }
-  if (body.action === "init") return { ok: true, value: { action: "init" } };
-  if (body.action === "push") return { ok: true, value: { action: "push" } };
-  if (body.action === "checkout") {
-    const ref = stringField(body, "ref", true);
-    return ref.ok ? { ok: true, value: { action: "checkout", ref: ref.value! } } : ref;
-  }
-  if (body.action === "switch_branch" || body.action === "create_branch") {
-    const branch = stringField(body, "branch", true);
-    if (!branch.ok) return branch;
-    return { ok: true, value: { action: body.action, branch: branch.value! } };
-  }
-  if (body.action === "add_worktree") {
-    const branch = stringField(body, "branch", true);
-    if (!branch.ok) return branch;
-    const path = stringField(body, "path", true);
-    if (!path.ok) return path;
-    return {
-      ok: true,
-      value: { action: "add_worktree", branch: branch.value!, path: path.value! },
-    };
-  }
-  if (body.action === "remove_worktree") {
-    const path = stringField(body, "path", true);
-    return path.ok ? { ok: true, value: { action: "remove_worktree", path: path.value! } } : path;
-  }
-  if (body.action === "commit") {
-    const message = stringField(body, "message", true);
-    if (!message.ok) return message;
-    return {
-      ok: true,
-      value: { action: "commit", message: message.value!, paths: stringArray(body.paths) },
-    };
-  }
-  return { ok: false, error: `Unsupported git action: ${body.action}` };
-}
 
 export type TerminalRunRequest = { command: string };
 export type TerminalRunResult = {
