@@ -1,6 +1,5 @@
 import { app, BrowserWindow, screen, type Rectangle } from "electron";
-import path from "node:path";
-import { DESKTOP_CONFIG } from "../configs";
+import { DESKTOP_CONFIG, resolveDesktopPreloadPath } from "../configs";
 import {
   getStoredQuickPanelThreadSize,
   setStoredQuickPanelThreadSize,
@@ -84,7 +83,7 @@ function createQuickPanelWindow(appUrl: string): BrowserWindow {
     backgroundColor: "#00000000",
     ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
     webPreferences: {
-      preload: path.join(app.getAppPath(), "desktop", "dist", "preload.js"),
+      preload: resolveDesktopPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

@@ -386,6 +386,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 :root {
   --desktop-surface-opacity: 100%;
+  --desktop-titlebar-left-inset: 0px;
   --bg: var(--color-background);
   --fg: var(--color-foreground);
   --dim: var(--color-foreground-subtle);

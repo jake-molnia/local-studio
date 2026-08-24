@@ -1,6 +1,5 @@
 import { app, BrowserWindow } from "electron";
-import path from "node:path";
-import { DESKTOP_CONFIG } from "../configs";
+import { DESKTOP_CONFIG, resolveDesktopPreloadPath } from "../configs";
 import { log } from "../helpers/logger";
 import { hardenWebContents, registerPermissionPolicy } from "./security";
 import { mainWindowAppearanceOptions } from "./window-appearance";
@@ -25,7 +24,7 @@ export function createMainWindow(appUrl: string): BrowserWindow {
     title: DESKTOP_CONFIG.appName,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(app.getAppPath(), "desktop", "dist", "preload.js"),
+      preload: resolveDesktopPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

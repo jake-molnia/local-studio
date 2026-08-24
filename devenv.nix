@@ -17,6 +17,12 @@ let
     };
   };
   system = pkgs.stdenv.hostPlatform.system;
+  controllerPort = 8082;
+  agentRuntimePort = 8081;
+  frontendPort = 3100;
+  controllerUrl = "http://127.0.0.1:${toString controllerPort}";
+  agentRuntimeUrl = "http://127.0.0.1:${toString agentRuntimePort}";
+  frontendUrl = "http://127.0.0.1:${toString frontendPort}";
   bun = pkgs.bun.overrideAttrs (previous: {
     version = bunVersion;
     src = bunSources.${system} or (throw "Bun ${bunVersion} is unavailable for ${system}");
@@ -68,44 +74,87 @@ in
       "devenv:processes:head-node"
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
-      "devenv:processes:desktop"
+      "devenv:processes:agent-runtime"
+      "devenv:processes:frontend"
+      "devenv:processes:electron"
     ];
   };
 
   processes.head-node = {
     cwd = "./controller";
     exec = ''
-      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", 8080)); connection.close()' 2>/dev/null; then
-        echo "Port 8080 is already in use" >&2
+      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString controllerPort})); connection.close()' 2>/dev/null; then
+        echo "Port ${toString controllerPort} is already in use" >&2
         exit 1
       fi
       exec bun run dev
     '';
-    env.LOCAL_STUDIO_PORT = "8080";
+    env.LOCAL_STUDIO_PORT = toString controllerPort;
     restart.on = "never";
     ready = {
-      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null http://127.0.0.1:8080/health";
+      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null ${controllerUrl}/health";
       period = 1;
       timeout = 120;
     };
   };
 
-  processes.desktop = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+  processes.agent-runtime = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+    cwd = "./services/agent-runtime";
     exec = ''
-      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", 3000)); connection.close()' 2>/dev/null; then
-        echo "Port 3000 is already in use" >&2
+      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString agentRuntimePort})); connection.close()' 2>/dev/null; then
+        echo "Port ${toString agentRuntimePort} is already in use" >&2
         exit 1
       fi
-      exec npm --prefix frontend run desktop:dev
+      exec bun --watch src/server.ts
     '';
     after = [ "devenv:processes:head-node@ready" ];
-    env.PORT = "3000";
+    env = {
+      PORT = toString agentRuntimePort;
+      LOCAL_STUDIO_FRONTEND_BASE = frontendUrl;
+    };
     restart.on = "never";
     ready = {
-      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null http://127.0.0.1:3000/";
+      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null ${agentRuntimeUrl}/health";
+      period = 1;
+      timeout = 120;
+    };
+  };
+
+  processes.frontend = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+    cwd = "./frontend";
+    exec = ''
+      if ! ${lib.getExe pkgs.python311} -c 'import socket; connection = socket.socket(); connection.bind(("127.0.0.1", ${toString frontendPort})); connection.close()' 2>/dev/null; then
+        echo "Port ${toString frontendPort} is already in use" >&2
+        exit 1
+      fi
+      exec ./node_modules/.bin/next dev -p ${toString frontendPort}
+    '';
+    after = [
+      "devenv:processes:head-node@ready"
+      "devenv:processes:agent-runtime@ready"
+    ];
+    env = {
+      BACKEND_URL = controllerUrl;
+      NEXT_PUBLIC_BACKEND_URL = controllerUrl;
+      LOCAL_STUDIO_BACKEND_URL = controllerUrl;
+      LOCAL_STUDIO_AGENT_RUNTIME_URL = agentRuntimeUrl;
+    };
+    restart.on = "never";
+    ready = {
+      exec = "${lib.getExe pkgs.curl} --fail --silent --output /dev/null ${frontendUrl}/";
       initial_delay = 2;
       period = 1;
       timeout = 120;
     };
+  };
+
+  processes.electron = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+    exec = ''
+      npm --prefix frontend run desktop:build:main
+      exec npm --prefix frontend run desktop:start
+    '';
+    after = [ "devenv:processes:frontend@ready" ];
+    env.LOCAL_STUDIO_DESKTOP_DEV_SERVER_URL = frontendUrl;
+    restart.on = "never";
   };
 }

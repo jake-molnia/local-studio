@@ -145,17 +145,30 @@ controller head node and Electron desktop app together with:
 devenv up
 ```
 
-The head node is available independently on every supported platform, and the
-desktop process includes its head-node dependency:
+The head node is available independently on every supported platform. On macOS,
+the agent runtime, frontend, and Electron processes can also be managed
+independently:
 
 ```bash
 devenv up head-node
-devenv up desktop
+devenv up agent-runtime
+devenv up frontend
+devenv up electron
 ```
 
+`devenv up electron` starts its frontend and head-node dependencies, waits for
+the live Next.js server to become ready, and then opens Electron against it.
+Renderer changes update through Next.js hot reload. Restart only the Electron
+process after changing desktop main-process or preload code:
+
+```bash
+devenv processes restart electron
+```
+
+The isolated desktop development stack uses `127.0.0.1:8082` for the controller,
+`127.0.0.1:8081` for the agent runtime, and `127.0.0.1:3100` for the frontend.
 Each process checks its fixed port before launch so an existing process fails
-visibly instead of silently moving either half of the stack to an incompatible
-port.
+visibly instead of silently moving the stack to incompatible ports.
 
 ## Agent runtime
 

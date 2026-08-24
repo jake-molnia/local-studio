@@ -19,6 +19,12 @@ export const DESKTOP_CONFIG = {
   },
 };
 
+export function resolveDesktopPreloadPath(): string {
+  return app.isPackaged
+    ? path.join(app.getAppPath(), "desktop", "dist", "preload.js")
+    : path.join(app.getAppPath(), "preload.js");
+}
+
 export function resolveDevelopmentFrontendDir(): string {
   return path.resolve(app.getAppPath(), "..", "..");
 }

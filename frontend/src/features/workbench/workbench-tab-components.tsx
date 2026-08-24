@@ -65,7 +65,7 @@ export function WorkbenchProjectTabList({
 }) {
   return (
     <div
-      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-7" : ""}`}
+      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-[calc(1.75rem+var(--desktop-titlebar-left-inset))]" : ""}`}
     >
       <div
         role="tablist"
