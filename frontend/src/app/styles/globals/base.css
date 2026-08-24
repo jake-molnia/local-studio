@@ -59,13 +59,19 @@ html {
 
 /* ZCode uses a flat --color-background canvas — no grid texture. */
 body {
-  background-color: var(--bg);
+  background-color: var(--agent-bg);
   color: var(--fg);
   font-family: var(--font-sans);
   font-weight: var(--app-font-weight);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --desktop-surface-opacity: 100% !important;
+  }
 }
 
 .agent-workspace {

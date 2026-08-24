@@ -1,13 +1,5 @@
 import { isDevChannelBuild } from "./app-identity";
-import {
-  app,
-  clipboard,
-  dialog,
-  globalShortcut,
-  ipcMain,
-  shell,
-  type BrowserWindow,
-} from "electron";
+import { app, clipboard, BrowserWindow, dialog, globalShortcut, ipcMain, shell } from "electron";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { DesktopAppState } from "./types";
@@ -43,6 +35,13 @@ import {
   toggleQuickPanel,
 } from "./logic/quick-panel-window";
 import { getStoredQuickPanelHotkey, setStoredQuickPanelHotkey } from "./logic/desktop-settings";
+import { WindowAppearancePreferenceSchema } from "./window-appearance-contract";
+import { Schema } from "effect";
+import {
+  getWindowAppearanceState,
+  updateReducedTransparency,
+  updateWindowAppearance,
+} from "./logic/window-appearance";
 import {
   closePty,
   closePtyByOwner,
@@ -278,6 +277,15 @@ function resolveHomeConfinedPath(target: unknown): string | null {
 }
 
 function registerIpcHandlers(): void {
+  const broadcastWindowAppearance = (state: ReturnType<typeof getWindowAppearanceState>) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) {
+        window.webContents.send("desktop:window-appearance-changed", state);
+      }
+    }
+    return state;
+  };
+
   ipcMain.handle("desktop:get-runtime", async () => ({
     platform: process.platform,
     appVersion: app.getVersion(),
@@ -402,6 +410,16 @@ function registerIpcHandlers(): void {
       ),
     );
     writeUiPreferencesFile(stringPrefs);
+  });
+
+  ipcMain.handle("desktop:window-appearance-set", async (_, preference: unknown) => {
+    const decoded = Schema.decodeUnknownSync(WindowAppearancePreferenceSchema)(preference);
+    return broadcastWindowAppearance(updateWindowAppearance(mainWindow, decoded));
+  });
+
+  ipcMain.handle("desktop:window-appearance-set-reduced", async (_, reduced: unknown) => {
+    const decoded = Schema.decodeUnknownSync(Schema.Boolean)(reduced);
+    return broadcastWindowAppearance(updateReducedTransparency(mainWindow, decoded));
   });
 
   ipcMain.handle("desktop:pty-status", async () => ({

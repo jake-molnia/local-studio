@@ -5,6 +5,7 @@ import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ProjectsProvider } from "@/features/agent/projects/context";
 import { ToolsProvider } from "@/features/agent/tools/context";
 import { requestIdleWork } from "@/lib/idle-work";
+import { DesktopWindowAppearanceSync } from "@/lib/desktop-window-appearance";
 
 type GlobalListenersComponent = ComponentType;
 
@@ -39,6 +40,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ProjectsProvider>
       <ToolsProvider>
+        <DesktopWindowAppearanceSync />
         <LazyGlobalListeners />
         {children}
       </ToolsProvider>

@@ -385,6 +385,7 @@
    --surface, --rail, --border and friends all resolve to the same values.
    ────────────────────────────────────────────────────────────────────────── */
 :root {
+  --desktop-surface-opacity: 100%;
   --bg: var(--color-background);
   --fg: var(--color-foreground);
   --dim: var(--color-foreground-subtle);
@@ -392,8 +393,16 @@
   --surface-2: var(--color-secondary);
   --surface-3: var(--color-input);
   --rail: var(--color-sidebar);
-  --agent-bg: var(--color-background);
-  --sidebar-bg: var(--color-sidebar);
+  --agent-bg: color-mix(
+    in srgb,
+    var(--color-background) var(--desktop-surface-opacity),
+    transparent
+  );
+  --sidebar-bg: color-mix(
+    in srgb,
+    var(--color-sidebar) var(--desktop-surface-opacity),
+    transparent
+  );
 
   --border: var(--color-border);
   --border-hover: var(--color-border-hover);
@@ -523,7 +532,7 @@
   /* UI adapter tokens — shared components under src/ui read through this
      layer. Repointed onto the design tokens so a future library swap needs no per-page
      class changes. */
-  --ui-bg: var(--bg);
+  --ui-bg: var(--agent-bg);
   --ui-fg: var(--fg);
   --ui-muted: var(--dim);
   --ui-surface: var(--surface);

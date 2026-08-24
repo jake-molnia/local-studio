@@ -22,6 +22,7 @@ import {
   type ToolPreviewHeightOverrides,
 } from "@/features/agent/ui/timeline/tool-metadata";
 import { SettingsButton, SettingsGroup, SettingsRow } from "./settings-ui";
+import { WindowMaterialSettings } from "./window-material-settings";
 
 const CUSTOM_THEME_TOKEN_KEY = "local-studio.customThemeTokens";
 const LIGHT_THEME_ID = "zai-light";
@@ -364,6 +365,8 @@ export function AppearanceSettings() {
 
   return (
     <div>
+      <WindowMaterialSettings />
+
       <SettingsGroup
         title="Theme"
         description="Use light, dark, or match your system."

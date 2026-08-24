@@ -44,6 +44,9 @@ function deriveThemeUiTokens(
 ): ThemeUiTokens {
   const isLight = (lightnessFromColor(tokens.bg) ?? 0) > 50;
   const ink = inkForTheme(tokens);
+  const rail = isLight
+    ? `color-mix(in oklab, ${tokens.bg} 97%, #000)`
+    : `color-mix(in oklab, ${tokens.bg} 82%, #000)`;
   return {
     // White/ink overlays over a unified canvas: 8% surfaces, 5% hover,
     // 8% active, hairline 8% borders — the same ratios tokens.css encodes.
@@ -51,9 +54,7 @@ function deriveThemeUiTokens(
     "surface-3": `rgba(${ink}, 0.05)`,
     // The rail sits one tone step above the canvas so the body reads darker
     // than the left navbar (mirrors tokens.css --color-sidebar).
-    rail: isLight
-      ? `color-mix(in oklab, ${tokens.bg} 97%, #000)`
-      : `color-mix(in oklab, ${tokens.bg} 82%, #000)`,
+    rail,
     border: `rgba(${ink}, 0.08)`,
     separator: `rgba(${ink}, 0.05)`,
     hover: `rgba(${ink}, 0.05)`,
@@ -65,6 +66,10 @@ function deriveThemeUiTokens(
   };
 }
 
+function translucentSurface(color: string): string {
+  return `color-mix(in srgb, ${color} var(--desktop-surface-opacity, 100%), transparent)`;
+}
+
 export function resolveThemeCssTokens(
   tokens: ThemeTokens,
   overrides: Partial<ThemeUiTokens> = {},
@@ -73,8 +78,8 @@ export function resolveThemeCssTokens(
   return {
     ...tokens,
     ...ui,
-    "agent-bg": tokens.bg,
-    "sidebar-bg": ui.rail,
+    "agent-bg": translucentSurface(tokens.bg),
+    "sidebar-bg": translucentSurface(ui.rail),
     "color-background": tokens.bg,
     "color-background-win-alt": tokens.bg,
     "color-background-alt": tokens.bg,
@@ -113,7 +118,7 @@ export function resolveThemeCssTokens(
     "color-foreground-subtle": tokens.dim,
     "color-foreground-subtlest": tokens.hl2,
     "color-tag": ui["surface-2"],
-    "ui-bg": tokens.bg,
+    "ui-bg": translucentSurface(tokens.bg),
     "ui-fg": tokens.fg,
     "ui-muted": tokens.dim,
     "ui-surface": tokens.surface,

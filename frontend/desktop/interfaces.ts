@@ -1,4 +1,8 @@
 import type { DesktopUpdateChannel, DesktopUpdateSnapshot } from "./types";
+import type {
+  WindowAppearancePreference,
+  WindowAppearanceState,
+} from "./window-appearance-contract";
 
 export interface ProjectEntry {
   id: string;
@@ -123,6 +127,11 @@ export interface DesktopBridge {
   /** Durable backup for renderer localStorage UI prefs (theme, font, layout). */
   loadUiPreferences(): Promise<UiPreferencesPayload>;
   saveUiPreferences(prefs: UiPreferencesPayload): Promise<void>;
+  windowAppearance: {
+    set(preference: WindowAppearancePreference): Promise<WindowAppearanceState>;
+    setReducedTransparency(reduced: boolean): Promise<WindowAppearanceState>;
+    onChanged(listener: (state: WindowAppearanceState) => void): () => void;
+  };
   getKittylitterPairingJson(): Promise<KittylitterPairingResult>;
   copyKittylitterPairingJson(pairingJson: string): Promise<KittylitterCopyResult>;
   terminal: PtyBridge;
