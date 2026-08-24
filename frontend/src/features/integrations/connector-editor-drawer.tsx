@@ -71,7 +71,6 @@ export interface ConnectorDraft {
   url: string;
   env: Pair[];
   headers: Pair[];
-  allowTools: string;
   enabled: boolean;
 }
 
@@ -115,7 +114,6 @@ export function draftFromConnector(connector: ConnectorView): ConnectorDraft {
     url: connector.url ?? "",
     env: pairsFrom(connector.env, connector.secret_keys),
     headers: pairsFrom(connector.headers, connector.secret_keys),
-    allowTools: (connector.allowTools ?? []).join("\n"),
     enabled: connector.enabled,
   };
 }
@@ -131,7 +129,6 @@ export function emptyDraft(): ConnectorDraft {
     url: "",
     env: [],
     headers: [],
-    allowTools: "",
     // Off, always. See rule 2 above.
     enabled: false,
   };
@@ -587,7 +584,6 @@ export function ConnectorEditorDrawer({
                 headers: recordFrom(draft.headers),
                 headerSecret: secretFlagsFrom(draft.headers),
               }),
-          allowTools: lines(draft.allowTools),
           enabled: draft.enabled,
         }),
       );
@@ -682,19 +678,6 @@ export function ConnectorEditorDrawer({
         ) : (
           <HttpFields draft={draft} patch={patch} badScheme={badScheme} />
         )}
-
-        <FormField
-          label="Allowed tools"
-          description="One per line. Leave empty to allow every tool this server declares."
-        >
-          <textarea
-            value={draft.allowTools}
-            onChange={(event) => patch({ allowTools: event.target.value })}
-            rows={3}
-            spellCheck={false}
-            className={CODE_CLASS}
-          />
-        </FormField>
       </div>
 
       <ResourceDrawerSection

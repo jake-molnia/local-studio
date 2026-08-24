@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { AppPage, SearchInput } from "@/ui";
-import { Brain, GraduationCap, KeyRound, Plug, Puzzle, ShieldCheck } from "@/ui/icon-registry";
+import { Brain, GraduationCap, KeyRound, Plug, Puzzle } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
-import { ConnectorAccessSection } from "./connector-access-section";
 import { GoogleAccountsSection } from "./google-accounts-section";
 import { integrationSectionFromHash, type IntegrationSectionId } from "./integration-navigation";
 import { ModelProvidersSection } from "./model-providers-section";
@@ -19,7 +18,6 @@ const CATEGORIES = [
   { id: "skills", label: "Skills", icon: GraduationCap, description: "Session instructions" },
   { id: "accounts", label: "Accounts", icon: KeyRound, description: "Connected accounts" },
   { id: "models", label: "Models", icon: Brain, description: "Provider sign-in" },
-  { id: "access", label: "Access", icon: ShieldCheck, description: "Model permissions" },
 ] satisfies Array<{
   id: IntegrationSectionId;
   label: string;
@@ -31,7 +29,6 @@ function CustomizeSection({ section, query }: { section: IntegrationSectionId; q
   if (section === "connectors") return <ConnectorsSection searchQuery={query} />;
   if (section === "plugins") return <PluginsSection searchQuery={query} />;
   if (section === "accounts") return <GoogleAccountsSection searchQuery={query} />;
-  if (section === "access") return <ConnectorAccessSection searchQuery={query} />;
   if (section === "models") return <ModelProvidersSection searchQuery={query} />;
   return <SkillsSection searchQuery={query} />;
 }

@@ -93,11 +93,6 @@ function ManagedConnectorDrawer({
         <ResourceFact label="Connector ID" value={connector.id} mono />
         <ResourceFact label="Transport" value={connector.transport} mono />
         <ResourceFact label="Reaches" value={connectorCommand(connector)} mono />
-        <ResourceFact
-          label="Allowed tools"
-          value={connector.allowTools?.join(" · ") || "All declared tools"}
-          mono
-        />
       </ResourceDrawerSection>
     </ResourceDrawer>
   );
@@ -140,7 +135,6 @@ function ConnectorRow({
         url: connector.url,
         env: connector.env,
         headers: connector.headers,
-        allowTools: connector.allowTools,
         enabled: !connector.enabled,
       }),
       "Connector update failed",

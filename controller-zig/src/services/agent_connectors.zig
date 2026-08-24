@@ -133,16 +133,10 @@ pub fn upsertLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     try object.put(arena, "name", .{ .string = try arena.dupe(u8, name) });
     const enabled = booleanField(object.*, "enabled") orelse true;
     try object.put(arena, "enabled", .{ .bool = enabled });
-    if (object.get("allowTools")) |allow_tools| {
-        if (allow_tools == .array and allow_tools.array.items.len == 0) _ = object.orderedRemove("allowTools");
-    }
+    _ = object.orderedRemove("allowTools");
     const stored_value = try stringify(allocator, incoming.value);
     defer allocator.free(stored_value);
     try repository.save(database, id, enabled, stored_value);
-    if (enabled) {
-        var timestamp_buffer: [24]u8 = undefined;
-        try repository.seedGrant(database, id, formatTimestamp(io, &timestamp_buffer));
-    }
     return listLocked(allocator, database);
 }
 
@@ -227,8 +221,7 @@ pub fn connectGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlit
     try std.json.Stringify.value(account, .{}, &document.writer);
     try document.writer.writeAll("},\"origin\":{\"kind\":\"account-adapter\",\"id\":");
     try std.json.Stringify.value(account, .{}, &document.writer);
-    try document.writer.writeAll(",\"binding\":\"google-workspace\"},\"enabled\":true,\"allowTools\":");
-    try document.writer.writeAll(if (std.mem.eql(u8, service, "gmail")) "[\"list_drafts\",\"get_thread\",\"get_message\",\"search_threads\",\"list_labels\"]" else "[\"list_events\",\"get_event\",\"list_calendars\",\"suggest_time\"]");
+    try document.writer.writeAll(",\"binding\":\"google-workspace\"},\"enabled\":true");
     try document.writer.writeByte('}');
     const response = try upsertLocal(allocator, io, database, document.writer.buffered());
     allocator.free(response);
@@ -389,7 +382,6 @@ pub fn grantsLocal(allocator: std.mem.Allocator, io: Io, configuration: *const c
                         for (tools.array.items) |tool| {
                             if (tool != .object) continue;
                             const tool_name = stringField(tool.object, "name") orelse continue;
-                            if (!toolAllowed(parsed.value.object, tool_name)) continue;
                             if (wrote_tool) try output.writer.writeByte(',');
                             try std.json.Stringify.value(tool_name, .{}, &output.writer);
                             wrote_tool = true;
@@ -438,14 +430,8 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
         database.unlock(io);
         return failure;
     };
-    var grants = repository.listGrants(allocator, database) catch |failure| {
-        connectors.deinit();
-        database.unlock(io);
-        return failure;
-    };
     database.unlock(io);
     defer connectors.deinit();
-    defer grants.deinit();
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"connectors\":[");
@@ -455,7 +441,6 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
         defer parsed.deinit();
         if (parsed.value != .object) continue;
         const id = stringField(parsed.value.object, "id") orelse continue;
-        if (!hasAnyGrant(allocator, grants.grants, model_id, id)) continue;
         if (wrote) try output.writer.writeByte(',');
         const name = stringField(parsed.value.object, "name") orelse id;
         try output.writer.writeAll("{\"id\":");
@@ -471,7 +456,7 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
         };
         defer allocator.free(tools_result);
         try output.writer.writeAll(",\"tools\":");
-        try writeFilteredTools(allocator, &output.writer, parsed.value.object, grants.grants, model_id, id, tools_result);
+        try writeTools(allocator, &output.writer, tools_result);
         try output.writer.writeByte('}');
         wrote = true;
     }
@@ -493,19 +478,12 @@ pub fn callLocal(allocator: std.mem.Allocator, io: Io, configuration: *const con
         database.unlock(io);
         return failure;
     };
-    var grants = repository.listGrants(allocator, database) catch |failure| {
-        if (stored) |value| allocator.free(value);
-        database.unlock(io);
-        return failure;
-    };
     database.unlock(io);
     defer if (stored) |value| allocator.free(value);
-    defer grants.deinit();
     const connector_document = stored orelse return error.ConnectorNotFound;
     var connector = std.json.parseFromSlice(std.json.Value, allocator, connector_document, .{}) catch return error.InvalidConnectorRecord;
     defer connector.deinit();
     if (connector.value != .object or !(booleanField(connector.value.object, "enabled") orelse false)) return error.ConnectorDisabled;
-    if (!toolAllowed(connector.value.object, tool) or !toolGranted(allocator, grants.grants, model_id, connector_id, tool)) return error.ConnectorToolDenied;
     const result = try executeConnector(allocator, io, configuration, client, connector.value.object, .{ .call = .{ .name = tool, .arguments = arguments } });
     defer allocator.free(result);
     return std.fmt.allocPrint(allocator, "{{\"ok\":true,\"result\":{s}}}", .{result});
@@ -603,7 +581,7 @@ fn executeConnector(allocator: std.mem.Allocator, io: Io, configuration: *const 
     return error.UnsupportedMcpTransport;
 }
 
-fn writeFilteredTools(allocator: std.mem.Allocator, writer: *Io.Writer, connector: std.json.ObjectMap, grants: []const repository.Grant, model_id: []const u8, connector_id: []const u8, document: []const u8) !void {
+fn writeTools(allocator: std.mem.Allocator, writer: *Io.Writer, document: []const u8) !void {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpResponse;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidMcpResponse;
@@ -613,45 +591,12 @@ fn writeFilteredTools(allocator: std.mem.Allocator, writer: *Io.Writer, connecto
     var wrote = false;
     for (tools.array.items) |tool_value| {
         if (tool_value != .object) continue;
-        const name = stringField(tool_value.object, "name") orelse continue;
-        if (!toolAllowed(connector, name) or !toolGranted(allocator, grants, model_id, connector_id, name)) continue;
+        _ = stringField(tool_value.object, "name") orelse continue;
         if (wrote) try writer.writeByte(',');
         try std.json.Stringify.value(tool_value, .{}, writer);
         wrote = true;
     }
     try writer.writeByte(']');
-}
-
-fn toolAllowed(connector: std.json.ObjectMap, tool: []const u8) bool {
-    const allow = connector.get("allowTools") orelse return true;
-    if (allow != .array) return false;
-    for (allow.array.items) |value| if (value == .string and std.mem.eql(u8, value.string, tool)) return true;
-    return false;
-}
-
-fn hasAnyGrant(allocator: std.mem.Allocator, grants: []const repository.Grant, model_id: []const u8, connector_id: []const u8) bool {
-    for (grants) |grant| {
-        if (!std.mem.eql(u8, grant.connector_id, connector_id)) continue;
-        if (!std.mem.eql(u8, grant.model_id, "*") and !std.mem.eql(u8, grant.model_id, model_id)) continue;
-        if (std.mem.eql(u8, grant.tools_json, "\"all\"")) return true;
-        var parsed = std.json.parseFromSlice(std.json.Value, allocator, grant.tools_json, .{}) catch continue;
-        defer parsed.deinit();
-        if (parsed.value == .array and parsed.value.array.items.len > 0) return true;
-    }
-    return false;
-}
-
-fn toolGranted(allocator: std.mem.Allocator, grants: []const repository.Grant, model_id: []const u8, connector_id: []const u8, tool: []const u8) bool {
-    for (grants) |grant| {
-        if (!std.mem.eql(u8, grant.connector_id, connector_id)) continue;
-        if (!std.mem.eql(u8, grant.model_id, "*") and !std.mem.eql(u8, grant.model_id, model_id)) continue;
-        if (std.mem.eql(u8, grant.tools_json, "\"all\"")) return true;
-        var parsed = std.json.parseFromSlice(std.json.Value, allocator, grant.tools_json, .{}) catch continue;
-        defer parsed.deinit();
-        if (parsed.value != .array) continue;
-        for (parsed.value.array.items) |value| if (value == .string and std.mem.eql(u8, value.string, tool)) return true;
-    }
-    return false;
 }
 
 fn listLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
@@ -707,13 +652,13 @@ fn restoreSecrets(incoming: *std.json.ObjectMap, stored: std.json.ObjectMap, rec
 }
 
 fn preserveFields(allocator: std.mem.Allocator, incoming: *std.json.ObjectMap, stored: std.json.ObjectMap) !void {
-    for ([_][]const u8{ "envSecret", "headerSecret", "cwd", "allowTools", "origin", "auth", "runtime", "protocolEra" }) |name| {
+    for ([_][]const u8{ "envSecret", "headerSecret", "cwd", "origin", "auth", "runtime", "protocolEra" }) |name| {
         if (incoming.get(name) == null) if (stored.get(name)) |value| try incoming.put(allocator, name, value);
     }
 }
 
 fn validateOptionalFields(object: std.json.ObjectMap) !void {
-    for ([_][]const u8{ "args", "allowTools" }) |name| if (object.get(name)) |value| {
+    for ([_][]const u8{"args"}) |name| if (object.get(name)) |value| {
         if (value != .array or value.array.items.len > 1000) return error.InvalidConnectorPayload;
         for (value.array.items) |entry| if (entry != .string or entry.string.len > 4096) return error.InvalidConnectorPayload;
     };
