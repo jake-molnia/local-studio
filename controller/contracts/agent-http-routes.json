@@ -252,6 +252,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/pr",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/pr/merge",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/plugins",
       "ownership": "head",
       "streaming": "never"
@@ -517,6 +529,18 @@
     {
       "method": "GET",
       "path": "/internal/node/v1/prompt-templates/load",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/pr",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/pr/merge",
       "ownership": "worker",
       "streaming": "never"
     },

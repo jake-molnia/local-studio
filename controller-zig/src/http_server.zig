@@ -45,6 +45,7 @@ const agent_projects = @import("services/agent_projects.zig");
 const agent_connectors = @import("services/agent_connectors.zig");
 const agent_discovery = @import("services/agent_discovery.zig");
 const agent_plugins = @import("services/agent_plugins.zig");
+const agent_pr = @import("services/agent_pr.zig");
 const agent_terminal = @import("services/agent_terminal.zig");
 const agent_pty = @import("services/agent_pty.zig");
 const agent_browser = @import("services/agent_browser.zig");
@@ -455,6 +456,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/pr") or std.mem.eql(u8, route.path, "/api/agent/pr/merge")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const cwd = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "cwd") else null;
+        defer if (cwd) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_pr.getPayload(allocator, io, mode, configuration, client, database, node_id, cwd orelse return respondPrFailure(request, error.PrCwdRequired))
+        else
+            agent_pr.mergePayload(allocator, io, mode, configuration, client, database, node_id, document orelse return false);
+        const payload = response catch |failure| return respondPrFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/plugins") or std.mem.eql(u8, route.path, "/api/agent/plugins/source")) {
         const node_id = try queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
@@ -798,6 +815,20 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else
             agent_discovery.templateLocal(allocator, io, configuration, path orelse return respondDiscoveryFailure(request, error.DiscoveryPathRequired));
         const payload = response catch |failure| return respondDiscoveryFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/pr") or std.mem.eql(u8, route.path, "/internal/node/v1/pr/merge")) {
+        const cwd = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "cwd") else null;
+        defer if (cwd) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .GET)
+            agent_pr.getLocal(allocator, io, configuration, cwd orelse return respondPrFailure(request, error.PrCwdRequired))
+        else
+            agent_pr.mergeLocal(allocator, io, configuration, document orelse return false);
+        const payload = response catch |failure| return respondPrFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -2164,6 +2195,30 @@ fn respondDiscoveryFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.DiscoveryNotFound => "Skill or prompt template not found",
         error.DiscoveryNodeRequired => "No enrolled node offers harness discovery",
         error.DiscoveryNodeUnavailable => "The discovery node is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondPrFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.PrCwdRequired, error.InvalidPrPayload, error.InvalidPrNumber, error.InvalidPrMethod, error.ProjectPathMustBeAbsolute => .bad_request,
+        error.ProjectPathNotFound => .not_found,
+        error.ProjectPathOutsideRoots => .forbidden,
+        error.PrNodeRequired => .conflict,
+        error.PrNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.PrCwdRequired => "cwd is required",
+        error.InvalidPrPayload => "invalid pull request payload",
+        error.InvalidPrNumber => "number must be a positive integer",
+        error.InvalidPrMethod => "method must be merge, squash, or rebase",
+        error.ProjectPathMustBeAbsolute => "cwd must be absolute",
+        error.ProjectPathNotFound => "cwd not found",
+        error.ProjectPathOutsideRoots => "cwd is outside allowed workspace roots",
+        error.PrNodeRequired => "No enrolled node offers GitHub operations",
+        error.PrNodeUnavailable => "The GitHub operation node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
