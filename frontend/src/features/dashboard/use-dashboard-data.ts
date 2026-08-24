@@ -1,5 +1,4 @@
 import { useRouter } from "next/navigation";
-import { settingsHref } from "@/features/settings/settings-navigation";
 import { useModelLifecycle } from "@/features/dashboard/use-model-lifecycle";
 import { useRealtimeStatusStore } from "@/hooks/realtime-status-store";
 import { metricsWithProcessIdentity, scopedMetrics } from "./dashboard-metrics";
@@ -48,7 +47,6 @@ export function useDashboardData() {
     lifecycleError: lifecycle.error,
     onLaunch: lifecycle.start,
     onBenchmark: actions.onBenchmark,
-    onNavigateLogs: navigate(settingsHref("machine:local:logs")),
     onNewRecipe: navigate("/models?new=1&tab=serves"),
     onViewAll: navigate("/models"),
   };

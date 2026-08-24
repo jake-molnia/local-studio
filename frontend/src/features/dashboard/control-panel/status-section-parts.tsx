@@ -25,7 +25,6 @@ export function StatusHeader({
   modelName,
   onBenchmark,
   onLaunch,
-  onNavigateLogs,
   onNewRecipe,
   onViewAll,
   pid,
@@ -46,7 +45,6 @@ export function StatusHeader({
   modelName: string;
   onBenchmark: () => void;
   onLaunch?: (recipeId: string) => Promise<void>;
-  onNavigateLogs: () => void;
   onNewRecipe?: () => void;
   onViewAll?: () => void;
   pid?: number;
@@ -87,7 +85,6 @@ export function StatusHeader({
         lifecycleStatus={lifecycleStatus}
         onBenchmark={onBenchmark}
         onLaunch={onLaunch}
-        onNavigateLogs={onNavigateLogs}
         onNewRecipe={onNewRecipe}
         onViewAll={onViewAll}
         recipes={recipes}
@@ -149,7 +146,6 @@ function StatusHeaderActions({
   lifecycleStatus,
   onBenchmark,
   onLaunch,
-  onNavigateLogs,
   onNewRecipe,
   onViewAll,
   recipes,
@@ -161,7 +157,6 @@ function StatusHeaderActions({
   lifecycleStatus: "idle" | "starting" | "ready" | "error";
   onBenchmark: () => void;
   onLaunch?: (recipeId: string) => Promise<void>;
-  onNavigateLogs: () => void;
   onNewRecipe?: () => void;
   onViewAll?: () => void;
   recipes?: RecipeWithStatus[];
@@ -182,7 +177,6 @@ function StatusHeaderActions({
           recipes={recipes}
         />
       ) : null}
-      <ActionBtn label="Logs" onClick={onNavigateLogs} />
       <ActionBtn
         label={benchmarkButtonLabel(benchmarking, benchmarkResult)}
         onClick={onBenchmark}

@@ -15,7 +15,6 @@ interface StatusSectionProps {
   isStatusLoading: boolean;
   platformKind?: RuntimePlatformKind | null;
   inferencePort?: number;
-  onNavigateLogs: () => void;
   onBenchmark: () => void;
   benchmarking: boolean;
   benchmarkResult: number | null;
@@ -37,7 +36,6 @@ export function StatusSection({
   isStatusLoading,
   platformKind,
   inferencePort,
-  onNavigateLogs,
   onBenchmark,
   benchmarking,
   benchmarkResult,
@@ -77,7 +75,6 @@ export function StatusSection({
         pid={view.pid}
         onBenchmark={onBenchmark}
         onLaunch={onLaunch}
-        onNavigateLogs={onNavigateLogs}
         onNewRecipe={onNewRecipe}
         onViewAll={onViewAll}
         recipes={recipes}
