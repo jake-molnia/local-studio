@@ -13,9 +13,15 @@ export type ModelCompany = {
 export type ModelRoute = {
   key: string;
   label: string;
+  speed: "standard" | "fast";
+  mode: "standard" | "max";
+  thinking: boolean;
+  contextWindow: number;
   route: ModelRouteOffer;
   model: AgentModel;
 };
+
+export type RouteField = "key" | "speed" | "mode" | "thinking" | "contextWindow";
 
 export type ModelChoice = {
   key: string;
@@ -32,12 +38,7 @@ export function buildModelChoices(models: AgentModel[]): ModelChoice[] {
       label: model.name,
       company: companyFromLab(model.lab),
       model,
-      routes: model.routes.map((route) => ({
-        key: route.id,
-        label: route.label,
-        route,
-        model,
-      })),
+      routes: model.routes.map((route) => modelRoute(model, route)),
     }))
     .toSorted(
       (left, right) =>
@@ -62,15 +63,38 @@ export function activeModelChoice(
 export function routeForChoice(
   choice: ModelChoice,
   selectedRoute: ModelRoute | null,
+  defaultModel?: string,
+  override: Partial<Pick<ModelRoute, RouteField>> = {},
 ): ModelRoute | null {
-  return (
-    choice.routes.find((route) => route.key === selectedRoute?.key && route.route.active) ??
-    choice.routes.find(
-      (route) => route.key === choice.model.defaultRouteId && route.route.active,
-    ) ??
+  const fallback =
+    choice.routes.find((route) => route.route.id === choice.model.defaultRouteId) ??
     choice.routes.find((route) => route.route.active) ??
-    null
+    choice.routes[0];
+  if (!fallback) return null;
+  const target = { ...(selectedRoute ?? fallback), ...override };
+  return (
+    choice.routes.toSorted(
+      (left, right) =>
+        routeScore(right, target, defaultModel) - routeScore(left, target, defaultModel),
+    )[0] ?? null
   );
+}
+
+export function routeValues<T extends RouteField>(
+  choice: ModelChoice,
+  field: T,
+): Array<ModelRoute[T]> {
+  const values = new Map<string, ModelRoute[T]>();
+  for (const route of choice.routes) {
+    const value = route[field];
+    if (!values.has(String(value))) values.set(String(value), value);
+  }
+  return [...values.values()];
+}
+
+export function formatContextWindow(value: number): string {
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
+  return `${Math.round(value / 1000)}K`;
 }
 
 export function modelChoiceSearchText(choice: ModelChoice): string {
@@ -101,7 +125,7 @@ export function selectedModelRoute(
   const choice = buildModelChoices([model])[0];
   if (!choice) return null;
   const route = model.routes.find((candidate) => candidate.id === selectedRoute);
-  return route ? { key: route.id, label: route.label, route, model } : routeForChoice(choice, null);
+  return route ? modelRoute(model, route) : routeForChoice(choice, null);
 }
 
 function companyFromLab(lab: ModelLab): ModelCompany {
@@ -110,4 +134,44 @@ function companyFromLab(lab: ModelLab): ModelCompany {
     label: lab.name,
     ...(lab.logo ? { logo: lab.logo } : {}),
   };
+}
+
+function modelRoute(model: AgentModel, route: ModelRouteOffer): ModelRoute {
+  const variant = parseVariantSlug(route.rawModelId.split("/").at(-1) ?? route.rawModelId);
+  return {
+    key: route.providerId,
+    label: route.label,
+    speed: variant.speed,
+    mode: variant.mode,
+    thinking: variant.thinking,
+    contextWindow: route.contextWindow,
+    route,
+    model,
+  };
+}
+
+function parseVariantSlug(value: string): {
+  speed: ModelRoute["speed"];
+  mode: ModelRoute["mode"];
+  thinking: boolean;
+} {
+  const slug = value.toLocaleLowerCase();
+  return {
+    speed: slug.includes("-fast") ? "fast" : "standard",
+    mode: slug.includes("-max") ? "max" : "standard",
+    thinking: slug.includes("-thinking"),
+  } as const;
+}
+
+function routeScore(route: ModelRoute, target: ModelRoute, defaultModel?: string): number {
+  return (
+    Number(route.route.active) * 128 +
+    Number(route.route.id === target.route.id) * 64 +
+    Number(route.key === target.key) * 32 +
+    Number(route.contextWindow === target.contextWindow) * 16 +
+    Number(route.mode === target.mode) * 8 +
+    Number(route.thinking === target.thinking) * 4 +
+    Number(route.speed === target.speed) * 2 +
+    Number(route.model.id === defaultModel)
+  );
 }

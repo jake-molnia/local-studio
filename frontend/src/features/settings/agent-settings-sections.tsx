@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { Schema } from "effect";
+import { HarnessCatalogSchema, type HarnessCatalog } from "@shared/agent/harness-catalog";
 import { StatusPill } from "@/ui";
 import {
   SettingsButton,
@@ -13,31 +14,6 @@ import { useSidebarStatus } from "@/features/settings/use-sidebar-status";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import api from "@/lib/api/client";
 import type { RuntimeTarget } from "@/lib/types";
-
-const HarnessCatalogSchema = Schema.Struct({
-  harnesses: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      name: Schema.String,
-      status: Schema.String,
-      transport: Schema.String,
-      nodeCount: Schema.optional(Schema.Number),
-      installation: Schema.optional(
-        Schema.Union([
-          Schema.Null,
-          Schema.Struct({
-            source: Schema.String,
-            executable: Schema.String,
-            version: Schema.Union([Schema.Null, Schema.String]),
-          }),
-        ]),
-      ),
-      capabilities: Schema.Array(Schema.String),
-    }),
-  ),
-});
-
-type HarnessCatalog = Schema.Schema.Type<typeof HarnessCatalogSchema>;
 
 export function ArchivedChatsSettings() {
   type Session = {

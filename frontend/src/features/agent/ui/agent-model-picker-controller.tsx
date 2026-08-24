@@ -18,10 +18,15 @@ import {
   activeModelChoice,
   availableModelCompanies,
   buildModelChoices,
+  formatContextWindow,
   routeForChoice,
+  routeValues,
   selectedModelRoute,
   type ModelChoice,
+  type ModelRoute,
+  type RouteField,
 } from "./agent-model-picker-data";
+import { useHarnessCatalog } from "./use-harness-catalog";
 import {
   ComposerPickerTrigger,
   filteredChoices,
@@ -43,11 +48,23 @@ type AgentModelPickerProps = {
   reasoningLevels?: readonly AgentThinkingLevel[];
   reasoningDisabled?: boolean;
   onSelectReasoning?: (level: AgentThinkingLevel) => void;
+  selectedHarness?: string;
+  onSelectHarness?: (harness: string) => void;
+  harnessDisabled?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
 
-type PickerView = "inspector" | "models" | "reasoning" | "provider";
+type PickerView =
+  | "inspector"
+  | "models"
+  | "reasoning"
+  | "provider"
+  | "harness"
+  | "context"
+  | "speed"
+  | "mode"
+  | "thinking";
 
 const PANEL_GAP_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
@@ -84,6 +101,9 @@ export function AgentModelPicker({
   reasoningLevels = [],
   reasoningDisabled = false,
   onSelectReasoning,
+  selectedHarness = "pi",
+  onSelectHarness,
+  harnessDisabled = false,
   open: controlledOpen,
   onOpenChange,
 }: AgentModelPickerProps) {
@@ -93,6 +113,7 @@ export function AgentModelPicker({
   const [query, setQuery] = useState("");
   const [selectedCompany, setSelectedCompany] = useState("openai");
   const [openSource, setOpenSource] = useState<"pointer" | "keyboard">("keyboard");
+  const harnesses = useHarnessCatalog();
   const open = controlledOpen ?? internalOpen;
   const choices = useMemo(() => buildModelChoices(models), [models]);
   const activeChoice = useMemo(
@@ -110,8 +131,29 @@ export function AgentModelPicker({
   const supportsReasoning = Boolean(
     onSelectReasoning && reasoningLevel && reasoningLevels.length > 1,
   );
-  const providerRoutes = activeChoice?.routes ?? [];
-  const supportsProviderSelection = providerRoutes.length > 1;
+  const harnessLabel =
+    harnesses.find((harness) => harness.id === selectedHarness)?.name ?? selectedHarness;
+  const pickerRows = useMemo(
+    () =>
+      buildPickerRows(
+        activeChoice,
+        activeRoute,
+        supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null,
+        onSelectHarness ? harnessLabel : null,
+        modelTriggerLabel(activeChoice, selectedModel, loading, choices.length),
+      ),
+    [
+      activeChoice,
+      activeRoute,
+      choices.length,
+      effectiveReasoning,
+      harnessLabel,
+      loading,
+      onSelectHarness,
+      selectedModel,
+      supportsReasoning,
+    ],
+  );
   const activeModel = models.find((model) => model.id === selectedModel) ?? null;
   const selectedModelNotRunning = !loading && Boolean(activeModel && !activeModel.active);
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -351,13 +393,7 @@ export function AgentModelPicker({
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >
-              <PickerInspector
-                activeView={view}
-                modelLabel={modelTriggerLabel(activeChoice, selectedModel, loading, choices.length)}
-                effortLabel={supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null}
-                providerLabel={supportsProviderSelection && activeRoute ? activeRoute.label : null}
-                onOpen={openNested}
-              />
+              <PickerInspector activeView={view} rows={pickerRows} onOpen={openNested} />
             </div>,
             document.body,
           )
@@ -428,21 +464,35 @@ export function AgentModelPicker({
                     ),
                   )}
                 </SimplePickerPanel>
-              ) : view === "provider" && activeRoute && activeChoice ? (
-                <SimplePickerPanel title="Provider">
-                  {providerRoutes.map((route) => (
+              ) : view === "harness" && onSelectHarness ? (
+                <SimplePickerPanel title="Harness">
+                  {(harnesses.length
+                    ? harnesses
+                    : [{ id: selectedHarness, name: harnessLabel, status: "available" }]
+                  ).map((harness) => (
                     <SimplePickerOption
-                      key={route.route.id}
-                      label={route.label}
-                      selected={route.route.id === selectedRoute}
-                      disabled={!route.route.active}
+                      key={harness.id}
+                      label={harness.name}
+                      selected={harness.id === selectedHarness}
+                      disabled={harnessDisabled || harness.status !== "available"}
                       onSelect={() => {
-                        onSelect(activeChoice.model.id, route.route.id);
+                        onSelectHarness(harness.id);
                         close(true);
                       }}
                     />
                   ))}
                 </SimplePickerPanel>
+              ) : activeChoice && activeRoute && isVariantView(view) ? (
+                <VariantPickerPanel
+                  view={view}
+                  choice={activeChoice}
+                  activeRoute={activeRoute}
+                  defaultModel={defaultModel}
+                  onSelect={(route) => {
+                    onSelect(activeChoice.model.id, route.route.id);
+                    close(true);
+                  }}
+                />
               ) : null}
             </div>,
             document.body,
@@ -452,30 +502,130 @@ export function AgentModelPicker({
   );
 }
 
+type VariantView = "provider" | "context" | "speed" | "mode" | "thinking";
+
+type PickerRow = {
+  view: Exclude<PickerView, "inspector">;
+  label: string;
+  value: string;
+};
+
+function buildPickerRows(
+  choice: ModelChoice | null,
+  activeRoute: ModelRoute | null,
+  effortLabel: string | null,
+  harnessLabel: string | null,
+  modelLabel: string,
+): PickerRow[] {
+  const rows: PickerRow[] = [{ view: "models", label: "Model", value: modelLabel }];
+  if (effortLabel) rows.push({ view: "reasoning", label: "Effort", value: effortLabel });
+  if (choice && activeRoute) {
+    if (routeValues(choice, "key").length > 1) {
+      rows.push({ view: "provider", label: "Provider", value: activeRoute.label });
+    }
+    if (harnessLabel) rows.push({ view: "harness", label: "Harness", value: harnessLabel });
+    if (routeValues(choice, "contextWindow").length > 1) {
+      rows.push({
+        view: "context",
+        label: "Context",
+        value: formatContextWindow(activeRoute.contextWindow),
+      });
+    }
+    if (routeValues(choice, "speed").length > 1) {
+      rows.push({
+        view: "speed",
+        label: "Speed",
+        value: variantValueLabel("speed", activeRoute.speed),
+      });
+    }
+    if (routeValues(choice, "mode").length > 1) {
+      rows.push({
+        view: "mode",
+        label: "Mode",
+        value: variantValueLabel("mode", activeRoute.mode),
+      });
+    }
+    if (routeValues(choice, "thinking").length > 1) {
+      rows.push({
+        view: "thinking",
+        label: "Thinking",
+        value: variantValueLabel("thinking", activeRoute.thinking),
+      });
+    }
+  } else if (harnessLabel) {
+    rows.push({ view: "harness", label: "Harness", value: harnessLabel });
+  }
+  return rows;
+}
+
+function VariantPickerPanel({
+  view,
+  choice,
+  activeRoute,
+  defaultModel,
+  onSelect,
+}: {
+  view: VariantView;
+  choice: ModelChoice;
+  activeRoute: ModelRoute;
+  defaultModel?: string;
+  onSelect: (route: ModelRoute) => void;
+}) {
+  const field = variantField(view);
+  return (
+    <SimplePickerPanel title={variantTitle(view)}>
+      {routeValues(choice, field).map((value) => {
+        const route = routeForChoice(choice, activeRoute, defaultModel, { [field]: value });
+        if (!route) return null;
+        return (
+          <SimplePickerOption
+            key={String(value)}
+            label={view === "provider" ? route.label : variantValueLabel(view, value)}
+            selected={value === activeRoute[field]}
+            disabled={!route.route.active}
+            onSelect={() => onSelect(route)}
+          />
+        );
+      })}
+    </SimplePickerPanel>
+  );
+}
+
+function isVariantView(view: PickerView): view is VariantView {
+  return ["provider", "context", "speed", "mode", "thinking"].includes(view);
+}
+
+function variantField(view: VariantView): RouteField {
+  if (view === "provider") return "key";
+  if (view === "context") return "contextWindow";
+  return view;
+}
+
+function variantTitle(view: VariantView): string {
+  if (view === "provider") return "Provider";
+  if (view === "context") return "Context";
+  if (view === "speed") return "Speed";
+  if (view === "mode") return "Mode";
+  return "Thinking";
+}
+
+function variantValueLabel(view: VariantView, value: string | number | boolean): string {
+  if (view === "context") return formatContextWindow(Number(value));
+  if (view === "speed") return value === "fast" ? "Fast" : "Standard";
+  if (view === "mode") return value === "max" ? "Max" : "Standard";
+  if (view === "thinking") return value ? "On" : "Off";
+  return String(value);
+}
+
 function PickerInspector({
   activeView,
-  modelLabel,
-  effortLabel,
-  providerLabel,
+  rows,
   onOpen,
 }: {
   activeView: PickerView;
-  modelLabel: string;
-  effortLabel: string | null;
-  providerLabel: string | null;
+  rows: PickerRow[];
   onOpen: (view: Exclude<PickerView, "inspector">, trigger: HTMLButtonElement) => void;
 }) {
-  const rows: Array<{
-    view: Exclude<PickerView, "inspector">;
-    label: string;
-    value: string;
-  }> = [
-    { view: "models", label: "Model", value: modelLabel },
-    ...(effortLabel ? [{ view: "reasoning" as const, label: "Effort", value: effortLabel }] : []),
-    ...(providerLabel
-      ? [{ view: "provider" as const, label: "Provider", value: providerLabel }]
-      : []),
-  ];
   return (
     <div className="grid gap-0.5">
       {rows.map((row) => (

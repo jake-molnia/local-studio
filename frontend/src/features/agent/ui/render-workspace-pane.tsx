@@ -18,6 +18,7 @@ import { activeSession } from "@/features/agent/runtime/selectors";
 import { terminalOwnerFor } from "@/features/agent/terminal-owners";
 import { collectLeaves } from "@/features/agent/workspace/layout";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
+import type { AgentHarness } from "@/features/agent/runtime/types";
 
 export type WorkspacePaneRenderContext = {
   paneId: PaneId;
@@ -213,6 +214,14 @@ const WorkspacePane = memo(function WorkspacePane({
             defaultModel={defaultModel}
             onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
             onSetDefault={handles.setDefaultModel}
+            selectedHarness={view.session?.harness ?? "pi"}
+            harnessDisabled={!view.isNewSession}
+            onSelectHarness={(harness) =>
+              handles.updateSession(view.pane.sessionId, (session) => ({
+                ...session,
+                harness: harness as AgentHarness,
+              }))
+            }
             loading={modelsLoading}
             {...reasoning}
           />

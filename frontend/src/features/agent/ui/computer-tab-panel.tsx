@@ -11,7 +11,7 @@ import {
 import type { ToolsContextValue } from "@/features/agent/tools/context";
 import type { ComputerTab } from "@/features/agent/tools/types";
 import type { Project, GitSummary } from "@/features/agent/projects/types";
-import type { Session, UpdateSession } from "@/features/agent/runtime/types";
+import type { AgentHarness, Session, UpdateSession } from "@/features/agent/runtime/types";
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { AgentModelPicker } from "@/features/agent/ui/agent-model-picker";
 import { ChatPane } from "@/features/agent/ui/chat-pane";
@@ -177,6 +177,16 @@ function SideChatTab({
                   modelRouteId: nextRouteId,
                 })),
               )
+            }
+            selectedHarness={sideChatSession.harness ?? focusedSession?.harness ?? "pi"}
+            harnessDisabled={Boolean(
+              sideChatSession.piSessionId || sideChatSession.messages.length,
+            )}
+            onSelectHarness={(harness) =>
+              updateSession(sideChatSession.id, (session) => ({
+                ...session,
+                harness: harness as AgentHarness,
+              }))
             }
             loading={modelsLoading}
             {...reasoning}

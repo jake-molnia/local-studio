@@ -12,6 +12,7 @@ import type { AgentThinkingLevel } from "@/features/agent/contracts";
 export type SessionId = string;
 
 export type SessionStatus = "idle" | "starting" | "running" | "stopping" | "loading";
+export type AgentHarness = "codex" | "fx" | "pi";
 
 export type ExtensionUiRequest = {
   requestId: string;
@@ -36,7 +37,7 @@ export type Session = {
   // Pi session UUID (null = unstarted, will be assigned by pi when the first
   // turn runs).
   piSessionId: string | null;
-  harness?: "fx" | "pi";
+  harness?: AgentHarness;
   projectId?: string;
   cwd?: string;
   modelId?: string;
