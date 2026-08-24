@@ -327,6 +327,10 @@ pub const Manager = struct {
     }
 
     pub fn turnPayload(manager: *Manager, document: []const u8) ![]u8 {
+        return manager.turnPayloadAt(document, 0, null);
+    }
+
+    pub fn turnPayloadAt(manager: *Manager, document: []const u8, initial_event_seq: u64, native_session_id: ?[]const u8) ![]u8 {
         if (manager.mode == .head) return error.RemoteHarnessRequired;
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidTurnPayload;
         defer parsed.deinit();
@@ -349,7 +353,7 @@ pub const Manager = struct {
         const tool_access = optionalString(object, "toolAccess") orelse "read_only";
         const session = if (std.mem.eql(u8, mode, "prompt"))
             if (harness_kind == .fx)
-                try manager.ensureFxSession(session_id, model_id, cwd)
+                try manager.ensureFxSession(session_id, native_session_id, model_id, cwd, initial_event_seq)
             else
                 try manager.ensureSession(session_id, optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId"), model_id, cwd, thinking, tool_access)
         else
@@ -611,7 +615,7 @@ pub const Manager = struct {
         return session;
     }
 
-    fn ensureFxSession(manager: *Manager, session_id: []const u8, model_id: []const u8, cwd_value: ?[]const u8) !*Session {
+    fn ensureFxSession(manager: *Manager, session_id: []const u8, native_session_id: ?[]const u8, model_id: []const u8, cwd_value: ?[]const u8, initial_event_seq: u64) !*Session {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
         if (manager.sessions.get(session_id)) |session| {
@@ -653,24 +657,32 @@ pub const Manager = struct {
         errdefer child.kill(manager.io);
         const initialized = try directFxRequest(manager.allocator, manager.io, &child, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":\"initialize\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}");
         defer manager.allocator.free(initialized);
-        var new_request: Io.Writer.Allocating = .init(manager.allocator);
-        defer new_request.deinit();
-        try new_request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":\"new\",\"method\":\"session/new\",\"params\":{\"mcpServers\":[{\"name\":\"local-studio\",\"command\":");
-        try std.json.Stringify.value(executable, .{}, &new_request.writer);
-        try new_request.writer.writeAll(",\"args\":[\"mcp-bridge\"],\"env\":[{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"value\":");
-        try std.json.Stringify.value(manager.controller_origin, .{}, &new_request.writer);
-        try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
-        try std.json.Stringify.value(model_id, .{}, &new_request.writer);
-        try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"value\":");
-        try std.json.Stringify.value(session_id, .{}, &new_request.writer);
-        if (manager.controller_api_key) |key| {
-            try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
-            try std.json.Stringify.value(key, .{}, &new_request.writer);
+        var session_request: Io.Writer.Allocating = .init(manager.allocator);
+        defer session_request.deinit();
+        try session_request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":\"session\",\"method\":");
+        try std.json.Stringify.value(if (native_session_id == null) "session/new" else "session/load", .{}, &session_request.writer);
+        try session_request.writer.writeAll(",\"params\":{");
+        if (native_session_id) |value| {
+            try session_request.writer.writeAll("\"sessionId\":");
+            try std.json.Stringify.value(value, .{}, &session_request.writer);
+            try session_request.writer.writeByte(',');
         }
-        try new_request.writer.writeAll("}]}]}}");
-        const created = try directFxRequest(manager.allocator, manager.io, &child, "new", new_request.writer.buffered());
+        try session_request.writer.writeAll("\"mcpServers\":[{\"name\":\"local-studio\",\"command\":");
+        try std.json.Stringify.value(executable, .{}, &session_request.writer);
+        try session_request.writer.writeAll(",\"args\":[\"mcp-bridge\"],\"env\":[{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"value\":");
+        try std.json.Stringify.value(manager.controller_origin, .{}, &session_request.writer);
+        try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
+        try std.json.Stringify.value(model_id, .{}, &session_request.writer);
+        try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"value\":");
+        try std.json.Stringify.value(session_id, .{}, &session_request.writer);
+        if (manager.controller_api_key) |key| {
+            try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
+            try std.json.Stringify.value(key, .{}, &session_request.writer);
+        }
+        try session_request.writer.writeAll("}]}]}}");
+        const created = try directFxRequest(manager.allocator, manager.io, &child, "session", session_request.writer.buffered());
         defer manager.allocator.free(created);
-        const native_id = try fxSessionId(manager.allocator, created);
+        const native_id = if (native_session_id) |value| try manager.allocator.dupe(u8, value) else try fxSessionId(manager.allocator, created);
         errdefer manager.allocator.free(native_id);
         const session = try manager.allocator.create(Session);
         errdefer manager.allocator.destroy(session);
@@ -684,6 +696,7 @@ pub const Manager = struct {
             .cwd = try manager.allocator.dupe(u8, cwd),
             .session_dir = session_dir,
             .child = child,
+            .event_seq = initial_event_seq,
         };
         errdefer {
             manager.allocator.free(session.id);
@@ -963,7 +976,7 @@ fn writeEvents(writer: *Io.Writer, session: *const Session, after: u64) !void {
         try writer.writeAll(",\"normalized\":");
         try harness_events.writeNormalized(session.allocator, writer, session.harness.name(), event.document);
         try writer.writeAll(",\"event\":");
-        try writer.writeAll(event.document);
+        try harness_events.writeCanonical(session.allocator, writer, session.harness.name(), event.document);
         try writer.writeAll(",\"native\":");
         try writer.writeAll(event.document);
         try writer.writeAll(",\"timestamp\":");

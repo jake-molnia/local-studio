@@ -132,6 +132,15 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\  PRIMARY KEY(session_id, sequence)
         \\);
         \\CREATE INDEX IF NOT EXISTS idx_agent_events_created ON agent_events(session_id, created_at);
+        \\CREATE TABLE IF NOT EXISTS agent_transcript_entries (
+        \\  ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+        \\  session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+        \\  source_key TEXT NOT NULL,
+        \\  document TEXT NOT NULL,
+        \\  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \\  UNIQUE(session_id, source_key)
+        \\);
+        \\CREATE INDEX IF NOT EXISTS idx_agent_transcript_session ON agent_transcript_entries(session_id, ordinal);
     );
     try ensureColumn(database, "harness_version", "ALTER TABLE agent_sessions ADD COLUMN harness_version TEXT");
     try ensureColumn(database, "capabilities_json", "ALTER TABLE agent_sessions ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'");
@@ -299,6 +308,42 @@ pub fn appendEvent(database: *sqlite.Database, session_id: []const u8, sequence:
     try statement.bindText(3, kind);
     try statement.bindText(4, document);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn appendTranscript(database: *sqlite.Database, session_id: []const u8, source_key: []const u8, document: []const u8) !void {
+    var statement = try database.prepare(
+        \\INSERT INTO agent_transcript_entries (session_id, source_key, document)
+        \\VALUES (?, ?, ?)
+        \\ON CONFLICT(session_id, source_key) DO NOTHING
+    );
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    try statement.bindText(2, source_key);
+    try statement.bindText(3, document);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn transcript(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !EventList {
+    var records: std.ArrayList(Event) = .empty;
+    errdefer {
+        for (records.items) |*record| record.deinit();
+        records.deinit(allocator);
+    }
+    var statement = try database.prepare(
+        "SELECT ordinal, source_key, document, created_at FROM agent_transcript_entries WHERE session_id = ? ORDER BY ordinal LIMIT 10000",
+    );
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    while (try statement.step() == .row) {
+        try records.append(allocator, .{
+            .allocator = allocator,
+            .sequence = @intCast(statement.columnInt(0)),
+            .kind = try requiredColumn(allocator, &statement, 1),
+            .document = try requiredColumn(allocator, &statement, 2),
+            .created_at = try requiredColumn(allocator, &statement, 3),
+        });
+    }
+    return .{ .allocator = allocator, .records = try records.toOwnedSlice(allocator) };
 }
 
 pub fn eventsAfter(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8, after: u64) !EventList {

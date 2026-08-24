@@ -65,7 +65,7 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
     return output.toOwnedSlice();
 }
 
-pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, project_path: ?[]const u8, archived_only: bool, include_archived: bool, limit: ?usize) ![]u8 {
+pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, project_path: ?[]const u8, project_id: ?[]const u8, archived_only: bool, include_archived: bool, limit: ?usize) ![]u8 {
     try database.lock(io);
     defer database.unlock(io);
     var sessions = try records.list(allocator, database);
@@ -78,9 +78,12 @@ pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
         const archived = std.mem.eql(u8, session.status, "archived");
         if (archived_only != archived and (archived_only or !include_archived)) continue;
         if (project_path) |expected| if (session.project_path == null or !std.mem.eql(u8, session.project_path.?, expected)) continue;
+        if (project_id) |expected| if (session.project_id == null or !std.mem.eql(u8, session.project_id.?, expected)) continue;
         if (limit) |maximum| if (count >= maximum) break;
         if (count > 0) try output.writer.writeByte(',');
-        try writeHistorySummary(&output.writer, &session);
+        const first_message = try firstUserMessage(allocator, database, session.id);
+        defer if (first_message) |value| allocator.free(value);
+        try writeHistorySummary(&output.writer, &session, first_message);
         count += 1;
     }
     try output.writer.writeAll("]}");
@@ -152,10 +155,10 @@ pub fn transcriptResponse(allocator: std.mem.Allocator, session: *const records.
     return output.toOwnedSlice();
 }
 
-fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session) !void {
+fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session, first_message: ?[]const u8) !void {
     const archived = std.mem.eql(u8, session.status, "archived");
     try writer.writeAll("{\"id\":");
-    try std.json.Stringify.value(session.native_session_id orelse session.id, .{}, writer);
+    try std.json.Stringify.value(if (std.mem.eql(u8, session.harness, "fx")) session.id else session.native_session_id orelse session.id, .{}, writer);
     try writer.writeAll(",\"filename\":\"\",\"cwd\":");
     try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
     try writer.writeAll(",\"startedAt\":");
@@ -165,7 +168,7 @@ fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session) !voi
     try writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"provider\":null,\"firstUserMessage\":");
-    try std.json.Stringify.value(session.id, .{}, writer);
+    if (first_message) |value| try std.json.Stringify.value(value, .{}, writer) else try std.json.Stringify.value(session.id, .{}, writer);
     try writer.print(",\"archived\":{},\"archivedAt\":", .{archived});
     if (archived) try std.json.Stringify.value(session.updated_at, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"parentSessionId\":null,\"subagentName\":null,\"projectId\":");
@@ -175,6 +178,28 @@ fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session) !voi
     try writer.writeAll(",\"projectPath\":");
     try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
     try writer.writeByte('}');
+}
+
+fn firstUserMessage(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?[]u8 {
+    var transcript = try records.transcript(allocator, database, session_id);
+    defer transcript.deinit();
+    for (transcript.records) |entry| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, entry.document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const event_type = optionalString(parsed.value.object, "type") orelse continue;
+        if (!std.mem.eql(u8, event_type, "message")) continue;
+        const message = parsed.value.object.get("message") orelse continue;
+        if (message != .object or !std.mem.eql(u8, optionalString(message.object, "role") orelse "", "user")) continue;
+        const content = message.object.get("content") orelse continue;
+        if (content != .array) continue;
+        for (content.array.items) |part| {
+            if (part != .object) continue;
+            const text = optionalString(part.object, "text") orelse continue;
+            return @as(?[]u8, try allocator.dupe(u8, text));
+        }
+    }
+    return null;
 }
 
 fn writeMetadata(writer: *Io.Writer, session: *const records.Session) !void {

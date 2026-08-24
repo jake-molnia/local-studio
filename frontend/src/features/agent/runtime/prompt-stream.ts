@@ -128,7 +128,7 @@ function appendOptimisticPrompt(
 ): void {
   deps.updateSession(context.sessionId, (session) => ({
     ...session,
-    cwd: session.cwd || deps.cwd,
+    cwd: session.harness === "fx" ? undefined : session.cwd || deps.cwd,
     modelId: session.modelId || deps.modelId,
     startedAt: session.startedAt ?? new Date().toISOString(),
     input: "",
@@ -165,9 +165,11 @@ function startPromptCommand(
       try: () => api.submitTurnCommand(promptTurnRequest(deps, context, args)),
       catch: (error) => ({ _tag: "SubmitFailed" as const, error }),
     });
+    const canonicalSessionId =
+      result.piSessionId || (result.harness === "fx" ? result.runtimeSessionId : null);
     deps.updateSession(context.sessionId, (session) => ({
       ...session,
-      piSessionId: result.piSessionId || session.piSessionId,
+      piSessionId: canonicalSessionId || session.piSessionId,
       contextUsage: api.runtimeContextUsage(result.status, session.contextUsage),
       status: "running",
       activeAssistantId: session.activeAssistantId ?? context.assistantId,
@@ -177,7 +179,7 @@ function startPromptCommand(
       context.assistantId,
       result.status?.eventSeq,
     );
-    if (result.piSessionId) deps.onPiSessionIdChange?.(result.piSessionId);
+    if (canonicalSessionId) deps.onPiSessionIdChange?.(canonicalSessionId);
   }).pipe(
     Effect.catch(({ error }) =>
       Effect.gen(function* () {
@@ -234,12 +236,16 @@ function promptTurnRequest(
   return {
     sessionId: context.runtime,
     harness: context.selected.harness,
+    projectId: context.selected.projectId,
     modelId: deps.modelId,
     thinkingLevel: deps.thinkingLevel,
     toolAccess: deps.toolAccess,
     message: args.prompt,
     images: args.images,
-    cwd: deps.cwd.trim() || undefined,
+    cwd:
+      context.selected.harness === "fx"
+        ? undefined
+        : (context.selected.cwd || deps.cwd).trim() || undefined,
     piSessionId:
       deps.tabsRef.current.find((tab) => tab.id === context.sessionId)?.piSessionId ??
       context.selected.piSessionId,

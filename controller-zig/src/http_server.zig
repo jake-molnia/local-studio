@@ -742,17 +742,19 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/api/agent/sessions")) {
         if (request.head.method == .DELETE) return respondDownloadError(request, .method_not_allowed, "Session deletion is disabled. Archive sessions from the UI instead.");
+        const project_id = try queryParameter(allocator, request.head.target, "projectId");
+        defer if (project_id) |value| allocator.free(value);
         const cwd = try queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
-        const canonical = agent_projects.resolveAllowedPath(allocator, io, environment, cwd orelse return respondSessionFailure(request, error.SessionCwdRequired)) catch |failure| return respondSessionFailure(request, failure);
-        defer allocator.free(canonical);
-        const response = agent_sessions.historyPayload(allocator, io, database, canonical, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        const canonical = if (project_id == null) agent_projects.resolveAllowedPath(allocator, io, environment, cwd orelse return respondSessionFailure(request, error.SessionCwdRequired)) catch |failure| return respondSessionFailure(request, failure) else null;
+        defer if (canonical) |value| allocator.free(value);
+        const response = agent_sessions.historyPayload(allocator, io, database, canonical, project_id, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/sessions/all")) {
-        const response = agent_sessions.historyPayload(allocator, io, database, null, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        const response = agent_sessions.historyPayload(allocator, io, database, null, null, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;

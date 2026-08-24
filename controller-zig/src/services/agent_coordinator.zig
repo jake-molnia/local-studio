@@ -90,8 +90,15 @@ pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.D
         if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
         try output.writer.writeAll(",\"modelId\":");
         if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+        const active = std.mem.eql(u8, session.status, "queued") or std.mem.eql(u8, session.status, "running");
         try output.writer.writeAll(",\"status\":{\"phase\":");
         try std.json.Stringify.value(session.status, .{}, &output.writer);
+        try output.writer.writeAll(",\"active\":");
+        try output.writer.writeAll(if (active) "true" else "false");
+        try output.writer.writeAll(",\"running\":");
+        try output.writer.writeAll(if (active) "true" else "false");
+        try output.writer.writeAll(",\"harness\":");
+        try std.json.Stringify.value(session.harness, .{}, &output.writer);
         try output.writer.print(",\"eventSeq\":{d}}},\"sharingPolicy\":", .{session.event_cursor});
         try std.json.Stringify.value(session.sharing_policy, .{}, &output.writer);
         try output.writer.writeAll(",\"updatedAt\":");
@@ -112,7 +119,6 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const session_id = optionalString(object, "sessionId") orelse "default";
     const model_id = optionalString(object, "modelId") orelse return error.ModelIdRequired;
     const message = optionalString(object, "message") orelse return error.MessageRequired;
-    _ = message;
     const project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
     const native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
@@ -153,7 +159,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     try lockedEnqueue(io, database, command_id[0..], session_id, command_kind, routed_document);
 
     const payload = if (mode == .standalone)
-        harness.turnPayload(routed_document)
+        harness.turnPayloadAt(routed_document, if (existing) |session| session.event_cursor else 0, if (existing) |session| session.native_session_id else null)
     else
         remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", routed_document);
     const response = payload catch |failure| {
@@ -163,6 +169,13 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     };
     errdefer allocator.free(response);
     try lockedFinish(io, database, command_id[0..], "accepted", null);
+    if (std.mem.eql(u8, command_kind, "prompt")) {
+        const transcript = try userTranscriptDocument(allocator, message);
+        defer allocator.free(transcript);
+        const source_key = try std.fmt.allocPrint(allocator, "command:{s}", .{command_id[0..]});
+        defer allocator.free(source_key);
+        try lockedTranscript(io, database, session_id, source_key, transcript);
+    }
     try ingestRuntimeDocument(allocator, io, database, session_id, response);
     return response;
 }
@@ -197,6 +210,7 @@ pub fn transcriptPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode
     if (since) |entry_id| if (!validEntryId(entry_id)) return error.InvalidTranscriptCursor;
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
     defer session.deinit();
+    if (std.mem.eql(u8, session.harness, "fx")) return storedTranscriptPayload(allocator, io, database, &session);
     if (mode == .standalone) return harness.transcriptPayload(session_id, session.native_session_id, since);
     const native_session_id = session.native_session_id orelse return error.NativeSessionIdRequired;
     if (!harness_session_id.validNative(native_session_id)) return error.InvalidNativeSessionId;
@@ -346,7 +360,9 @@ fn writeStatusEvent(writer: *Io.Writer, session: *const records.Session, phase: 
     try writer.writeAll(",\"nativeSessionId\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"piSessionId\":");
-    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    if (std.mem.eql(u8, session.harness, "pi")) {
+        if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    } else try writer.writeAll("null");
     try writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.print(",\"eventSeq\":{d}}}}}\n\n", .{session.event_cursor});
@@ -396,6 +412,15 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
         defer allocator.free(serialized);
         const session_harness = optionalString(status.object, "harness") orelse "pi";
         try records.appendEvent(database, session_id, sequence, session_harness, serialized);
+        if (event.object.get("event")) |native| {
+            const native_document = try serialize(allocator, native);
+            defer allocator.free(native_document);
+            const canonical = try harness_events.canonicalDocument(allocator, session_harness, native_document);
+            defer allocator.free(canonical);
+            const source_key = try std.fmt.allocPrint(allocator, "event:{d}", .{sequence});
+            defer allocator.free(source_key);
+            try records.appendTranscript(database, session_id, source_key, canonical);
+        }
     };
     try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
     try records.updateDriver(database, session_id, harness_version, capabilities_json);
@@ -420,7 +445,9 @@ fn storedStatus(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database
     try output.writer.writeAll(",\"nativeSessionId\":");
     if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"piSessionId\":");
-    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    if (std.mem.eql(u8, session.harness, "pi")) {
+        if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    } else try output.writer.writeAll("null");
     try output.writer.print(",\"modelId\":", .{});
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.print(",\"eventSeq\":{d},\"phase\":", .{session.event_cursor});
@@ -459,6 +486,43 @@ fn lockedEnqueue(io: Io, database: *sqlite.Database, command_id: []const u8, ses
     try database.lock(io);
     defer database.unlock(io);
     try records.enqueueCommand(database, command_id, session_id, kind, document);
+}
+
+fn lockedTranscript(io: Io, database: *sqlite.Database, session_id: []const u8, source_key: []const u8, document: []const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try records.appendTranscript(database, session_id, source_key, document);
+}
+
+fn storedTranscriptPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session: *const records.Session) ![]u8 {
+    try database.lock(io);
+    defer database.unlock(io);
+    var entries = try records.transcript(allocator, database, session.id);
+    defer entries.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"sessionId\":");
+    try std.json.Stringify.value(session.id, .{}, &output.writer);
+    try output.writer.writeAll(",\"harness\":");
+    try std.json.Stringify.value(session.harness, .{}, &output.writer);
+    try output.writer.writeAll(",\"nativeSessionId\":");
+    if (session.native_session_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"entries\":[");
+    for (entries.records, 0..) |entry, index| {
+        if (index > 0) try output.writer.writeByte(',');
+        try output.writer.writeAll(entry.document);
+    }
+    try output.writer.writeAll("],\"leafId\":null}");
+    return output.toOwnedSlice();
+}
+
+fn userTranscriptDocument(allocator: std.mem.Allocator, message: []const u8) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":");
+    try std.json.Stringify.value(message, .{}, &output.writer);
+    try output.writer.writeAll("}]}}");
+    return output.toOwnedSlice();
 }
 
 fn lockedFinish(io: Io, database: *sqlite.Database, command_id: []const u8, state: []const u8, failure: ?[]const u8) !void {

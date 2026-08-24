@@ -262,7 +262,7 @@ export function createSessionRuntimeController(): SessionRuntimeController {
 
   const applyPiPayload = (
     sessionId: SessionId,
-    payload: Extract<RuntimeEventPayload, { type: "pi" }>,
+    payload: Exclude<RuntimeEventPayload, { type: "status" }>,
   ) => {
     const eventId = piSessionIdFromEvent(payload.event);
     if (!acceptSeq(sessionId, payload.seq)) return;

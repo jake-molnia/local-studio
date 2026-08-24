@@ -14,6 +14,7 @@ const RuntimeLoggedEventSchema = Schema.Struct({
 });
 
 export const RuntimeStatusSchema = Schema.Struct({
+  phase: Schema.optional(Schema.String),
   active: Schema.optional(Schema.Boolean),
   running: Schema.optional(Schema.Boolean),
   harness: Schema.optional(Schema.String),
@@ -35,8 +36,8 @@ const RuntimeStatusEventSchema = Schema.Struct({
   session: Schema.optional(RuntimeStatusSchema),
 });
 
-const RuntimePiEventSchema = Schema.Struct({
-  type: Schema.Literal("pi"),
+const RuntimeHarnessEventSchema = Schema.Struct({
+  type: Schema.Union([Schema.Literal("pi"), Schema.Literal("harness")]),
   harness: Schema.optional(Schema.String),
   seq: Schema.optional(Schema.Number),
   normalized: Schema.optional(
@@ -53,7 +54,10 @@ const RuntimePiEventSchema = Schema.Struct({
   native: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
 
-const RuntimeEventPayloadSchema = Schema.Union([RuntimeStatusEventSchema, RuntimePiEventSchema]);
+const RuntimeEventPayloadSchema = Schema.Union([
+  RuntimeStatusEventSchema,
+  RuntimeHarnessEventSchema,
+]);
 
 export type RuntimeEventPayload = Schema.Schema.Type<typeof RuntimeEventPayloadSchema>;
 

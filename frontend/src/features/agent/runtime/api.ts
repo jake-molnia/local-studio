@@ -180,12 +180,13 @@ export type LoadCanonicalSessionOptions = { tail?: number; before?: number };
 
 export function loadCanonicalSession(
   piSessionId: string,
-  cwd: string,
+  cwd?: string,
   options: LoadCanonicalSessionOptions = {},
 ): Promise<CanonicalSessionResult> {
   return Effect.runPromise(
     Effect.gen(function* () {
-      const params = new URLSearchParams({ cwd });
+      const params = new URLSearchParams();
+      if (cwd) params.set("cwd", cwd);
       const tail =
         options.before === undefined ? (options.tail ?? DEFAULT_SESSION_TAIL) : undefined;
       if (tail !== undefined) params.set("tail", String(tail));
@@ -250,6 +251,7 @@ export function compactSession(args: CompactSessionArgs): Promise<CompactSession
 export type SubmitTurnArgs = {
   sessionId: string;
   harness?: string;
+  projectId?: string;
   modelId: string;
   thinkingLevel?: import("@/features/agent/contracts").AgentThinkingLevel;
   toolAccess: AgentToolAccess;
