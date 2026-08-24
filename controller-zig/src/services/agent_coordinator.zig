@@ -124,7 +124,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     defer if (existing) |*session| session.deinit();
     const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
-    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi")) return error.HarnessDriverUnavailable;
+    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head) try harness_nodes.select(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
@@ -135,7 +135,10 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     try lockedSave(allocator, io, database, .{
         .id = session_id,
         .harness = requested_harness,
-        .harness_version = if (mode == .standalone) harness.piVersion() else target.?.harness_version orelse if (existing) |session| session.harness_version else null,
+        .harness_version = if (mode == .standalone)
+            if (std.mem.eql(u8, requested_harness, "fx")) "0.0.0-local-studio" else harness.piVersion()
+        else
+            target.?.harness_version orelse if (existing) |session| session.harness_version else null,
         .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else if (std.mem.eql(u8, requested_harness, "pi")) "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]" else "[]",
         .node_id = node_id,
         .native_session_id = native_session_id,

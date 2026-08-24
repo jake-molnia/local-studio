@@ -233,6 +233,7 @@ function promptTurnRequest(
 ): api.SubmitTurnArgs {
   return {
     sessionId: context.runtime,
+    harness: context.selected.harness,
     modelId: deps.modelId,
     thinkingLevel: deps.thinkingLevel,
     toolAccess: deps.toolAccess,

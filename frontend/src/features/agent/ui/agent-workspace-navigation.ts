@@ -4,7 +4,7 @@ import {
 } from "@/features/agent/ui/projects-nav/helpers";
 import type { WorkspaceDispatch } from "@/features/agent/workspace/effects";
 import type { ProjectsContextValue } from "@/features/agent/projects/context";
-import type { Project } from "@/features/agent/projects/types";
+import { isChatsProject, type Project } from "@/features/agent/projects/types";
 import { makeFreshTab, newPaneId } from "@/features/agent/messages/helpers";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import type { WorkspaceAction } from "@/features/agent/workspace/types";
@@ -58,8 +58,9 @@ export function workspaceNavigationAction(
   if (!key) return null;
   const tab = {
     ...makeFreshTab(),
+    harness: isChatsProject(project) ? ("fx" as const) : undefined,
     projectId: project?.id,
-    cwd: project?.path,
+    cwd: isChatsProject(project) ? undefined : project?.path,
   };
   return {
     type: "urlNavRequested",

@@ -226,6 +226,7 @@ export function sessionMetaForPersistence(
   const base: PersistedSessionMeta = {
     id: tab.id,
     piSessionId: tab.piSessionId,
+    harness: tab.harness,
     projectId: tab.projectId,
     cwd: tab.cwd,
     modelId: tab.modelId,

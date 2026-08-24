@@ -63,7 +63,7 @@ import { respondExtensionUi } from "@/features/agent/runtime/api";
 import { useSessionEngine } from "@/features/agent/runtime/engine";
 import type { Session, UpdateSession } from "@/features/agent/runtime/types";
 import { useTools } from "@/features/agent/tools/context";
-import type { GitSummary, Project } from "@/features/agent/projects/types";
+import { isChatsProject, type GitSummary, type Project } from "@/features/agent/projects/types";
 import type { BrowserBackend } from "@/features/agent/tools/types";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import {
@@ -478,8 +478,9 @@ export function ChatPane({
       if (!activeTab || activeTab.messages.length > 0) return;
       updateTab(activeTab.id, (session) => ({
         ...session,
+        harness: isChatsProject(project) ? "fx" : undefined,
         projectId: project.id,
-        cwd: project.path,
+        cwd: isChatsProject(project) ? undefined : project.path,
       }));
     },
     [activeTab, updateTab],

@@ -36,6 +36,7 @@ export type Session = {
   // Pi session UUID (null = unstarted, will be assigned by pi when the first
   // turn runs).
   piSessionId: string | null;
+  harness?: "fx" | "pi";
   projectId?: string;
   cwd?: string;
   modelId?: string;
