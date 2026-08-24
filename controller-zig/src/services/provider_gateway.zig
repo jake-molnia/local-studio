@@ -10,8 +10,11 @@ pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, p
         .chat_completions => .chat_completions,
         .responses => .responses,
     };
-    if (upstream_protocol == public_protocol) return error.TranslationNotRequired;
-    const translated = try openai_protocol.request(allocator, public_protocol, upstream_protocol, payload);
+    return serve(allocator, client, provider.base_url, provider.api_key, public_protocol, upstream_protocol, payload, requested_stream, request);
+}
+
+pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, base_url: []const u8, api_key: []const u8, public_protocol: openai_protocol.Protocol, upstream_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !void {
+    const translated = if (upstream_protocol == public_protocol) try allocator.dupe(u8, payload) else try openai_protocol.request(allocator, public_protocol, upstream_protocol, payload);
     defer allocator.free(translated);
     const upstream_payload = try forceNonStreaming(allocator, translated);
     defer allocator.free(upstream_payload);
@@ -19,10 +22,10 @@ pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, p
         .chat_completions => "v1/chat/completions",
         .responses => "v1/responses",
     };
-    const base = std.mem.trimEnd(u8, std.mem.trim(u8, provider.base_url, " \t\r\n"), "/");
+    const base = std.mem.trimEnd(u8, std.mem.trim(u8, base_url, " \t\r\n"), "/");
     const url = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, path });
     defer allocator.free(url);
-    const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{provider.api_key});
+    const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_key});
     defer allocator.free(authorization);
     const storage = try allocator.alloc(u8, max_response_bytes);
     defer allocator.free(storage);
@@ -49,7 +52,7 @@ pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, p
         });
         return;
     }
-    const converted = try openai_protocol.response(allocator, upstream_protocol, public_protocol, body.buffered());
+    const converted = if (upstream_protocol == public_protocol) try allocator.dupe(u8, body.buffered()) else try openai_protocol.response(allocator, upstream_protocol, public_protocol, body.buffered());
     defer allocator.free(converted);
     if (!requested_stream) {
         try request.respond(converted, .{

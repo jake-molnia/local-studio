@@ -34,6 +34,7 @@ const provider_gateway = @import("services/provider_gateway.zig");
 const openai_protocol = @import("services/openai_protocol.zig");
 const head_providers = @import("services/head_providers.zig");
 const codex_gateway = @import("services/codex_gateway.zig");
+const cursor_gateway = @import("services/cursor_gateway.zig");
 const harness_runtime = @import("services/harness_runtime.zig");
 const agent_coordinator = @import("services/agent_coordinator.zig");
 const agent_sessions = @import("services/agent_sessions.zig");
@@ -115,7 +116,7 @@ pub const HttpServer = struct {
         errdefer studio.deinit();
         var compute = try compute_lifecycle.Manager.init(allocator, io, config.data_dir);
         errdefer compute.deinit();
-        var head_provider_state = try head_providers.State.init(allocator, io, config.data_dir);
+        var head_provider_state = try head_providers.State.init(allocator, io, &config);
         errdefer head_provider_state.deinit();
         var oauth = try agent_oauth.State.init(allocator, io, config.data_dir, config.environment);
         errdefer oauth.deinit();
@@ -327,9 +328,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId/respond") and request.head.method == .POST) {
+        const job_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/respond");
+        defer allocator.free(job_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        return respondDownloadError(request, .conflict, "No matching model provider login prompt");
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        defer parsed.deinit();
+        const prompt_id = if (parsed.value == .object) parsed.value.object.get("promptId") orelse return respondDownloadError(request, .bad_request, "promptId is required") else return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        const value = if (parsed.value == .object) parsed.value.object.get("value") orelse return respondDownloadError(request, .bad_request, "value is required") else unreachable;
+        if (prompt_id != .integer or prompt_id.integer < 0 or value != .string) return respondDownloadError(request, .bad_request, "Invalid provider login response");
+        if (!(try head_provider_state.respondAny(job_id, @intCast(prompt_id.integer), value.string))) return respondDownloadError(request, .conflict, "No matching model provider login prompt");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/:providerId/logout") and request.head.method == .POST) {
         const provider_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/logout");
@@ -1435,9 +1445,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId/respond") and request.head.method == .POST) {
+        const parameters = try modelProviderJobParameters(allocator, request.head.target, "/respond");
+        defer parameters.deinit(allocator);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        return respondDownloadError(request, .bad_request, "No matching model provider login prompt");
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        defer parsed.deinit();
+        const prompt_id = if (parsed.value == .object) parsed.value.object.get("promptId") orelse return respondDownloadError(request, .bad_request, "promptId is required") else return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        const value = if (parsed.value == .object) parsed.value.object.get("value") orelse return respondDownloadError(request, .bad_request, "value is required") else unreachable;
+        if (prompt_id != .integer or prompt_id.integer < 0 or value != .string) return respondDownloadError(request, .bad_request, "Invalid provider login response");
+        if (!(try head_provider_state.respond(parameters.provider_id, parameters.job_id, @intCast(prompt_id.integer), value.string))) return respondDownloadError(request, .conflict, "No matching model provider login prompt");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/logout") and request.head.method == .POST) {
         const provider_id = try pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/logout");
@@ -2914,6 +2933,29 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
         return false;
     }
+    const openrouter_prefix = "openrouter/";
+    if (std.mem.startsWith(u8, model_id, openrouter_prefix)) {
+        const upstream_model = model_id[openrouter_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "openrouter", upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
+        var credential = (try head_provider_state.credential(client, "openrouter")) orelse return respondDownloadError(request, .unauthorized, "OpenRouter is not connected on this Head");
+        defer credential.deinit();
+        const rewritten = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
+        defer allocator.free(rewritten);
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, public_protocol, .chat_completions, rewritten, requested_stream, request) catch return false;
+        return false;
+    }
+    const cursor_prefix = "cursor/";
+    if (std.mem.startsWith(u8, model_id, cursor_prefix)) {
+        const upstream_model = model_id[cursor_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
+        if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Head");
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        cursor_gateway.serve(allocator, io, configuration, public_protocol, upstream_model, inference_body, requested_stream, request) catch return false;
+        return false;
+    }
 
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
     defer snapshot.deinit();
@@ -3034,6 +3076,27 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, inference_body, requested_stream, request) catch return false;
         return false;
     }
+    const openrouter_prefix = "openrouter/";
+    if (std.mem.startsWith(u8, requested_provider_model, openrouter_prefix)) {
+        const upstream_model = requested_provider_model[openrouter_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "openrouter", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
+        var credential = (try head_provider_state.credential(client, "openrouter")) orelse return respondDownloadError(request, .unauthorized, "OpenRouter is not connected on this Standalone node");
+        defer credential.deinit();
+        const rewritten = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
+        defer allocator.free(rewritten);
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .chat_completions, .chat_completions, rewritten, requested_stream, request) catch return false;
+        return false;
+    }
+    const cursor_prefix = "cursor/";
+    if (std.mem.startsWith(u8, requested_provider_model, cursor_prefix)) {
+        const upstream_model = requested_provider_model[cursor_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
+        if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Standalone node");
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        cursor_gateway.serve(allocator, io, configuration, .chat_completions, upstream_model, inference_body, requested_stream, request) catch return false;
+        return false;
+    }
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
     defer snapshot.deinit();
     if (provider_routing.resolve(snapshot.providers, requested_provider_model)) |provider_route| {
@@ -3130,6 +3193,27 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch return false;
+        return false;
+    }
+    const openrouter_prefix = "openrouter/";
+    if (protocol == .responses and std.mem.startsWith(u8, requested_model, openrouter_prefix)) {
+        const upstream_model = requested_model[openrouter_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "openrouter", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
+        var credential = (try head_provider_state.credential(client, "openrouter")) orelse return respondDownloadError(request, .unauthorized, "OpenRouter is not connected on this Standalone node");
+        defer credential.deinit();
+        const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
+        defer allocator.free(rewritten_provider);
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .responses, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+        return false;
+    }
+    const cursor_prefix = "cursor/";
+    if (protocol == .responses and std.mem.startsWith(u8, requested_model, cursor_prefix)) {
+        const upstream_model = requested_model[cursor_prefix.len..];
+        if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
+        if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Standalone node");
+        const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        cursor_gateway.serve(allocator, io, configuration, .responses, upstream_model, inference_body, requested_stream, request) catch return false;
         return false;
     }
 
