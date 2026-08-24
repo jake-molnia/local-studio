@@ -279,6 +279,52 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers") and request.head.method == .GET) {
+        const response = try head_provider_state.listPayload();
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers/:providerId/login") and request.head.method == .POST) {
+        const provider_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/login");
+        defer allocator.free(provider_id);
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return respondDownloadError(request, .bad_request, "Invalid JSON body");
+        defer parsed.deinit();
+        const auth_type = if (parsed.value == .object) if (parsed.value.object.get("type")) |value| if (value == .string) value.string else "" else "" else "";
+        const response = head_provider_state.startLogin(client, provider_id, auth_type) catch |failure| return respondHeadProviderFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId") and request.head.method == .GET) {
+        const job_id = try pathParameter(allocator, request.head.target, "/api/agent/providers/login/");
+        defer allocator.free(job_id);
+        const response = try head_provider_state.jobPayloadAny(job_id, queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId/cancel") and request.head.method == .POST) {
+        const job_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/cancel");
+        defer allocator.free(job_id);
+        if (!(try head_provider_state.cancelAny(job_id))) return respondDownloadError(request, .not_found, "Model provider login job not found");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId/respond") and request.head.method == .POST) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        return respondDownloadError(request, .conflict, "No matching model provider login prompt");
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/providers/:providerId/logout") and request.head.method == .POST) {
+        const provider_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/logout");
+        defer allocator.free(provider_id);
+        if (!(try head_provider_state.logout(provider_id))) return respondDownloadError(request, .not_found, "Head model provider not found");
+        try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/head-connection")) {
         const response = switch (request.head.method) {
             .GET => head_connection.payload(allocator, io, configuration.data_dir),

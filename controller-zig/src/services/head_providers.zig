@@ -133,6 +133,17 @@ pub const State = struct {
         defer state.mutex.unlock(state.io);
         const job = state.jobs.get(job_id) orelse return null;
         if (!std.mem.eql(u8, job.provider_id, provider_id)) return null;
+        return @as(?[]u8, try state.writeJobPayload(job, after));
+    }
+
+    pub fn jobPayloadAny(state: *State, job_id: []const u8, after: u64) !?[]u8 {
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        const job = state.jobs.get(job_id) orelse return null;
+        return @as(?[]u8, try state.writeJobPayload(job, after));
+    }
+
+    fn writeJobPayload(state: *State, job: *const Job, after: u64) ![]u8 {
         var output: Io.Writer.Allocating = .init(state.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"jobId\":");
@@ -158,7 +169,7 @@ pub const State = struct {
             wrote = true;
         }
         try output.writer.writeAll("]}");
-        return @as(?[]u8, try output.toOwnedSlice());
+        return output.toOwnedSlice();
     }
 
     pub fn cancel(state: *State, provider_id: []const u8, job_id: []const u8) !bool {
@@ -166,6 +177,15 @@ pub const State = struct {
         defer state.mutex.unlock(state.io);
         const job = state.jobs.get(job_id) orelse return false;
         if (!std.mem.eql(u8, job.provider_id, provider_id)) return false;
+        job.cancelled.store(true, .release);
+        if (job.status == .running) job.status = .cancelled;
+        return true;
+    }
+
+    pub fn cancelAny(state: *State, job_id: []const u8) !bool {
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        const job = state.jobs.get(job_id) orelse return false;
         job.cancelled.store(true, .release);
         if (job.status == .running) job.status = .cancelled;
         return true;
