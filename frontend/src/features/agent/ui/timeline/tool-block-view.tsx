@@ -35,6 +35,8 @@ import {
   parseDiffPreview,
   type DiffPreviewLine,
 } from "@/features/agent/ui/timeline/diff-preview-model";
+import { parseUnifiedDiff } from "@/features/agent/ui/git-diff-panel-model";
+import { PierreInlineDiff } from "@/features/agent/ui/git-diff-panel-diff-view";
 
 const ToolPreviewHeightContext = createContext<PreviewHeight>("md");
 
@@ -283,6 +285,7 @@ const DIFF_MARKER_STYLES: Record<DiffPreviewLine["kind"], string> = {
 function DiffPreviewSource({ body, filePath }: { body: string; filePath?: string | null }) {
   const height = useToolPreviewHeight();
   const preview = useMemo(() => parseDiffPreview(body), [body]);
+  const pierreFiles = useMemo(() => parseUnifiedDiff(body), [body]);
   const language = detectLang(filePath);
   const highlightedLines = useMemo(
     () =>
@@ -294,6 +297,15 @@ function DiffPreviewSource({ body, filePath }: { body: string; filePath?: string
         : null,
     [language, preview.lines],
   );
+  if (pierreFiles.length > 0) {
+    return (
+      <div className="overflow-hidden rounded-md border border-(--border) bg-(--color-input)">
+        <PreviewScroll height={height} stickToBottom={false}>
+          <PierreInlineDiff files={pierreFiles} />
+        </PreviewScroll>
+      </div>
+    );
+  }
   return (
     <div className="overflow-hidden rounded-md border border-(--border) bg-(--color-input)">
       <div className="flex h-7 items-center justify-between border-b border-(--separator) px-3 text-[length:var(--fs-xs)]">

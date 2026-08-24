@@ -1,6 +1,6 @@
 "use client";
 
-import { CodeView } from "@pierre/diffs/react";
+import { CodeView, FileDiff } from "@pierre/diffs/react";
 import type { CodeViewDiffItem } from "@pierre/diffs";
 import { useAppStore } from "@/store";
 import { THEME_BY_ID, type ThemeId } from "@/lib/themes";
@@ -107,6 +107,28 @@ export function DiffFileList({
       />
     </div>
   );
+}
+
+export function PierreInlineDiff({ files }: { files: CodeViewDiffItem[] }) {
+  const themeId = useAppStore((state) => state.themeId);
+  const resolvedThemeType = themeType(themeId);
+
+  return files.map(({ id, fileDiff }) => (
+    <FileDiff
+      key={id}
+      fileDiff={fileDiff}
+      className="block min-w-0"
+      options={{
+        collapsed: false,
+        diffStyle: "unified",
+        lineDiffType: "none",
+        overflow: "wrap",
+        theme: { dark: "github-dark", light: "github-light" },
+        themeType: resolvedThemeType,
+        unsafeCSS: DIFF_SURFACE_CSS,
+      }}
+    />
+  ));
 }
 
 function DiffModeButton({
