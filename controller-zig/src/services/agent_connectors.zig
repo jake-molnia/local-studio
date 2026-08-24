@@ -174,10 +174,10 @@ pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite
     try args.append(.{ .string = "@modelcontextprotocol/server-github@2025.4.8" });
     try object.put(arena, "args", .{ .array = args });
     try object.put(arena, "protocolEra", .{ .string = "legacy" });
-    var auth: std.json.ObjectMap = .init(arena);
-    try auth.put("type", .{ .string = "oauth" });
-    try auth.put("provider", .{ .string = "github" });
-    try auth.put("account", .{ .string = account orelse "github" });
+    var auth: std.json.ObjectMap = .empty;
+    try auth.put(arena, "type", .{ .string = "oauth" });
+    try auth.put(arena, "provider", .{ .string = "github" });
+    try auth.put(arena, "account", .{ .string = account orelse "github" });
     try object.put(arena, "auth", .{ .object = auth });
     const enabled = booleanField(object.*, "enabled") orelse false;
     try object.put(arena, "enabled", .{ .bool = enabled });
