@@ -75,7 +75,9 @@ export function resolveDataDir(): string {
 
   cachedDataDir = dir;
   cachedDataDirEnv = envDir;
-  migrateLegacySettings(dir);
+  if (process.env.LOCAL_STUDIO_DISABLE_LEGACY_SETTINGS_MIGRATION !== "1") {
+    migrateLegacySettings(dir);
+  }
   return dir;
 }
 

@@ -146,12 +146,13 @@ devenv up
 ```
 
 The head node is available independently on every supported platform. On macOS,
-the agent runtime, frontend, and Electron processes can also be managed
+the local node, frontend, and Electron processes can also be managed
 independently:
 
 ```bash
 devenv up head-node
 devenv up agent-runtime
+devenv up local-node
 devenv up frontend
 devenv up electron
 ```
@@ -165,10 +166,13 @@ process after changing desktop main-process or preload code:
 devenv processes restart electron
 ```
 
-The isolated desktop development stack uses `127.0.0.1:8082` for the controller,
-`127.0.0.1:8081` for the agent runtime, and `127.0.0.1:3100` for the frontend. A
-single preflight checks every required port before any process starts, so an
-existing stack fails immediately instead of producing partial ready states.
+The isolated desktop development stack uses `127.0.0.1:8082` for the Zig Head,
+`127.0.0.1:8083` for the enrolled local Zig Worker, `127.0.0.1:8081` for the
+TypeScript agent runtime, and `127.0.0.1:3100` for the frontend. Electron reuses
+the local Worker and stores its Chromium profile under the worktree's devenv
+state directory. A single preflight checks every required port before any
+process starts, so an existing stack fails immediately instead of producing
+partial ready states.
 
 ## Agent runtime
 

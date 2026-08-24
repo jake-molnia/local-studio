@@ -64,6 +64,10 @@ function setBackendCookie(url: string): void {
 }
 
 export function getStoredBackendUrl(): string {
+  const configured = normalizeControllerUrl(
+    process.env.NEXT_PUBLIC_LOCAL_STUDIO_CONTROLLER_URL ?? "",
+  );
+  if (configured) return configured;
   if (typeof window === "undefined") return "";
   try {
     const stored = normalizeControllerUrl(

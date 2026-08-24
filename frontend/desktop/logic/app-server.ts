@@ -14,6 +14,15 @@ import {
   type AgentRuntimeHandle,
 } from "./agent-runtime-server";
 
+const DEFAULT_FRONTEND_PORT = 4783;
+const configuredControllerPort = Number(process.env.LOCAL_STUDIO_DESKTOP_CONTROLLER_PORT);
+const DEFAULT_AGENT_RUNTIME_PORT =
+  Number.isInteger(configuredControllerPort) &&
+  configuredControllerPort > 0 &&
+  configuredControllerPort <= 65_535
+    ? configuredControllerPort
+    : 8081;
+
 // The most recently forked embedded server. A single process-exit hook kills
 // whichever child is current — registering a fresh once("exit") per (re)start
 // leaked listeners on every frontend restart.
@@ -170,7 +179,7 @@ export async function startFrontendServer(
       url: DESKTOP_CONFIG.devServerUrl,
     };
     const agentRuntime = await startOrReuseAgentRuntime(
-      { frontendUrl: runtime.url, preferredPort: 8081 },
+      { frontendUrl: runtime.url, preferredPort: DEFAULT_AGENT_RUNTIME_PORT },
       options.agentRuntime,
     );
     return { agentRuntime, runtime };
@@ -201,10 +210,15 @@ export async function startFrontendServer(
     copyDirectory(publicDir, targetPublicDir);
   }
 
-  const port = await resolveStablePort(options.port ?? readPersistedPort());
+  const port = await resolveStablePort(
+    options.port ?? readPersistedPort() ?? DEFAULT_FRONTEND_PORT,
+  );
   persistPort(port);
   const url = `http://127.0.0.1:${port}`;
-  const agentRuntime = await startOrReuseAgentRuntime({ frontendUrl: url }, options.agentRuntime);
+  const agentRuntime = await startOrReuseAgentRuntime(
+    { frontendUrl: url, preferredPort: DEFAULT_AGENT_RUNTIME_PORT },
+    options.agentRuntime,
+  );
 
   log.info(`Starting embedded frontend server from ${serverScript} on ${url}`);
 
