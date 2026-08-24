@@ -3,15 +3,16 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   ChevronDown,
-  Cable,
   Cpu,
   FileIcon,
+  Info,
   Keyboard,
   type LucideIcon,
   Monitor,
   Paintbrush,
   ServerCog,
   Smartphone,
+  StatusIcon,
   UsageIcon,
 } from "@/ui/icon-registry";
 import {
@@ -24,6 +25,7 @@ import type { CompatibilityReport, ConfigData } from "@/lib/types";
 import type { ApiConnectionSettings, ConnectionStatus } from "./types";
 import { ApiConnectionSection } from "./api-connection-section";
 import { ArchivedChatsSettings, SetupChecksSettings } from "./agent-settings-sections";
+import { AppVersionSection } from "./app-version-section";
 import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
 import { EnginesSection } from "./engines-section";
@@ -39,6 +41,12 @@ import { ServerContent } from "@/features/logs/server-view";
 import { ErrorBox } from "@/ui";
 import { cx } from "@/ui/utils";
 import { legacySettingsHash } from "./settings-navigation";
+import {
+  LocalMachineStatus,
+  MachineControllerSettings,
+  MachineStatusSettings,
+  MachineSystemSettings,
+} from "./machine-settings-sections";
 interface SettingsViewProps {
   data: ConfigData | null;
   compatibilityReport: CompatibilityReport | null;
@@ -69,35 +77,6 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
     { label: "Application", terms: ["release", "updates", "desktop"] },
     { label: "Update channel", terms: ["stable", "nightly"] },
     { label: "Version", terms: ["build", "release", "web ui"] },
-    {
-      label: "Local controller",
-      terms: ["controller name", "controller url", "endpoint", "api key", "censor urls"],
-    },
-    { label: "Active connection check", terms: ["test", "probe", "save active"] },
-  ],
-  controller: [
-    { label: "Controller status", terms: ["server", "health", "running", "inference"] },
-    { label: "Server logs", terms: ["logs", "sessions", "runtime"] },
-    { label: "API docs", terms: ["openapi", "reference", "endpoints"] },
-  ],
-  system: [
-    { label: "Services & endpoints", terms: ["controller", "service", "health", "url"] },
-    { label: "Runtime engines", terms: ["vllm", "sglang", "llama", "engine"] },
-    { label: "Host", target: "Runtime engines", terms: ["runtime host"] },
-    { label: "GPU monitoring", target: "Runtime engines", terms: ["nvidia", "metrics"] },
-    { label: "GPU lease", target: "Runtime engines", terms: ["allocation", "reservation"] },
-    {
-      label: "Managed environments",
-      target: "Runtime engines",
-      terms: ["environment", "runtime"],
-    },
-    {
-      label: "Discovered runtimes",
-      target: "Runtime engines",
-      terms: ["runtime", "discovery"],
-    },
-    { label: "Machine details", terms: ["platform", "gpu", "storage", "hardware"] },
-    { label: "Compatibility", terms: ["requirements", "support"] },
   ],
   appearance: [
     { label: "Theme", terms: ["light", "dark", "system", "mode"] },
@@ -126,12 +105,6 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
     { label: "Font size", terms: ["terminal text", "pixels"] },
   ],
   archive: [{ label: "Archived chats", terms: ["hidden", "sessions", "restore", "tasks"] }],
-  setup: [
-    {
-      label: "First-time setup",
-      terms: ["preflight", "prerequisite", "controller connection", "requirements"],
-    },
-  ],
   usage: [
     {
       label: "Usage overview",
@@ -150,23 +123,9 @@ const SECTIONS: SettingsSectionDef[] = [
   [
     "connection",
     "General",
-    "Controller connections and API access.",
-    Cable,
-    "controller api endpoint url key connection version release update censor",
-  ],
-  [
-    "controller",
-    "Controller",
-    "Status, logs, and API documentation for the local controller.",
-    ServerCog,
-    "controller server health logs sessions api docs openapi status inference",
-  ],
-  [
-    "system",
-    "System",
-    "Engines, services, storage, and hardware.",
-    Cpu,
-    "engine vllm sglang llama runtime service hardware gpu storage cache environment host lease monitoring",
+    "Application version and updates.",
+    Info,
+    "application version release update channel desktop",
   ],
   [
     "appearance",
@@ -190,13 +149,6 @@ const SECTIONS: SettingsSectionDef[] = [
     "archived hidden chats tasks sessions restore delete",
   ],
   [
-    "setup",
-    "Setup",
-    "Local prerequisites and first-run checks.",
-    ServerCog,
-    "prerequisite check install first run local environment requirements",
-  ],
-  [
     "usage",
     "Usage",
     "Inference and session usage across the active controller.",
@@ -217,17 +169,18 @@ const normalizeSectionId = (value: string): SettingsSectionId | null => {
   if (isSectionId(value)) return value;
   if (value === "machines") return "machines";
   if (value === "desktop") return "terminal";
-  if (value === "engines" || value === "services") return "system";
   return null;
 };
 
-type MachineView = "logs";
+type MachineView = "status" | "controller" | "system" | "logs";
 
 const machineSectionId = (nodeId: string, view: MachineView): string => `machine:${nodeId}:${view}`;
 
 const machineViewFromSection = (section: string): MachineView | null => {
   const view = section.split(":").at(-1);
-  return view === "logs" ? view : null;
+  return view === "status" || view === "controller" || view === "system" || view === "logs"
+    ? view
+    : null;
 };
 
 const machineNodeIdFromSection = (section: string): string | null => {
@@ -247,29 +200,42 @@ const machineTargetKey = (target: LogsTarget): string =>
       (target.kind === "worker" ? target.workerId : "");
 
 const machineViewLabel: Record<MachineView, string> = {
+  status: "Status",
+  controller: "Controller",
+  system: "System",
   logs: "Logs",
 };
 
 const machineViewIcon: Record<MachineView, ReactNode> = {
+  status: <StatusIcon className="h-3 w-3" />,
+  controller: <ServerCog className="h-3 w-3" />,
+  system: <Cpu className="h-3 w-3" />,
   logs: <FileIcon className="h-3 w-3" />,
 };
 const MACHINES_SECTION: SettingsSectionDef = {
   id: "machines",
   label: "All machines",
-  description: "Configure the machines available to this workspace.",
+  description: "Configure machines, controller connections, and deployment.",
   icon: <Monitor className="h-3.5 w-3.5" />,
-  searchTerms: ["machines", "hardware", "compute", "gpu"],
+  searchTerms: ["machines", "hardware", "compute", "gpu", "controller", "endpoint", "deploy"],
+  settings: [
+    {
+      label: "Controller connections",
+      terms: ["controller name", "controller url", "endpoint", "api key", "censor urls"],
+    },
+    { label: "Active connection check", terms: ["test", "probe", "save active"] },
+  ],
 };
 
-type MachineTargets = { logs: LogsTarget };
+type MachineTargets = { logs?: LogsTarget };
 
 const machineTargetsFor = (
   node: { id: string; role: string },
   localNodeId: string,
   headConnection: ReturnType<typeof useConfigure>["headConnection"],
-): MachineTargets | null => {
+): MachineTargets => {
   if (node.id === localNodeId) return { logs: { kind: "local" } };
-  if (!node.id.startsWith("head:") || !headConnection) return null;
+  if (!node.id.startsWith("head:") || !headConnection) return {};
   const workerId = node.id.slice("head:".length);
   if (node.role === "head") {
     return {
@@ -302,20 +268,22 @@ export function SettingsView({
   const machineTargets = useMemo(
     () =>
       new Map(
-        machineNodes.flatMap((node) => {
-          const targets = machineTargetsFor(node, configure.localNodeId, configure.headConnection);
-          return targets ? [[node.id, targets] as const] : [];
-        }),
+        machineNodes.map(
+          (node) =>
+            [
+              node.id,
+              machineTargetsFor(node, configure.localNodeId, configure.headConnection),
+            ] as const,
+        ),
       ),
     [configure.headConnection, configure.localNodeId, machineNodes],
   );
   const machineSections = useMemo(
     () =>
       machineNodes.flatMap((node) => {
-        if (!machineTargets.has(node.id)) return [];
         const targets = machineTargets.get(node.id);
         return (Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
-          targets?.[view]
+          view !== "logs" || targets?.logs
             ? [
                 {
                   id: machineSectionId(node.id, view),
@@ -340,6 +308,26 @@ export function SettingsView({
     ? machineTargets.get(activeMachineNodeId)
     : undefined;
   const activeMachineView = machineViewFromSection(activeSection);
+  const activeMachineNode = activeMachineNodeId
+    ? machineNodes.find((node) => node.id === activeMachineNodeId)
+    : undefined;
+  const activeMachineWorker = activeMachineNodeId
+    ? configure.workers.find(
+        (worker) =>
+          worker.id ===
+          (activeMachineNodeId.startsWith("head:")
+            ? activeMachineNodeId.slice("head:".length)
+            : activeMachineNodeId),
+      )
+    : undefined;
+  const canonicalMachineSection = (section: string): string => {
+    const nodeId = machineNodeIdFromSection(section);
+    const view = machineViewFromSection(section);
+    return nodeId === "local" && view ? machineSectionId(configure.localNodeId, view) : section;
+  };
+  const activatesLocalSystem = (section: string): boolean =>
+    machineNodeIdFromSection(section) === configure.localNodeId &&
+    machineViewFromSection(section) === "system";
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
@@ -347,13 +335,13 @@ export function SettingsView({
         window.location.replace(`/customize#${hash}`);
         return;
       }
-      const normalizedHash = legacySettingsHash(hash) ?? hash;
+      const normalizedHash = canonicalMachineSection(legacySettingsHash(hash) ?? hash);
       const normalized =
         normalizeSectionId(normalizedHash) ??
         (sections.some((section) => section.id === normalizedHash) ? normalizedHash : null);
       if (!normalized) return;
       setActiveSection(normalized);
-      if (normalized === "system") onSystemSectionActive();
+      if (activatesLocalSystem(normalized)) onSystemSectionActive();
     };
     onHashChange();
     window.addEventListener("hashchange", onHashChange);
@@ -361,7 +349,7 @@ export function SettingsView({
   }, [onSystemSectionActive, sections]);
   const selectSection = (section: SettingsSectionId) => {
     setActiveSection(section);
-    if (section === "system") onSystemSectionActive();
+    if (activatesLocalSystem(section)) onSystemSectionActive();
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${section}`);
     }
@@ -384,47 +372,77 @@ export function SettingsView({
           onSelectSection={selectSection}
           hasMachines={machineNodes.length > 0}
           machineTargets={machineTargets}
+          localNodeId={configure.localNodeId}
         />
       }
     >
-      {activeSection === "connection" ? (
-        <ApiConnectionSection
-          apiSettingsLoading={apiSettingsLoading}
-          apiSettings={apiSettings}
-          testing={testing}
-          saving={saving}
-          connectionStatus={connectionStatus}
-          statusMessage={statusMessage}
-          onApiSettingsChange={onApiSettingsChange}
-          onTestConnection={onTestConnection}
-          onSave={onSaveSettings}
-        />
-      ) : null}
-      {activeSection === "controller" ? <ServerContent embedded /> : null}
+      {activeSection === "connection" ? <AppVersionSection /> : null}
       {activeSection === "profile" ? <ProfileSettings /> : null}
       <SettingsUsage active={activeSection === "usage"} />
-      {activeSection === "system" ? (
-        <div className="space-y-5">
-          <SystemOverview
-            data={data}
-            compatibilityReport={compatibilityReport}
-            loading={loading}
-            error={error}
-          />
-          <EnginesSection runtime={data?.runtime ?? null} />
-          <ServicesSettings data={data} apiSettings={apiSettings} loading={loading} error={error} />
-          <SystemDetails data={data} compatibilityReport={compatibilityReport} />
-        </div>
-      ) : null}
       {activeSection === "appearance" ? <AppearanceSettings /> : null}
       {activeSection === "terminal" ? <ShortcutsSettings /> : null}
       {activeSection === "archive" ? <ArchivedChatsSettings /> : null}
-      {activeSection === "setup" ? <SetupChecksSettings /> : null}
       {activeSection === MACHINES_SECTION.id ? (
-        <div className="space-y-3">
+        <div className="space-y-8">
           {configure.error ? <ErrorBox>{configure.error}</ErrorBox> : null}
           <MachinesSection state={configure} />
+          <ApiConnectionSection
+            apiSettingsLoading={apiSettingsLoading}
+            apiSettings={apiSettings}
+            testing={testing}
+            saving={saving}
+            connectionStatus={connectionStatus}
+            statusMessage={statusMessage}
+            onApiSettingsChange={onApiSettingsChange}
+            onTestConnection={onTestConnection}
+            onSave={onSaveSettings}
+          />
         </div>
+      ) : null}
+      {activeMachineView === "status" && activeMachineNode ? (
+        activeMachineNode.id === configure.localNodeId ? (
+          <LocalMachineStatus />
+        ) : (
+          <MachineStatusSettings
+            node={activeMachineNode}
+            worker={activeMachineWorker}
+            headConnected={configure.headConnected}
+          />
+        )
+      ) : null}
+      {activeMachineView === "controller" && activeMachineNode ? (
+        activeMachineNode.id === configure.localNodeId ? (
+          <ServerContent embedded />
+        ) : (
+          <MachineControllerSettings
+            node={activeMachineNode}
+            worker={activeMachineWorker}
+            headConnected={configure.headConnected}
+          />
+        )
+      ) : null}
+      {activeMachineView === "system" && activeMachineNode ? (
+        activeMachineNode.id === configure.localNodeId ? (
+          <div className="space-y-5">
+            <SystemOverview
+              data={data}
+              compatibilityReport={compatibilityReport}
+              loading={loading}
+              error={error}
+            />
+            <SetupChecksSettings />
+            <EnginesSection runtime={data?.runtime ?? null} />
+            <ServicesSettings
+              data={data}
+              apiSettings={apiSettings}
+              loading={loading}
+              error={error}
+            />
+            <SystemDetails data={data} compatibilityReport={compatibilityReport} />
+          </div>
+        ) : (
+          <MachineSystemSettings node={activeMachineNode} />
+        )
       ) : null}
       {activeMachineView === "logs" && activeMachineTargets?.logs ? (
         <SettingsLogs
@@ -432,7 +450,8 @@ export function SettingsView({
           target={activeMachineTargets.logs}
         />
       ) : null}
-      {activeMachineView && !activeMachineTargets?.[activeMachineView] ? (
+      {activeMachineView &&
+      (!activeMachineNode || (activeMachineView === "logs" && !activeMachineTargets?.logs)) ? (
         <div className="rounded-[6px] border border-(--ui-separator) bg-(--ui-surface) px-3 py-3 text-[length:var(--fs-sm)] text-(--ui-muted)">
           This machine or view is no longer available.
           <button
@@ -455,6 +474,7 @@ function SettingsMachineRail({
   onSelectSection,
   hasMachines,
   machineTargets,
+  localNodeId,
 }: {
   sections: SettingsSectionDef[];
   nodes: Array<{ id: string; name: string; role: string }>;
@@ -462,6 +482,7 @@ function SettingsMachineRail({
   onSelectSection: (section: string) => void;
   hasMachines: boolean;
   machineTargets: Map<string, MachineTargets>;
+  localNodeId: string;
 }) {
   const [machinesOpen, setMachinesOpen] = useState(hasMachines);
   const [openNodes, setOpenNodes] = useState<Record<string, boolean>>({});
@@ -555,14 +576,16 @@ function SettingsMachineRail({
                       />
                       <Monitor className="h-3 w-3 opacity-75" />
                       <span className="min-w-0 truncate">{node.name}</span>
-                      {node.role === "head" ? (
-                        <span className="ml-auto text-[10px] text-(--ui-muted)/65">Head</span>
+                      {node.id === localNodeId || node.role === "head" ? (
+                        <span className="ml-auto text-[10px] text-(--ui-muted)/65">
+                          {node.id === localNodeId ? "Local" : "Head"}
+                        </span>
                       ) : null}
                     </button>
                     {nodeOpen ? (
                       <div className="mt-0.5 flex flex-col gap-px max-lg:mt-0 max-lg:flex-row max-lg:items-center">
                         {(Object.keys(machineViewLabel) as MachineView[]).flatMap((view) =>
-                          machineTargets.get(node.id)?.[view]
+                          view !== "logs" || machineTargets.get(node.id)?.logs
                             ? [
                                 renderButton(
                                   machineSectionId(node.id, view),

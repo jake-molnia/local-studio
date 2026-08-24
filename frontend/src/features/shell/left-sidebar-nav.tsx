@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ComponentType, type MouseEvent } from "react";
-import { AutomationsIcon, ModelsIcon, SettingsIcon, StatusIcon } from "@/ui/icon-registry";
+import { AutomationsIcon, ModelsIcon, SettingsIcon } from "@/ui/icon-registry";
 
 export type IconComponent = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -10,10 +10,7 @@ export const primaryTabs = [
   { href: "/agent/automations", label: "Automations", icon: AutomationsIcon },
 ] as const;
 
-export const studioTabs = [
-  { href: "/", label: "Status", icon: StatusIcon },
-  { href: "/models", label: "Models", icon: ModelsIcon },
-] as const;
+export const studioTabs = [{ href: "/models", label: "Models", icon: ModelsIcon }] as const;
 
 export const tabs = [...primaryTabs, ...studioTabs];
 

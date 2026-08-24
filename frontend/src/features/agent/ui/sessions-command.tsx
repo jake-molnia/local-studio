@@ -28,10 +28,10 @@ type AppDestination = {
 
 const APP_DESTINATIONS: AppDestination[] = [
   {
-    href: "/",
+    href: settingsHref("machine:local:status"),
     label: "Status",
-    keywords: "dashboard controller gpu metrics decode prefill throughput live historic",
-    description: "Controller, GPU, model status, and live metrics.",
+    keywords: "machine dashboard controller gpu metrics decode prefill throughput live historic",
+    description: "Local machine, controller, GPU, model status, and live metrics.",
   },
   {
     href: settingsHref("usage"),
@@ -48,10 +48,10 @@ const APP_DESTINATIONS: AppDestination[] = [
   },
   {
     href: settingsHref("machines"),
-    label: "Configure",
+    label: "Machines",
     keywords:
       "machines hardware gpu memory pool server logs api docs swagger controller engines runtime",
-    description: "Manage the machines that run models, and the controller.",
+    description: "Manage machines, controller connections, and deployment.",
   },
   {
     href: "/agent",

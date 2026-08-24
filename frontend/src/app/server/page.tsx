@@ -1,5 +1,6 @@
 import { permanentRedirect } from "next/navigation";
+import { settingsHref } from "@/features/settings/settings-navigation";
 
 export default function ServerRedirect() {
-  permanentRedirect("/settings#controller");
+  permanentRedirect(settingsHref("machine:local:controller"));
 }

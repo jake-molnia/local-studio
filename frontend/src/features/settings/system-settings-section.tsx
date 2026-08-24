@@ -21,7 +21,7 @@ export function ServicesSettings({
   return (
     <SettingsGroup
       title="Services & endpoints"
-      description="Controller, inference, and desktop endpoints used by this installation."
+      description="Controller, inference, and desktop endpoints running on this machine."
       actions={
         <StatusPill tone={tone}>
           {services.length ? `${services.length} live` : "fallback"}
@@ -67,7 +67,7 @@ export function SystemOverview({
             System snapshot
           </h3>
           <p className="mt-1 text-[length:var(--fs-sm)] leading-relaxed text-(--ui-muted)">
-            Live controller state at a glance. Expand a section only when you need to act.
+            Live state for this machine. Expand a section only when you need to act.
           </p>
         </div>
         <StatusPill tone={controllerTone}>{controllerState.toLowerCase()}</StatusPill>

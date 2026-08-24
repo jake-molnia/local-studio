@@ -150,7 +150,13 @@ export function ArchivedChatsSettings() {
     </SettingsGroup>
   );
 }
-export function SetupChecksSettings() {
+export function SetupChecksSettings({
+  title = "Dependencies & apps",
+  description = "Local services and applications required for agent and inference workloads.",
+}: {
+  title?: string;
+  description?: string;
+}) {
   type Check = {
     id: string;
     label: string;
@@ -180,7 +186,7 @@ export function SetupChecksSettings() {
     label: "Controller connection",
     ok: controllerStatus.online,
     value: controllerStatus.online ? controllerStatus.activityLine : "offline",
-    guidance: "Set a reachable controller URL in Settings → Connection before using Agents.",
+    guidance: "Set a reachable controller URL in Settings → Machines before using Agents.",
   };
   const harnessChecks: Check[] = harnesses.map((harness) => ({
     id: `harness-${harness.id}`,
@@ -206,8 +212,8 @@ export function SetupChecksSettings() {
   }));
   return (
     <SettingsGroup
-      title="First-time setup"
-      description="Preflight checks prevent new users from landing in an empty Agent tab without explanation."
+      title={title}
+      description={description}
       actions={
         <StatusPill tone={blockers.length ? "warning" : "good"}>
           {blockers.length ? `${blockers.length} blockers` : "ready"}

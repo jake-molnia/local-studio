@@ -121,6 +121,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
     width === "wide"
       ? "max-w-[82rem] lg:grid-cols-[136px_minmax(0,68rem)]"
       : "max-w-[44rem] lg:grid-cols-[136px_minmax(0,32rem)]";
+  const takeoverWidth = width === "wide" ? "max-w-[72rem]" : "max-w-[34rem]";
 
   const selectSearchResult = (section: Id, target?: string) => {
     onSelectSection(section);
@@ -272,7 +273,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 {navigation}
               </div>
             </div>
-            <div className={cx("mx-auto w-full max-w-[34rem] px-4 pb-12 pt-6 sm:px-8 lg:pt-8")}>
+            <div className={cx("mx-auto w-full px-4 pb-12 pt-6 sm:px-8 lg:pt-8", takeoverWidth)}>
               {content}
             </div>
           </section>
