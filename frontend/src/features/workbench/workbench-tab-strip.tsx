@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Menu, PanelLeftHollow, Plus } from "@/ui/icon-registry";
 import { uniqueOpenSessions, useOpenSessions } from "@/features/agent/session-index";
 import { useProjects } from "@/features/agent/projects/context";
+import { CHATS_PROJECT_ID } from "@/features/agent/projects/types";
 import { useComputerTools, useToolsActions } from "@/features/agent/tools/context";
 import { workspaceCommands } from "@/features/agent/workspace/commands";
 import { hrefWithOpenNonce } from "@/features/agent/ui/projects-nav/helpers";
@@ -60,6 +61,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function WorkbenchTabStrip() {
+  const searchParams = useSearchParams();
+  const projects = useProjects();
+  const projectId = searchParams.get("project") ?? projects.selectedProjectId;
+  if (projectId === CHATS_PROJECT_ID) return null;
+  return <ProjectWorkbenchTabStrip />;
+}
+
+function ProjectWorkbenchTabStrip() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const setMobileNavOpen = useAppStore((store) => store.setMobileNavOpen);
