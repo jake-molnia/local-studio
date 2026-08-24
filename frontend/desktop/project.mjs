@@ -383,76 +383,6 @@ var init_browser_perf_audit = __esm(async () => {
   }
 });
 
-var exports_bundle = {};
-import {
-  cpSync,
-  existsSync as existsSync4,
-  readdirSync as readdirSync3,
-  mkdirSync,
-  readFileSync as readFileSync5,
-  realpathSync as realpathSync2,
-  rmSync as rmSync2
-} from "node:fs";
-import path2 from "node:path";
-import { spawnSync as spawnSync2 } from "node:child_process";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-var packageDir, distDir, bundlePath, runtimePackages, build, lydellDir, bundle, sourceRoot;
-var init_bundle = __esm(() => {
-  packageDir = path2.resolve(path2.dirname(fileURLToPath2(import.meta.url)), "../../services/agent-runtime"), distDir = path2.join(packageDir, "dist"), bundlePath = path2.join(distDir, "standalone.mjs"), runtimePackages = [
-    "playwright-core",
-    "chromium-bidi",
-    "mitt",
-    "devtools-protocol",
-    "@silvia-odwyer/photon-node",
-    "undici",
-    "@lydell/node-pty",
-    // Pi's extension loader (jiti alias mode) eagerly require.resolve()s
-    // typebox and import.meta.resolve()s the pi packages from the bundle's
-    // own directory BEFORE loading any extension file. Without these four on
-    // disk next to standalone.mjs, every bundled extension fails with
-    // "Cannot find module 'typebox'" in the packaged app.
-    "typebox",
-    "@earendil-works/pi-agent-core",
-    "@earendil-works/pi-tui",
-    "@earendil-works/pi-ai"
-  ];
-  rmSync2(distDir, { recursive: !0, force: !0 });
-  mkdirSync(distDir, { recursive: !0 });
-  build = spawnSync2("bun", [
-    "build",
-    "src/server.ts",
-    "--target=node",
-    "--external",
-    "fsevents",
-    "--external",
-    "playwright-core",
-    "--external",
-    "@silvia-odwyer/photon-node",
-    "--external",
-    "undici",
-    "--minify",
-    "--outfile=dist/standalone.mjs"
-  ], { cwd: packageDir, stdio: "inherit" });
-  if (build.status !== 0)
-    throw Error(`Agent runtime bundle failed with status ${build.status ?? "unknown"}`);
-  lydellDir = path2.join(packageDir, "node_modules", "@lydell");
-  if (existsSync4(lydellDir)) {
-    for (let entry of readdirSync3(lydellDir))
-      if (entry.startsWith("node-pty-"))
-        runtimePackages.push(`@lydell/${entry}`);
-  }
-  for (let packageName of runtimePackages) {
-    let segments = packageName.split("/"), source = path2.join(packageDir, "node_modules", ...segments), destination = path2.join(distDir, "node_modules", ...segments);
-    if (!existsSync4(path2.join(source, "package.json")))
-      throw Error(`Missing browser runtime package: ${packageName}`);
-    mkdirSync(path2.dirname(destination), { recursive: !0 }), cpSync(source, destination, { recursive: !0 });
-  }
-  bundle = readFileSync5(bundlePath, "utf8"), sourceRoot = realpathSync2(path2.join(packageDir, "..", ".."));
-  if (bundle.includes(sourceRoot))
-    throw Error(`Agent runtime bundle contains the build-machine root: ${sourceRoot}`);
-  console.log(`Packaged portable browser runtime: ${runtimePackages.join(", ")}`);
-});
-
 var exports_check_conventional_commits = {};
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { readFileSync as readFileSync6 } from "node:fs";
@@ -752,39 +682,6 @@ var init_controller_standards_audit = __esm(() => {
   process.exit(run());
 });
 
-var exports_link_services_node_modules = {};
-import { lstatSync as lstatSync3, mkdirSync as mkdirSync3, rmSync as rmSync5, symlinkSync as symlinkSync2 } from "node:fs";
-import path5 from "node:path";
-import { fileURLToPath as fileURLToPath4 } from "node:url";
-var frontendDir, servicesDir, linkPath, existingEntryKind = () => {
-  try {
-    let stat = lstatSync3(linkPath);
-    if (stat.isSymbolicLink())
-      return "link";
-    return stat.isDirectory() ? "directory" : "file";
-  } catch {
-    return "missing";
-  }
-}, removeExistingEntry = () => {
-  rmSync5(linkPath, { recursive: !0, force: !0 });
-}, createLink = () => {
-  if (process.platform === "win32") {
-    symlinkSync2(path5.join(frontendDir, "node_modules"), linkPath, "junction");
-    return;
-  }
-  symlinkSync2(path5.join("..", "frontend", "node_modules"), linkPath, "dir");
-}, kind;
-var init_link_services_node_modules = __esm(() => {
-  frontendDir = path5.resolve(path5.dirname(fileURLToPath4(import.meta.url)), ".."), servicesDir = path5.join(path5.dirname(frontendDir), "services"), linkPath = path5.join(servicesDir, "node_modules");
-  mkdirSync3(servicesDir, { recursive: !0 });
-  kind = existingEntryKind();
-  if (kind === "directory")
-    console.error(`[link-services-node-modules] ${linkPath} is a real directory; leaving it alone.`), process.exit(0);
-  if (kind !== "missing")
-    removeExistingEntry();
-  createLink();
-});
-
 var exports_perf_audit = {};
 import { performance } from "node:perf_hooks";
 function percentile(values, ratio) {
@@ -859,53 +756,6 @@ var init_perf_audit = __esm(async () => {
       console.error(`- ${failure}`);
     process.exit(1);
   }
-});
-
-var exports_postbuild = {};
-import { readdirSync as readdirSync5, readFileSync as readFileSync10, statSync as statSync3, writeFileSync as writeFileSync4, existsSync as existsSync8 } from "node:fs";
-import path7 from "node:path";
-import { fileURLToPath as fileURLToPath6 } from "node:url";
-function* jsFiles(dir) {
-  for (let entry of readdirSync5(dir, { withFileTypes: !0 })) {
-    let full = path7.join(dir, entry.name);
-    if (entry.isDirectory())
-      yield* jsFiles(full);
-    else if (entry.isFile() && entry.name.endsWith(".js"))
-      yield full;
-  }
-}
-function resolveSpecifier(fromFile, spec) {
-  if (/\.(js|mjs|cjs|json|node)$/.test(spec))
-    return spec;
-  let base = path7.resolve(path7.dirname(fromFile), spec);
-  if (existsSync8(`${base}.js`))
-    return `${spec}.js`;
-  if (existsSync8(base) && statSync3(base).isDirectory() && existsSync8(path7.join(base, "index.js")))
-    return `${spec}/index.js`;
-  return spec;
-}
-var packageDir2, distDir2, realEntry, SPECIFIER_RE, rewrites = 0, shim = `// Generated by scripts/postbuild.mjs — stable entry for "node dist/server.js".
-import "./services/agent-runtime/src/server.js";
-`;
-var init_postbuild = __esm(() => {
-  packageDir2 = path7.resolve(path7.dirname(fileURLToPath6(import.meta.url)), "../../services/agent-runtime"), distDir2 = path7.join(packageDir2, "dist"), realEntry = path7.join(distDir2, "services", "agent-runtime", "src", "server.js");
-  if (!existsSync8(realEntry))
-    console.error(`[postbuild] expected tsc output missing: ${realEntry}`), process.exit(1);
-  SPECIFIER_RE = /(from\s+|import\s*\(\s*|export\s+\*\s+from\s+|import\s+)("(\.{1,2}\/[^"]+)"|'(\.{1,2}\/[^']+)')/g;
-  for (let file2 of jsFiles(distDir2)) {
-    let source = readFileSync10(file2, "utf8"), next = source.replace(SPECIFIER_RE, (match, lead, quoted, dq, sq) => {
-      let spec = dq ?? sq, fixed = resolveSpecifier(file2, spec);
-      if (fixed === spec)
-        return match;
-      rewrites += 1;
-      let quote = quoted[0];
-      return `${lead}${quote}${fixed}${quote}`;
-    });
-    if (next !== source)
-      writeFileSync4(file2, next);
-  }
-  writeFileSync4(path7.join(distDir2, "server.js"), shim);
-  console.log(`[postbuild] rewrote ${rewrites} relative specifiers; wrote dist/server.js shim`);
 });
 
 var exports_prepare_next_build = {};
@@ -1232,56 +1082,57 @@ import { resolveAccessPostureFromEnvironment } from "../src/lib/auth/access-post
 function copyDirectory(from, to) {
   mkdirSync7(to, { recursive: !0 }), cpSync3(from, to, { recursive: !0 });
 }
-async function runtimeHealthy() {
+async function controllerHealthy() {
   try {
-    let response = await fetch(`${runtimeUrl}/health`, { signal: AbortSignal.timeout(1000) });
+    let response = await fetch(`${controllerUrl}/health`, { signal: AbortSignal.timeout(1000) });
     if (!response.ok)
       return !1;
-    return (await response.json()).service === "local-studio-agent-runtime";
+    let payload = await response.json();
+    return payload.service === "local-studio-controller" && payload.status === "ok";
   } catch {
     return !1;
   }
 }
-async function waitForRuntime(child) {
+async function waitForController(child) {
   for (let attempt = 0;attempt < 150; attempt += 1) {
     if (child.exitCode !== null)
-      throw Error(`Agent runtime exited with code ${child.exitCode}`);
-    if (await runtimeHealthy())
+      throw Error(`Controller exited with code ${child.exitCode}`);
+    if (await controllerHealthy())
       return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  throw Error(`Timed out waiting for agent runtime: ${runtimeUrl}`);
+  throw Error(`Timed out waiting for controller: ${controllerUrl}`);
 }
-async function startRuntime() {
-  if (await runtimeHealthy())
+async function startController() {
+  if (await controllerHealthy())
     return null;
-  let url = new URL(runtimeUrl);
+  let url = new URL(controllerUrl);
   if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
-    throw Error(`Agent runtime is unavailable: ${runtimeUrl}`);
-  let entry = resolve4(projectRoot3, "..", "services", "agent-runtime", "dist", "standalone.mjs");
+    throw Error(`Controller is unavailable: ${controllerUrl}`);
+  let executable = process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller", entry = resolve4(projectRoot3, "..", "controller-zig", "zig-out", "bin", executable);
   if (!existsSync12(entry))
-    throw Error(`Missing agent runtime bundle: ${entry}`);
-  let child = spawn3(process.execPath, [entry], {
+    throw Error(`Missing Zig controller executable: ${entry}`);
+  let piEntry = resolve4(projectRoot3, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi"), child = spawn3(entry, ["--mode", "standalone", "--host", "127.0.0.1", "--port", url.port || "8081"], {
     stdio: "inherit",
     env: {
       ...process.env,
-      PORT: url.port || "8081",
+      ...(process.env.LOCAL_STUDIO_PI_BIN || !existsSync12(piEntry) ? {} : { LOCAL_STUDIO_PI_BIN: piEntry }),
       LOCAL_STUDIO_FRONTEND_BASE: `http://127.0.0.1:${port}`
     }
   });
   try {
-    return await waitForRuntime(child), child;
+    return await waitForController(child), child;
   } catch (error) {
     if (child.exitCode === null)
       child.kill("SIGTERM");
     throw error;
   }
 }
-function stopOwnedRuntime() {
-  if (agentRuntime?.exitCode === null)
-    agentRuntime.kill("SIGTERM");
+function stopOwnedController() {
+  if (controller?.exitCode === null)
+    controller.kill("SIGTERM");
 }
-var projectRoot3, standaloneRoot2, nestedRoot, serverRoot, rawPort, port, serverEnvironment, accessPosture, runtimeUrl, agentRuntime, server, runtimeExitCode = 0;
+var projectRoot3, standaloneRoot2, nestedRoot, serverRoot, rawPort, port, serverEnvironment, accessPosture, controllerUrl, controller, server, controllerExitCode = 0;
 var init_start_standalone = __esm(async () => {
   projectRoot3 = resolve4(dirname3(fileURLToPath10(import.meta.url)), ".."), standaloneRoot2 = resolve4(projectRoot3, ".next", "standalone"), nestedRoot = resolve4(standaloneRoot2, "frontend"), serverRoot = existsSync12(nestedRoot) ? nestedRoot : standaloneRoot2, rawPort = process.env.PORT || "4783", port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -1294,26 +1145,26 @@ var init_start_standalone = __esm(async () => {
   }, accessPosture = resolveAccessPostureFromEnvironment(serverEnvironment);
   if (accessPosture.kind === "configuration-error")
     throw Error(accessPosture.message);
-  runtimeUrl = (serverEnvironment.LOCAL_STUDIO_AGENT_RUNTIME_URL || "http://127.0.0.1:8081").replace(/\/+$/, "");
+  controllerUrl = (serverEnvironment.LOCAL_STUDIO_CONTROLLER_URL || "http://127.0.0.1:8081").replace(/\/+$/, "");
   if (!existsSync12(standaloneRoot2))
     throw Error('Missing ".next/standalone". Run "npm run build" first.');
   copyDirectory(resolve4(projectRoot3, "public"), resolve4(serverRoot, "public"));
   copyDirectory(resolve4(projectRoot3, ".next", "static"), resolve4(serverRoot, ".next", "static"));
-  agentRuntime = await startRuntime(), server = spawn3(process.execPath, ["server.js"], {
+  controller = await startController(), server = spawn3(process.execPath, ["server.js"], {
     cwd: serverRoot,
     stdio: "inherit",
     env: {
       ...serverEnvironment,
       LOCAL_STUDIO_AGENT_CWD: process.env.LOCAL_STUDIO_AGENT_CWD || resolve4(projectRoot3, ".."),
-      LOCAL_STUDIO_AGENT_RUNTIME_URL: runtimeUrl
+      LOCAL_STUDIO_CONTROLLER_URL: controllerUrl
     }
   });
   console.log(`Local Studio: http://127.0.0.1:${port}`);
   server.on("exit", (code) => {
-    stopOwnedRuntime(), process.exit(runtimeExitCode || code || 0);
+    stopOwnedController(), process.exit(controllerExitCode || code || 0);
   });
-  agentRuntime?.on("exit", (code) => {
-    if (runtimeExitCode = code || 1, server.exitCode === null)
+  controller?.on("exit", (code) => {
+    if (controllerExitCode = code || 1, server.exitCode === null)
       server.kill("SIGTERM");
   });
   process.on("SIGINT", () => server.kill("SIGINT"));
@@ -1459,10 +1310,9 @@ var init_validate_package_json = __esm(() => {
     ["package.json", ["doctor", "setup", "dev", "dev:controller", "build", "start", "start:controller", "check"]],
     ["frontend/package.json", ["dev", "build", "start", "desktop:dist", "check:quality"]],
     ["controller/package.json", ["dev", "start", "typecheck", "lint", "check"]],
-    ["services/agent-runtime/package.json", ["bundle", "build", "dev", "start"]],
     ["shared/package.json", []],
     ["controller/contracts/package.json", []]
-  ], packageLocks = ["frontend/package-lock.json", "controller/bun.lock", "services/agent-runtime/bun.lock", "shared/bun.lock"], packageMissing = [];
+  ], packageLocks = ["frontend/package-lock.json", "controller/bun.lock", "shared/bun.lock"], packageMissing = [];
   for (let [manifest, scripts] of packageRequirements) {
     let packageJson = packageAuditRead(manifest);
     if (packageJson.private !== true)
@@ -1475,7 +1325,7 @@ var init_validate_package_json = __esm(() => {
     if (!existsSync(resolve6(packageRepository, lockfile)))
       packageMissing.push(lockfile);
   releaseVersion = packageAuditRead("package.json").version;
-  for (let manifest of ["frontend/package.json", "controller/package.json", "controller/contracts/package.json", "services/agent-runtime/package.json"])
+  for (let manifest of ["frontend/package.json", "controller/package.json", "controller/contracts/package.json"])
     if (packageAuditRead(manifest).version !== releaseVersion)
       packageMissing.push(`${manifest}:version`);
   if (packageMissing.length > 0)
@@ -1738,15 +1588,11 @@ var project_entry_default = afterPack, root5 = path11.resolve(path11.dirname(fil
   ["assert-release-main", () => Promise.resolve().then(() => (init_assert_release_main(), exports_assert_release_main))],
   ["assert-standalone", () => Promise.resolve().then(() => (init_assert_standalone_build(), exports_assert_standalone_build))],
   ["browser-perf", () => init_browser_perf_audit().then(() => exports_browser_perf_audit)],
-  ["bundle-agent-runtime", () => Promise.resolve().then(() => (init_bundle(), exports_bundle))],
   ["check-commits", () => Promise.resolve().then(() => (init_check_conventional_commits(), exports_check_conventional_commits))],
   ["complete-standalone", () => Promise.resolve().then(() => (init_complete_standalone_build(), exports_complete_standalone_build))],
   ["controller-standards", () => Promise.resolve().then(() => (init_controller_standards_audit(), exports_controller_standards_audit))],
   ["doctor", async () => doctor()],
-  ["link-services", () => Promise.resolve().then(() => (init_link_services_node_modules(), exports_link_services_node_modules))],
   ["perf", () => init_perf_audit().then(() => exports_perf_audit)],
-  ["postbuild-agent-runtime", () => Promise.resolve().then(() => (init_postbuild(), exports_postbuild))],
-  ["prepare-agent-runtime", async () => rmSync6(path11.join(root5, "services", "agent-runtime", "dist"), { recursive: !0, force: !0 })],
   ["prepare-next", () => Promise.resolve().then(() => (init_prepare_next_build(), exports_prepare_next_build))],
   ["release-notes", () => Promise.resolve().then(() => (init_release_statement(), exports_release_statement))],
   ["setup", async () => setupRepository()],
@@ -1791,13 +1637,13 @@ function doctor() {
 }
 function setupRepository() {
   doctor();
-  for (let directory of ["controller", "shared", "services/agent-runtime"])
+  for (let directory of ["controller", "shared"])
     run3("bun", ["install", "--frozen-lockfile"], path11.join(root5, directory));
   run3("npm", ["ci", "--legacy-peer-deps"], path11.join(root5, "frontend"));
   console.log("Repository setup complete");
 }
 function auditLayout() {
-  let expected = ["frontend/desktop/project.mjs", "scripts/install-controller.sh", "scripts/install-desktop-app.sh"], actual = readdirSync10(path11.join(root5, "scripts"), { withFileTypes: !0 }).filter((entry) => entry.isFile()).map((entry) => `scripts/${entry.name}`).sort(), executable = git(["ls-files", "-s"]).split("\n").filter((line) => line.startsWith("100755 ")).map((line) => line.split("\t")[1]).sort(), stale = ["frontend/scripts", "controller/scripts", "services/agent-runtime/scripts"].filter((directory) => existsSync(path11.join(root5, directory)));
+  let expected = ["frontend/desktop/project.mjs", "scripts/install-controller.sh", "scripts/install-desktop-app.sh"], actual = readdirSync10(path11.join(root5, "scripts"), { withFileTypes: !0 }).filter((entry) => entry.isFile()).map((entry) => `scripts/${entry.name}`).sort(), executable = git(["ls-files", "-s"]).split("\n").filter((line) => line.startsWith("100755 ")).map((line) => line.split("\t")[1]).sort(), stale = ["frontend/scripts", "controller/scripts"].filter((directory) => existsSync(path11.join(root5, directory)));
   if (JSON.stringify(actual) !== JSON.stringify(expected.slice(1)) || JSON.stringify(executable) !== JSON.stringify(expected) || stale.length > 0)
     throw Error(`Automation layout drifted: scripts=${actual.join(",")}; executable=${executable.join(",")}; stale=${stale.join(",")}`);
   console.log("Automation layout passed: exactly three scripts");

@@ -81,14 +81,7 @@ const nextConfig: NextConfig = {
       "../tsconfig*.json",
     ],
   },
-  // Ships raw .ts sources (no build step) — Next must transpile it.
-  //
-  // @local-studio/agent-runtime also ships raw .ts (services/agent-runtime), so
-  // it cannot be externalized (Node can't execute TypeScript at runtime in the
-  // standalone server) — it is transpiled and bundled with the app. Long-lived
-  // runtime state survives dev HMR through the package's single globalThis
-  // registry (services/agent-runtime/src/instances.ts).
-  transpilePackages: ["@local-studio/contracts", "@local-studio/agent-runtime"],
+  transpilePackages: ["@local-studio/contracts"],
   // The package and shared/agent live outside frontend/, so their real paths
   // don't have frontend/node_modules on the walk-up resolution path. Teach
   // webpack to also look here for their external deps (effect, the pi SDK).
@@ -111,11 +104,6 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  // No resolveAlias here: turbopack rejects absolute alias targets ("server
-  // relative imports are not implemented yet"), and none is needed — the
-  // services/node_modules → frontend/node_modules symlink (postinstall
-  // link-services-node-modules.mjs) puts effect/the pi SDK on the walk-up
-  // path for the out-of-root agent-runtime sources.
   turbopack: {
     root: path.join(__dirname, ".."),
   },
