@@ -1,5 +1,6 @@
 const std = @import("std");
 const oauth_credentials = @import("../repository/oauth_credentials.zig");
+const model_catalog = @import("model_catalog.zig");
 
 const Io = std.Io;
 const codex_id = "openai-codex";
@@ -61,11 +62,13 @@ pub const State = struct {
             stored_credential.deinit();
             break :configured true;
         } else false;
+        var models = try model_catalog.providerModels(state.allocator, codex_id);
+        defer models.deinit();
         var output: Io.Writer.Allocating = .init(state.allocator);
         errdefer output.deinit();
         try output.writer.print("{{\"providers\":[{{\"id\":\"openai-codex\",\"name\":\"OpenAI Codex\",\"oauth\":{{\"label\":\"OpenAI (ChatGPT subscription)\"}},\"configured\":{},", .{configured});
         if (configured) try output.writer.writeAll("\"authSource\":\"controller\",\"authLabel\":\"ChatGPT OAuth\",\"credentialType\":\"oauth\",");
-        try output.writer.print("\"modelCount\":{d},\"controllerOwned\":true}}]}}", .{codex_models.len});
+        try output.writer.print("\"modelCount\":{d},\"controllerOwned\":true}}]}}", .{models.count});
         return output.toOwnedSlice();
     }
 
@@ -81,16 +84,11 @@ pub const State = struct {
         errdefer output.deinit();
         try output.writer.writeAll("{\"providers\":[");
         if (configured) {
-            try output.writer.writeAll("{\"provider\":\"openai-codex\",\"models\":[");
-            for (codex_models, 0..) |model, index| {
-                if (index > 0) try output.writer.writeByte(',');
-                try output.writer.writeAll("{\"id\":");
-                try std.json.Stringify.value(model.id, .{}, &output.writer);
-                try output.writer.writeAll(",\"name\":");
-                try std.json.Stringify.value(model.name, .{}, &output.writer);
-                try output.writer.print(",\"contextWindow\":{d},\"maxTokens\":{d},\"reasoning\":true,\"vision\":{}}}", .{ model.context_window, model.max_tokens, model.vision });
-            }
-            try output.writer.writeAll("]}");
+            var models = try model_catalog.providerModels(state.allocator, codex_id);
+            defer models.deinit();
+            try output.writer.writeAll("{\"provider\":\"openai-codex\",\"models\":");
+            try output.writer.writeAll(models.document);
+            try output.writer.writeByte('}');
         }
         try output.writer.writeAll("]}");
         return output.toOwnedSlice();
@@ -218,9 +216,8 @@ pub const State = struct {
     }
 };
 
-pub fn isCodexModel(model_id: []const u8) bool {
-    for (codex_models) |model| if (std.mem.eql(u8, model.id, model_id)) return true;
-    return false;
+pub fn isCodexModel(allocator: std.mem.Allocator, model_id: []const u8) !bool {
+    return model_catalog.providerHasModel(allocator, codex_id, model_id);
 }
 
 fn runCodexLogin(state: *State, client: *std.http.Client, job: *Job) Io.Cancelable!void {
@@ -468,15 +465,3 @@ fn formEncode(writer: *Io.Writer, value: []const u8) !void {
         }
     }
 }
-
-const CodexModel = struct { id: []const u8, name: []const u8, context_window: u32, max_tokens: u32, vision: bool };
-
-const codex_models = [_]CodexModel{
-    .{ .id = "gpt-5.3-codex-spark", .name = "GPT-5.3 Codex Spark", .context_window = 128_000, .max_tokens = 128_000, .vision = false },
-    .{ .id = "gpt-5.4", .name = "GPT-5.4", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-    .{ .id = "gpt-5.4-mini", .name = "GPT-5.4 mini", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-    .{ .id = "gpt-5.5", .name = "GPT-5.5", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-    .{ .id = "gpt-5.6-luna", .name = "GPT-5.6 Luna", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-    .{ .id = "gpt-5.6-sol", .name = "GPT-5.6 Sol", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-    .{ .id = "gpt-5.6-terra", .name = "GPT-5.6 Terra", .context_window = 272_000, .max_tokens = 128_000, .vision = true },
-};
