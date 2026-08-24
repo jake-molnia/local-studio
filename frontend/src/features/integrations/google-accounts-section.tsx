@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Schema } from "effect";
 import {
   GoogleAccountResponseSchema,
@@ -22,6 +22,7 @@ import {
   RowAction,
   StatusText,
   TableFrame,
+  TableNotice,
   TableSection,
   TableSkeleton,
   TextCell,
@@ -61,7 +62,7 @@ function accountSummary(account: GoogleAccountView | null, id: GoogleWorkspacePl
   return emails.length ? emails.join(", ") : "Google Workspace";
 }
 
-export function GoogleAccountsSection() {
+export function GoogleAccountsSection({ searchQuery = "" }: { searchQuery?: string } = {}) {
   const [account, setAccount] = useState<GoogleAccountView | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,6 +93,15 @@ export function GoogleAccountsSection() {
     refresh();
   }, [refresh]);
 
+  const visibleAccounts = useMemo(() => {
+    const normalized = searchQuery.trim().toLowerCase();
+    if (!normalized) return GOOGLE_WORKSPACE_PLUGIN_IDS;
+    return GOOGLE_WORKSPACE_PLUGIN_IDS.filter((id) => {
+      const binding = GOOGLE_WORKSPACE_BINDINGS[id];
+      return `${binding.name} ${id} Google Workspace`.toLowerCase().includes(normalized);
+    });
+  }, [searchQuery]);
+
   return (
     <>
       {error ? (
@@ -113,6 +123,11 @@ export function GoogleAccountsSection() {
       >
         {!loaded ? (
           <TableSkeleton columns={ACCOUNT_COLUMNS} rows={2} minWidthClass={ACCOUNT_MIN_WIDTH} />
+        ) : visibleAccounts.length === 0 ? (
+          <TableNotice
+            title="No account matches this search"
+            body="Search by the account name or Google Workspace service."
+          />
         ) : (
           <TableFrame minWidthClass={ACCOUNT_MIN_WIDTH}>
             <thead>
@@ -125,7 +140,7 @@ export function GoogleAccountsSection() {
               </tr>
             </thead>
             <tbody>
-              {GOOGLE_WORKSPACE_PLUGIN_IDS.map((id) => {
+              {visibleAccounts.map((id) => {
                 const binding = GOOGLE_WORKSPACE_BINDINGS[id];
                 const state = accountState(account, id);
                 return (

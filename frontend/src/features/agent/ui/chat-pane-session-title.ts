@@ -31,11 +31,10 @@ export function useChatPaneSessionTitle({
     const nextTitle = cleanSessionTitle(sessionPrefs[key]?.title);
     return nextTitle || title;
   }, "");
-  // Empty starter/restored tabs stay visually untitled until user content arrives.
   const sessionLooksEmpty =
     !activeTab || (activeTab.messages.length === 0 && !activeTab.input.trim() && !running);
   const displayedSessionTitle = sessionLooksEmpty
-    ? ""
+    ? "New task"
     : sessionPrefTitle || cleanSessionTitle(activeTab?.title) || "";
   const sessionPinned = sessionPrefKeys.some((key) => Boolean(sessionPrefs[key]?.pinned));
   const patchActiveSessionPrefs = useCallback(

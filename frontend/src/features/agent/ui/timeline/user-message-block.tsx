@@ -111,7 +111,7 @@ export function UserMessage({ message }: { message: ChatMessage }) {
         </div>
       ) : null}
       <div
-        className={`min-w-0 max-w-full rounded-lg bg-(--bubble) px-4 py-2 text-[length:var(--codex-chat-font-size)] leading-[1.5] text-(--fg)/85 transition-opacity duration-500 ${pending ? "opacity-45" : "opacity-100"}`}
+        className={`min-w-0 max-w-[min(90%,42rem)] rounded-md bg-(--bubble) px-3 py-1.5 text-[length:var(--codex-chat-font-size)] leading-[1.45] text-(--fg)/85 transition-opacity duration-500 ${pending ? "opacity-45" : "opacity-100"}`}
       >
         <div className="whitespace-pre-wrap break-words">{message.text}</div>
         {message.attachments?.length ? (

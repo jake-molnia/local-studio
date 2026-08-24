@@ -103,17 +103,17 @@ export function OpenApiPanel() {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-(--color-panel)">
-      <div className="mx-auto max-w-5xl p-5">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-(--border) pb-5">
+      <div className="mx-auto max-w-4xl p-3 sm:p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-(--border) pb-3">
           <div>
             <div className="text-[length:var(--fs-sm)] text-(--color-foreground-subtlest)">
               OpenAPI {spec?.openapi ?? "reference"}
             </div>
-            <h2 className="mt-1 text-[length:var(--fs-2xl)] font-semibold tracking-tight text-(--fg)">
+            <h2 className="mt-0.5 text-[length:var(--fs-xl)] font-semibold tracking-tight text-(--fg)">
               {spec?.info.title ?? (loading ? "Loading controller API…" : "Controller API")}
             </h2>
             {spec?.info.description ? (
-              <p className="mt-2 max-w-2xl text-[length:var(--fs-sm)] leading-5 text-(--color-foreground-subtle)">
+              <p className="mt-1 max-w-2xl text-[length:var(--fs-xs)] leading-5 text-(--color-foreground-subtle)">
                 {spec.info.description}
               </p>
             ) : null}
@@ -147,7 +147,7 @@ export function OpenApiPanel() {
         ) : null}
 
         {!error && operations.length > 0 ? (
-          <div className="mt-3">
+          <div className="mt-2">
             <TableFrame minWidthClass="min-w-[40rem]">
               <thead>
                 <tr>

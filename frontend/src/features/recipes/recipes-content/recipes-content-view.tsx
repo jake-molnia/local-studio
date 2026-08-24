@@ -147,8 +147,8 @@ export function RecipesContentView(props: Props) {
   return (
     <>
       {embedded ? (
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--ui-separator) pb-3">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-(--ui-separator) pb-2">
             <Tabs variant="pill" items={MODEL_TABS} activeTab={tab} onSelectTab={setTab} />
             <div className="flex items-center gap-2">
               {managementAction}
@@ -156,7 +156,7 @@ export function RecipesContentView(props: Props) {
                 onRefresh={onRefresh}
                 loading={refreshing || loading}
                 label="Refresh models"
-                className="h-8 w-8"
+                className="h-7 w-7"
               />
             </div>
           </div>

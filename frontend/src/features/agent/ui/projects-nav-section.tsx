@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Button, UiModal, UiModalBody, UiModalFooter, UiModalHeader } from "@/ui";
 import { PlusIcon } from "@/ui/icons";
 import { usePersistentTerminalOwners } from "@/features/agent/ui/use-persistent-terminal-owners";
@@ -45,6 +45,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [terminalsExpanded, setTerminalsExpanded] = useState(true);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
+  const addProjectButtonRef = useRef<HTMLButtonElement>(null);
   const removal = useProjectRemoval(projectsContext.removeProject, setOpenIds, setAddError);
 
   const handleAddProject = useCallback(async () => {
@@ -125,13 +126,14 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
     projects: (
       <>
         <SidebarSectionHeader
-          label="Projects"
+          label="Workspaces"
           open={projectsExpanded}
           onToggle={() => setProjectsExpanded((value) => !value)}
           {...sections.headerDragProps("projects")}
           action={
             <button
               type="button"
+              ref={addProjectButtonRef}
               onClick={handleAddProject}
               className="flex h-5 w-5 items-center justify-center rounded text-(--dim) transition-colors hover:text-(--fg)"
               title="Add folder"
@@ -240,6 +242,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         error={addError}
         onClose={() => setDirectoryModalOpen(false)}
         onSelect={(directoryPath) => void handleDirectoryPicked(directoryPath)}
+        anchorRef={addProjectButtonRef}
       />
       <ProjectRemoveConfirmModal
         project={removal.project}

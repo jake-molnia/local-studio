@@ -24,7 +24,7 @@ function UiModal({ isOpen, onClose, children, className, maxWidth = "max-w-lg" }
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+    <div className="ui-scrim-enter fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
       <button
         type="button"
         tabIndex={-1}
@@ -39,7 +39,7 @@ function UiModal({ isOpen, onClose, children, className, maxWidth = "max-w-lg" }
         aria-modal="true"
         aria-labelledby={titleId}
         className={cx(
-          `relative z-10 flex max-h-full w-full flex-col outline-none ${MODAL_SURFACE_CLASS}`,
+          `ui-modal-enter relative z-10 flex max-h-full w-full flex-col outline-none ${MODAL_SURFACE_CLASS}`,
           maxWidth,
           className,
         )}
@@ -75,10 +75,7 @@ function UiModalHeader({
 
   return (
     <div
-      className={cx(
-        "flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5",
-        className,
-      )}
+      className={cx("flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5", className)}
     >
       <div className="flex min-w-0 items-center gap-2">
         {icon}
@@ -94,8 +91,9 @@ function UiModalHeader({
         {showCloseButton && onClose ? (
           <button
             type="button"
+            data-ui-control="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg) active:scale-[0.98]"
+            className="flex h-7 w-7 items-center justify-center rounded-[var(--rad-sm)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
             aria-label={closeLabel}
           >
             {closeIcon ?? <X className="h-3.5 w-3.5" />}
@@ -130,10 +128,7 @@ interface UiModalFooterProps {
 function UiModalFooter({ children, leading, className }: UiModalFooterProps) {
   return (
     <div
-      className={cx(
-        "flex shrink-0 items-center justify-between gap-3 px-6 pb-5 pt-4",
-        className,
-      )}
+      className={cx("flex shrink-0 items-center justify-between gap-3 px-6 pb-5 pt-4", className)}
     >
       <div className="flex items-center gap-2">{leading}</div>
       <div className="flex items-center gap-2">{children}</div>

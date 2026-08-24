@@ -20,6 +20,7 @@ import type {
   AgentModel,
   PaneId,
   WorkspaceAction,
+  WorkspaceSessionPayload,
   WorkspaceState,
 } from "@/features/agent/workspace/types";
 import { useProjects } from "@/features/agent/projects/context";
@@ -37,7 +38,6 @@ import {
   useWorkspaceRuntimeSync,
 } from "@/features/agent/ui/use-workspace-effects";
 import type { ChatPaneHandle } from "@/features/agent/ui/chat-pane";
-import type { SessionDropPayload } from "@/features/agent/ui/pane-grid";
 import {
   readDefaultAgentModel,
   writeDefaultAgentModel,
@@ -45,7 +45,7 @@ import {
 
 export type WorkspaceHandles = {
   registerComputerAside: (element: HTMLElement | null) => void;
-  openSessionPayloadInPane: (paneId: PaneId, payload: SessionDropPayload) => void;
+  openSessionPayloadInPane: (paneId: PaneId, payload: WorkspaceSessionPayload) => void;
   renameTab: (paneId: PaneId, tabId: string, title: string) => void;
   splitTabIntoNewPane: (paneId: PaneId, tabId: string) => void;
   registerPaneHandle: (paneId: PaneId, handle: ChatPaneHandle | null) => void;
@@ -59,7 +59,7 @@ export type WorkspaceHandles = {
     paneId: PaneId,
     direction: "vertical" | "horizontal",
     side: "a" | "b",
-    payload: SessionDropPayload,
+    payload: WorkspaceSessionPayload,
   ) => void;
   selectPaneModel: (paneId: PaneId, modelId: string) => void;
   setDefaultModel: (modelId: string) => void;
@@ -242,7 +242,7 @@ export function useWorkspace({ ephemeral = false }: UseWorkspaceOptions = {}): U
       registerComputerAside: (element: HTMLElement | null) => {
         computerAsideRef.current = element;
       },
-      openSessionPayloadInPane: (paneId: PaneId, payload: SessionDropPayload) =>
+      openSessionPayloadInPane: (paneId: PaneId, payload: WorkspaceSessionPayload) =>
         dispatch({ type: "openSessionPayloadInPane", paneId, payload, tab: makeFreshTab() }),
       renameTab: (paneId: PaneId, tabId: string, title: string) =>
         dispatch({ type: "renameTab", paneId, tabId, title }),
@@ -277,7 +277,7 @@ export function useWorkspace({ ephemeral = false }: UseWorkspaceOptions = {}): U
         paneId: PaneId,
         direction: "vertical" | "horizontal",
         side: "a" | "b",
-        payload: SessionDropPayload,
+        payload: WorkspaceSessionPayload,
       ) =>
         dispatch({
           type: "splitPaneWithPayload",

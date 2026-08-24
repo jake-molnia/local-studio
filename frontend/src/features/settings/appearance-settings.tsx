@@ -13,7 +13,7 @@ import {
   type ThemeTokens,
 } from "@/lib/themes";
 import { applyTokensToDocument, applyUiControl } from "@/lib/theme-runtime";
-import { ColorField, SegmentedControl, type SegmentedItem, Slider } from "@/ui";
+import { ColorField, SegmentedControl, Select, type SegmentedItem, Slider } from "@/ui";
 import type { PreviewHeight } from "@/ui/preview-scroll";
 import {
   TOOL_PREVIEW_HEIGHT_OPTIONS,
@@ -102,6 +102,17 @@ function readVar(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function readRemVar(name: string, fallback: number): number {
+  if (typeof document === "undefined") return fallback;
+  const root = getComputedStyle(document.documentElement);
+  const value = root.getPropertyValue(name).trim();
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (!value.endsWith("px")) return parsed;
+  const rem = Number.parseFloat(root.fontSize);
+  return Number.isFinite(rem) && rem > 0 ? parsed / rem : fallback;
+}
+
 function ThemeSwatches({ theme }: { theme: ThemeMeta }) {
   return (
     <div className="flex items-center gap-0.5">
@@ -151,7 +162,7 @@ export function AppearanceSettings() {
   const [chatLineHeight, setChatLineHeight] = useState(() =>
     readVar("--codex-chat-line-height", 1.5),
   );
-  const [chatWidth, setChatWidth] = useState(() => readVar("--composer-w", 48));
+  const [chatWidth, setChatWidth] = useState(() => readRemVar("--thread-w", 56));
   const [bubbleTone, setBubbleTone] = useState(() => readVarString("--bubble", "#282828"));
   const setChatFont = (value: number) => {
     setChatFontSize(value);
@@ -163,7 +174,7 @@ export function AppearanceSettings() {
   };
   const setChatColumn = (value: number) => {
     setChatWidth(value);
-    applyUiControl("--composer-w", `${value}rem`);
+    applyUiControl("--thread-w", `${value}rem`);
   };
   const setBubble = (value: string) => {
     setBubbleTone(value);
@@ -308,7 +319,7 @@ export function AppearanceSettings() {
                   </span>
                 </button>
                 {expanded ? (
-                  <div className="grid grid-cols-1 gap-1 p-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-1 p-2">
                     {themes.map((theme) => {
                       const active = theme.id === themeId && !isCustomActive;
                       const font = FONT_FAMILY_BY_ID.get(theme.fontFamilyId);
@@ -428,23 +439,15 @@ export function AppearanceSettings() {
         <SettingsRow
           label="Font family"
           control={
-            <div className="relative w-full max-w-[184px]">
-              <select
-                value={fontFamilyId}
-                onChange={(e) => setFontFamilyId(e.target.value as FontFamilyId)}
-                className="h-7 w-full appearance-none rounded-md border border-(--ui-border) bg-(--ui-bg) pl-7 pr-7 text-[length:var(--fs-md)] text-(--ui-fg) outline-none focus:border-(--ui-accent)/40"
-              >
-                {FONT_FAMILY_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[length:var(--fs-sm)] text-(--ui-muted)">
-                Aa
-              </span>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-(--ui-muted)" />
-            </div>
+            <Select
+              compact
+              value={fontFamilyId}
+              onChange={(event) => setFontFamilyId(event.target.value as FontFamilyId)}
+              options={FONT_FAMILY_OPTIONS.map((option) => ({
+                value: option.id,
+                label: option.label,
+              }))}
+            />
           }
         />
         <SettingsRow
@@ -554,12 +557,12 @@ export function AppearanceSettings() {
         />
         <SettingsRow
           label="Chat column width"
-          description="Maximum width of the thread and composer"
+          description="Maximum width of the message thread"
           control={
             <div className="flex w-full items-center gap-3">
               <Slider
                 value={chatWidth}
-                min={40}
+                min={26}
                 max={64}
                 step={1}
                 onChange={setChatColumn}

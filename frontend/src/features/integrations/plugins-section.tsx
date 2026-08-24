@@ -151,9 +151,9 @@ function PluginEditorDrawer({
       width={860}
     >
       <Alert variant="warning" className="mb-6">
-        A plugin runs inside the agent process with your user account — the same reach as the
-        agent itself, with no sandbox between them. Saving writes the file and nothing more; the
-        code first runs when your next message rebuilds the session.
+        A plugin runs inside the agent process with your user account — the same reach as the agent
+        itself, with no sandbox between them. Saving writes the file and nothing more; the code
+        first runs when your next message rebuilds the session.
       </Alert>
 
       {creating ? (
@@ -177,8 +177,8 @@ function PluginEditorDrawer({
         <div className="mb-2">
           <h3 className="text-[length:var(--fs-base)] font-medium text-(--ui-fg)">Source</h3>
           <p className="mt-0.5 text-[length:var(--fs-sm)] text-(--ui-muted)">
-            TypeScript, compiled by the agent on load. Imports resolve against the agent&rsquo;s
-            own dependencies.
+            TypeScript, compiled by the agent on load. Imports resolve against the agent&rsquo;s own
+            dependencies.
           </p>
         </div>
         <textarea
@@ -287,12 +287,12 @@ function PluginRowView({
   );
 }
 
-export function PluginsSection() {
+export function PluginsSection({ searchQuery }: { searchQuery?: string } = {}) {
   const [plugins, setPlugins] = useState<readonly PluginRow[]>([]);
   const [directory, setDirectory] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [query, setQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<PluginRow | null>(null);
   const [composing, setComposing] = useState(false);
@@ -337,6 +337,7 @@ export function PluginsSection() {
       .finally(() => setLoadingSource(false));
   };
 
+  const query = searchQuery ?? localQuery;
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return plugins;
@@ -362,12 +363,14 @@ export function PluginsSection() {
         }
         actions={
           <div className="flex items-center gap-2">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder="Search plugins"
-              className="w-56"
-            />
+            {searchQuery === undefined ? (
+              <SearchInput
+                value={query}
+                onChange={setLocalQuery}
+                placeholder="Search plugins"
+                className="w-56"
+              />
+            ) : null}
             <StatusText tone={error ? "warn" : loaded ? "ok" : "dim"}>
               {loaded ? `${visible.length} of ${plugins.length}` : "reading"}
             </StatusText>

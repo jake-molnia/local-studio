@@ -93,16 +93,7 @@ export function Timeline({
 
   if (emptyPrompt) {
     return (
-      <div className="flex min-h-0 flex-1 overflow-y-auto bg-(--agent-bg) px-6 pb-10 pt-2">
-        <div className="agent-thread-shell mx-auto flex flex-1">
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-            <p className="max-w-[24ch] text-[clamp(1.45rem,2.6vw,2.1rem)] font-semibold leading-[1.22] tracking-[-0.02em] text-(--fg)/90">
-              A dream is something you build for yourself.
-            </p>
-            <p className="text-[length:var(--fs-xl)] text-(--dim)">Just talk to it.</p>
-          </div>
-        </div>
-      </div>
+      <div className="agent-chat-empty flex min-h-0 flex-1 bg-(--agent-bg)" aria-hidden="true" />
     );
   }
 
@@ -113,7 +104,7 @@ export function Timeline({
         <div
           ref={setScroller}
           data-timeline-scroller
-          className="agent-chat-scroller min-h-0 min-w-0 flex-1 overflow-y-auto bg-(--agent-bg) px-4 pb-0 pt-2 [overflow-anchor:auto] [overscroll-behavior:contain] [scroll-behavior:auto] [scrollbar-gutter:stable] sm:px-5"
+          className="agent-chat-scroller min-h-0 min-w-0 flex-1 overflow-y-auto bg-(--agent-bg) px-3 pb-0 pt-1.5 [overflow-anchor:auto] [overscroll-behavior:contain] [scroll-behavior:auto] [scrollbar-gutter:stable] sm:px-4"
         >
           <div data-timeline-list className="agent-thread-shell mx-auto flex flex-col">
             {hasEarlier && onLoadEarlier ? (
@@ -127,7 +118,7 @@ export function Timeline({
                 <div
                   key={message.id}
                   data-timeline-message-id={message.id}
-                  className={`${isGrouped ? "pt-2" : "pt-4 sm:pt-6"} ${isLast ? "pb-4" : ""}`}
+                  className={`${isGrouped ? "pt-1.5" : "pt-3 sm:pt-4"} ${isLast ? "pb-3" : ""}`}
                 >
                   <MemoMessage
                     message={message}
@@ -140,7 +131,7 @@ export function Timeline({
               );
             })}
             {running && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" ? (
-              <div className="pt-4 pb-4 sm:pt-6">
+              <div className="pt-3 pb-3 sm:pt-4">
                 <span className="codex-shimmer-text text-[length:var(--fs-base)] font-normal leading-5">
                   Thinking
                 </span>

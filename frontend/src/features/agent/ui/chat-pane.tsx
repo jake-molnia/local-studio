@@ -91,6 +91,8 @@ import { cx } from "@/ui/utils";
 import { ExtensionUiDialog } from "@/features/agent/ui/extension-ui-dialog";
 export type { ChatPaneHandle };
 
+type ComposerPopover = "context" | "model";
+
 const Timeline = dynamic(
   () => import("@/features/agent/ui/timeline/timeline").then((mod) => mod.Timeline),
   { ssr: false, loading: () => <TimelineFallback /> },
@@ -111,16 +113,7 @@ function downloadTextFile(filename: string, content: string): void {
 
 function EmptyPromptTimeline() {
   return (
-    <div className="flex min-h-0 flex-1 overflow-y-auto bg-(--agent-bg) px-6 pb-10 pt-2">
-      <div className="agent-thread-shell mx-auto flex flex-1">
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-          <p className="max-w-[24ch] text-[clamp(1.45rem,2.6vw,2.1rem)] font-semibold leading-[1.22] tracking-[-0.02em] text-(--fg)/90">
-            A dream is something you build for yourself.
-          </p>
-          <p className="text-[length:var(--fs-xl)] text-(--dim)">Just talk to it.</p>
-        </div>
-      </div>
-    </div>
+    <div className="agent-chat-empty flex min-h-0 flex-1 bg-(--agent-bg)" aria-hidden="true" />
   );
 }
 
@@ -131,9 +124,7 @@ function TimelineFallback() {
 function chatPaneClassName(composerOnly: boolean): string {
   return cx(
     "relative flex min-h-0 min-w-0 flex-1 flex-col",
-    composerOnly
-      ? "bg-transparent"
-      : "bg-(--agent-bg) shadow-[inset_1px_0_rgba(255,255,255,0.015)]",
+    composerOnly ? "bg-transparent" : "bg-(--agent-bg)",
   );
 }
 
@@ -227,6 +218,8 @@ export type ComposerModelSelectorProps = {
   reasoningLevels: readonly AgentThinkingLevel[];
   reasoningDisabled: boolean;
   onSelectReasoning: (level: AgentThinkingLevel) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
 function renderComposerModelSelector(
@@ -385,11 +378,21 @@ export function ChatPane({
     },
     [activeTab, running, updateTab],
   );
+  const [activeComposerPopover, setActiveComposerPopover] = useState<ComposerPopover | null>(null);
+  const contextOpen = activeComposerPopover === "context";
+  const modelPickerOpen = activeComposerPopover === "model";
   const composerModelSelector = renderComposerModelSelector(modelSelector, {
     reasoningLevel: thinkingLevel,
     reasoningLevels: modelThinkingLevels,
     reasoningDisabled: Boolean(running),
     onSelectReasoning: selectThinkingLevel,
+    open: modelPickerOpen,
+    onOpenChange: (next) => {
+      setActiveComposerPopover((current) => {
+        if (next) return "model";
+        return current === "model" ? null : current;
+      });
+    },
   });
 
   const activePiSessionId = activeTab?.piSessionId ?? null;
@@ -435,6 +438,10 @@ export function ChatPane({
     tools.setComputerOpen(true);
   }, [tools]);
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+  const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useMountSubscription(() => {
+    setActiveComposerPopover(null);
+  }, [activeTabId]);
   const openDiffDrawer = useCallback(() => setDiffDrawerOpen(true), []);
   const closeDiffDrawer = useCallback(() => setDiffDrawerOpen(false), []);
   const exportSession = useCallback(() => {
@@ -486,7 +493,7 @@ export function ChatPane({
           toggleBrowserTool: onToggleBrowserTool,
           // The command is `/connectors`, so it lands on the tab it names
           // rather than on whichever tab the page happens to open with.
-          openIntegrations: () => router.push("/integrations#connectors"),
+          openIntegrations: () => router.push("/customize#connectors"),
           ...(openTerminalAction ? { openTerminal: openTerminalAction } : {}),
           ...(onForkSession ? { forkSession: onForkSession } : {}),
           ...(canExport ? { exportSession } : {}),
@@ -629,6 +636,7 @@ export function ChatPane({
     <section
       onMouseDownCapture={onFocus}
       data-pane-id={paneId}
+      data-empty-prompt={showEmptyPrompt ? "true" : undefined}
       className={chatPaneClassName(composerOnly)}
     >
       <ChatPaneChrome
@@ -687,8 +695,6 @@ export function ChatPane({
         <AgentComposerFrame
           attachments={attachments}
           banner={composerVisual.banner}
-          browserToolEnabled={browserToolEnabled}
-          browserBackend={browserBackend}
           composerDragActive={composerDragActive}
           contextWindow={effectiveContextWindow}
           currentContextTokens={currentContextTokens}
@@ -702,6 +708,11 @@ export function ChatPane({
           mentionRows={mentionRows}
           modelSupportsVision={modelSupportsVision}
           modelSelector={composerModelSelector}
+          contextOpen={contextOpen}
+          contextTriggerRef={contextTriggerRef}
+          onOpenContext={() => {
+            setActiveComposerPopover((current) => (current === "context" ? null : "context"));
+          }}
           onAbortTurn={() => void abortTurn()}
           onAttachFiles={(files) => void attachFiles(files)}
           onComposerChange={handleComposerChange}
@@ -720,8 +731,6 @@ export function ChatPane({
           onRemoveLoadedContext={removeLoadedContext}
           onSelectMention={(entry) => void handleSelectMention(entry)}
           onSubmit={handleComposerSubmit}
-          onToggleBrowserBackend={onToggleBrowserBackend}
-          onToggleBrowserTool={onToggleBrowserTool}
           placeholder={goalModeApi.goalPlaceholder ?? composerVisual.placeholder}
           drawer={
             <SessionProjectDrawer
@@ -735,6 +744,19 @@ export function ChatPane({
               onInitGit={onInitGit}
               onOpenDiff={openDiffDrawer}
               showProjectRow={composerVisual.showProjectRow}
+              open={contextOpen}
+              onOpenChange={(next) => {
+                setActiveComposerPopover((current) => {
+                  if (next) return "context";
+                  return current === "context" ? null : current;
+                });
+              }}
+              contextTriggerRef={contextTriggerRef}
+              onRequestAttach={() => fileInputRef.current?.click()}
+              browserToolEnabled={browserToolEnabled}
+              browserBackend={browserBackend}
+              onToggleBrowserBackend={onToggleBrowserBackend}
+              onToggleBrowserTool={onToggleBrowserTool}
               running={Boolean(running)}
               onProjectPicked={handleProjectPicked}
               queueItems={visibleQueueItems}

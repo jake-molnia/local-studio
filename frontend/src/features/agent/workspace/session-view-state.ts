@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   COMPUTER_TAB_IDS,
+  type BrowserState,
   type ComputerState,
   type ComputerTab,
 } from "@/features/agent/tools/types";
@@ -17,11 +18,13 @@ export type SessionViewIdentity = {
 };
 
 export type SessionComputerState = Pick<ComputerState, "open" | "tab" | "tabs" | "width">;
+export type SessionBrowserState = BrowserState;
 
 export type SessionViewState = {
   scrollTop: number;
   stickToBottom: boolean;
   computer?: SessionComputerState;
+  browser?: SessionBrowserState;
 };
 
 const SessionComputerStateSchema = Schema.Struct({
@@ -31,10 +34,18 @@ const SessionComputerStateSchema = Schema.Struct({
   width: Schema.Number,
 });
 
+const SessionBrowserStateSchema = Schema.Struct({
+  enabled: Schema.Boolean,
+  backend: Schema.String,
+  url: Schema.String,
+  input: Schema.String,
+});
+
 const SessionViewStateSchema = Schema.Struct({
   scrollTop: Schema.Number,
   stickToBottom: Schema.Boolean,
   computer: Schema.optional(SessionComputerStateSchema),
+  browser: Schema.optional(SessionBrowserStateSchema),
 });
 
 const SessionViewStoreSchema = Schema.Struct({
@@ -69,10 +80,19 @@ function normalizeComputerState(
 
 function normalizeView(value: typeof SessionViewStateSchema.Type): SessionViewState {
   const computer = value.computer ? normalizeComputerState(value.computer) : undefined;
+  const browser: SessionBrowserState | undefined = value.browser
+    ? {
+        enabled: value.browser.enabled,
+        backend: value.browser.backend === "chrome" ? "chrome" : "embedded",
+        url: value.browser.url.slice(0, 8192),
+        input: value.browser.input.slice(0, 8192),
+      }
+    : undefined;
   return {
     scrollTop: Math.max(0, value.scrollTop),
     stickToBottom: value.stickToBottom,
     ...(computer ? { computer } : {}),
+    ...(browser ? { browser } : {}),
   };
 }
 
@@ -139,4 +159,8 @@ export function computerSessionView(computer: ComputerState): SessionComputerSta
     tabs: computer.tabs,
     width: computer.width,
   };
+}
+
+export function browserSessionView(browser: BrowserState): SessionBrowserState {
+  return browser;
 }

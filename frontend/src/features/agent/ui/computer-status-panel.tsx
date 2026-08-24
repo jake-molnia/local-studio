@@ -268,8 +268,8 @@ function usedSkillsForSession(session: Session | null): ComposerSkillRef[] {
 
 function UsedSkillsSection({ skills }: { skills: ComposerSkillRef[] }) {
   return (
-    <div className="mt-4 border-t border-(--border) pt-3">
-      <div className="mb-2 flex items-center gap-2 text-[length:var(--fs-sm)] text-(--dim)">
+    <div className="mt-3 border-t border-(--border)/70 pt-2.5">
+      <div className="mb-1.5 flex items-center gap-2 text-[length:var(--fs-xs)] text-(--dim)">
         <span>Skills · session</span>
         <span className="font-mono normal-case tracking-normal">{skills.length}</span>
       </div>
@@ -282,7 +282,7 @@ function UsedSkillsSection({ skills }: { skills: ComposerSkillRef[] }) {
           {skills.map((skill) => (
             <li
               key={skill.id || skill.path || skill.name}
-              className="flex min-w-0 items-center gap-2 py-0.5 text-[length:var(--fs-sm)]"
+              className="flex min-w-0 items-center gap-2 py-0.5 text-[length:var(--fs-xs)]"
               title={skill.path}
             >
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--ok)/75" />
@@ -315,9 +315,9 @@ function SessionSummary({
   messageCount: number;
 }) {
   return (
-    <div className="border-b border-(--border) pb-3">
+    <div className="border-b border-(--border)/70 pb-2.5">
       <div className="truncate text-sm font-medium text-(--fg)">{title}</div>
-      <div className="mt-2 grid grid-cols-3 gap-3 font-mono">
+      <div className="mt-1.5 grid grid-cols-3 gap-2 font-mono">
         <MiniStat label="session" value={formatTokenCount(sessionTokens)} />
         <MiniStat label="max" value={formatTokenCount(allTokens)} />
         <MiniStat label="msgs" value={String(messageCount)} />
@@ -329,20 +329,16 @@ function SessionSummary({
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[length:var(--fs-sm)] text-(--dim)">
-        {label}
-      </div>
-      <div className="mt-1 truncate text-[length:var(--fs-base)] text-(--fg)">{value}</div>
+      <div className="truncate text-[length:var(--fs-sm)] text-(--dim)">{label}</div>
+      <div className="mt-0.5 truncate text-[length:var(--fs-sm)] text-(--fg)">{value}</div>
     </div>
   );
 }
 
 function StatusSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="mt-4 border-t border-(--border) pt-3">
-      <div className="mb-2 text-[length:var(--fs-sm)] text-(--dim)">
-        {title}
-      </div>
+    <div className="mt-3 border-t border-(--border)/70 pt-2.5">
+      <div className="mb-1.5 text-[length:var(--fs-xs)] text-(--dim)">{title}</div>
       <div className="grid gap-1">{children}</div>
     </div>
   );

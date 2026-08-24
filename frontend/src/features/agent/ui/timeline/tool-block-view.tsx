@@ -152,7 +152,7 @@ function ToolSummary({
   return (
     <details className="group min-w-0" open={expanded}>
       <summary
-        className="flex min-h-6 min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
+        className="flex min-h-5 min-w-0 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
         onClick={(event) => {
           event.preventDefault();
           setUserOpen(!expanded);
@@ -160,7 +160,7 @@ function ToolSummary({
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-(--dim)/65" strokeWidth={1.7} />
         <span
-          className={`shrink-0 text-[length:var(--fs-base)] font-normal leading-5 ${
+          className={`shrink-0 text-[length:var(--fs-sm)] font-normal leading-5 ${
             running ? "codex-shimmer-text" : idleColor
           }`}
         >

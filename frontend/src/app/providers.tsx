@@ -3,6 +3,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ProjectsProvider } from "@/features/agent/projects/context";
+import { ToolsProvider } from "@/features/agent/tools/context";
 import { requestIdleWork } from "@/lib/idle-work";
 
 type GlobalListenersComponent = ComponentType;
@@ -37,8 +38,10 @@ function LazyGlobalListeners() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <ProjectsProvider>
-      <LazyGlobalListeners />
-      {children}
+      <ToolsProvider>
+        <LazyGlobalListeners />
+        {children}
+      </ToolsProvider>
     </ProjectsProvider>
   );
 }

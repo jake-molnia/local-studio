@@ -19,10 +19,7 @@ export {
   ReloadIcon,
   StopIcon,
   FileIcon,
-  GlobeIcon,
   GitBranchIcon,
-  UserBrowserIcon,
-  PanelIcon,
   MoreIcon,
   PinIcon,
   PinOffIcon,
@@ -31,8 +28,6 @@ export {
   StatusIcon,
   ModelsIcon,
   AutomationsIcon,
-  IntegrationsIcon,
-  ConfigureIcon,
   UsageIcon,
   NewTaskIcon,
   SettingsIcon,
@@ -41,12 +36,7 @@ export {
 } from "./icons";
 
 // Sidebar toggles — see panel-toggle-icons.tsx for why these are not lucide's.
-export {
-  PanelLeftFilled,
-  PanelLeftHollow,
-  PanelRightFilled,
-  PanelRightHollow,
-} from "./panel-toggle-icons";
+export { PanelLeftFilled, PanelLeftHollow } from "./panel-toggle-icons";
 
 // Lucide-react re-exports — all icons used across the app
 export {
@@ -126,6 +116,7 @@ export {
   Slash,
   Smartphone,
   Sparkles,
+  Star,
   Square,
   SquarePen,
   Sun,

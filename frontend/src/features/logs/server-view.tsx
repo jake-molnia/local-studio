@@ -39,8 +39,8 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           logs.selectedSession ? logs.loadLogContent(logs.selectedSession) : undefined
         }
       />
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
-        <ServerStatusAside
+      {embedded ? (
+        <EmbeddedServerBody
           realtime={realtime}
           backendUrl={backendUrl}
           tab={tab}
@@ -48,10 +48,6 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           sessions={logs.filteredSessions}
           selectedSession={logs.selectedSession}
           onSelectSession={logs.handleSelectSession}
-        />
-        <ServerViewerPanel
-          tab={tab}
-          selectedSession={logs.selectedSession}
           loadingContent={logs.loadingContent}
           autoScroll={logs.autoScroll}
           setAutoScroll={logs.setAutoScroll}
@@ -59,19 +55,111 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
           hasLogContent={logs.hasLogContent}
           renderLogs={logs.renderLogs}
         />
-      </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden lg:grid-cols-[248px_minmax(0,1fr)]">
+          <ServerStatusAside
+            realtime={realtime}
+            backendUrl={backendUrl}
+            tab={tab}
+            setTab={setTab}
+            sessions={logs.filteredSessions}
+            selectedSession={logs.selectedSession}
+            onSelectSession={logs.handleSelectSession}
+          />
+          <ServerViewerPanel
+            tab={tab}
+            selectedSession={logs.selectedSession}
+            loadingContent={logs.loadingContent}
+            autoScroll={logs.autoScroll}
+            setAutoScroll={logs.setAutoScroll}
+            logRef={logs.logRef}
+            hasLogContent={logs.hasLogContent}
+            renderLogs={logs.renderLogs}
+          />
+        </div>
+      )}
     </>
   );
 
   if (embedded) {
     return (
-      <div className="flex min-h-[44rem] flex-col overflow-hidden rounded-xl border border-(--ui-border) bg-(--ui-surface)">
+      <div className="flex min-h-[32rem] flex-col overflow-hidden rounded-md border border-(--ui-border) bg-(--ui-surface) sm:min-h-[44rem]">
         {content}
       </div>
     );
   }
 
   return <AppPage className="flex h-full min-h-0 flex-col overflow-hidden">{content}</AppPage>;
+}
+
+function EmbeddedServerBody({
+  realtime,
+  backendUrl,
+  tab,
+  setTab,
+  sessions,
+  selectedSession,
+  onSelectSession,
+  loadingContent,
+  autoScroll,
+  setAutoScroll,
+  logRef,
+  hasLogContent,
+  renderLogs,
+}: {
+  realtime: RealtimeStatusSnapshot;
+  backendUrl: string;
+  tab: Tab;
+  setTab: (t: Tab) => void;
+  sessions: ReturnType<typeof useLogs>["filteredSessions"];
+  selectedSession: string | null;
+  onSelectSession: (id: string) => void;
+  loadingContent: boolean;
+  autoScroll: boolean;
+  setAutoScroll: (v: boolean) => void;
+  logRef: React.RefObject<HTMLDivElement | null>;
+  hasLogContent: boolean;
+  renderLogs: () => ReactNode;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+      <div className="grid grid-cols-1 gap-x-5 gap-y-1 border-b border-(--border) py-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ConnectionGroup realtime={realtime} backendUrl={backendUrl} />
+        <RuntimeGroup realtime={realtime} />
+        <BackendsGroup realtime={realtime} />
+        <ProcessGroup realtime={realtime} />
+        <ServicesGroup realtime={realtime} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-(--border) py-2">
+        <Tabs
+          variant="pill"
+          items={[
+            { id: "logs", label: "Server Logs" },
+            { id: "docs", label: "API Docs" },
+          ]}
+          activeTab={tab}
+          onSelectTab={setTab}
+        />
+        <EmbeddedSessionList
+          sessions={sessions}
+          selectedSession={selectedSession}
+          onSelect={onSelectSession}
+          onActivate={() => setTab("logs")}
+        />
+      </div>
+      <ServerViewerPanel
+        embedded
+        tab={tab}
+        selectedSession={selectedSession}
+        loadingContent={loadingContent}
+        autoScroll={autoScroll}
+        setAutoScroll={setAutoScroll}
+        logRef={logRef}
+        hasLogContent={hasLogContent}
+        renderLogs={renderLogs}
+      />
+    </div>
+  );
 }
 
 function ServerHeader({
@@ -92,7 +180,7 @@ function ServerHeader({
   onRefresh: () => void;
 }) {
   return (
-    <header className={`border-b border-(--border) ${embedded ? "px-4 py-3" : "px-5 py-4"}`}>
+    <header className={`border-b border-(--border) ${embedded ? "px-3 py-2" : "px-4 py-3"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           {embedded ? (
@@ -101,10 +189,10 @@ function ServerHeader({
             </CensoredApiUrl>
           ) : (
             <>
-              <div className="text-[length:var(--fs-sm)] text-(--color-foreground-subtle)">
+              <div className="text-[length:var(--fs-xs)] text-(--color-foreground-subtle)">
                 Server
               </div>
-              <h1 className="mt-1 text-[length:var(--fs-3xl)] font-semibold tracking-[-0.015em]">
+              <h1 className="mt-0.5 text-[length:var(--fs-xl)] font-semibold tracking-[-0.015em]">
                 Controller
               </h1>
               <CensoredApiUrl className="mt-1 block font-mono text-xs text-(--color-foreground-subtle)">
@@ -114,10 +202,18 @@ function ServerHeader({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill tone={connected ? "good" : "danger"} variant="badge">
+          <StatusPill
+            tone={connected ? "good" : "danger"}
+            variant="badge"
+            className="text-[length:var(--fs-xs)]"
+          >
             {connected ? "controller online" : "controller offline"}
           </StatusPill>
-          <StatusPill tone={running ? "good" : "default"} variant="badge">
+          <StatusPill
+            tone={running ? "good" : "default"}
+            variant="badge"
+            className="text-[length:var(--fs-xs)]"
+          >
             {running ? "inference serving" : "inference idle"}
           </StatusPill>
           <Button
@@ -160,7 +256,7 @@ function ServerStatusAside({
       <BackendsGroup realtime={realtime} />
       <ProcessGroup realtime={realtime} />
       <ServicesGroup realtime={realtime} />
-      <div className="border-t border-(--border) px-4 py-3">
+      <div className="border-t border-(--border) px-3 py-2">
         <Tabs
           variant="pill"
           items={[
@@ -304,7 +400,7 @@ function SessionList({
   onActivate: () => void;
 }) {
   return (
-    <div className="max-h-[34vh] overflow-y-auto px-2 pb-3">
+    <div className="max-h-[28vh] overflow-y-auto px-1.5 pb-2">
       {sessions.map((session) => (
         <button
           key={session.id}
@@ -313,7 +409,50 @@ function SessionList({
             onActivate();
             onSelect(session.id);
           }}
-          className={`mb-1 block w-full truncate rounded px-2 py-1.5 text-left text-[length:var(--fs-sm)] ${
+          className={`mb-0.5 block w-full truncate rounded px-2 py-1 text-left text-[length:var(--fs-xs)] ${
+            selectedSession === session.id
+              ? "bg-(--color-surface) text-(--fg)"
+              : "text-(--color-foreground-subtle) hover:bg-(--hover) hover:text-(--fg)"
+          }`}
+          title={session.id}
+        >
+          {session.recipe_name || session.model || session.id}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EmbeddedSessionList({
+  sessions,
+  selectedSession,
+  onSelect,
+  onActivate,
+}: {
+  sessions: ReturnType<typeof useLogs>["filteredSessions"];
+  selectedSession: string | null;
+  onSelect: (id: string) => void;
+  onActivate: () => void;
+}) {
+  if (sessions.length === 0) {
+    return (
+      <span className="text-[length:var(--fs-xs)] text-(--color-foreground-subtlest)">
+        No log streams
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+      {sessions.map((session) => (
+        <button
+          key={session.id}
+          type="button"
+          onClick={() => {
+            onActivate();
+            onSelect(session.id);
+          }}
+          className={`max-w-full truncate rounded px-2 py-1 text-left text-[length:var(--fs-xs)] transition-[background-color,color] duration-[var(--motion-fast)] ${
             selectedSession === session.id
               ? "bg-(--color-surface) text-(--fg)"
               : "text-(--color-foreground-subtle) hover:bg-(--hover) hover:text-(--fg)"
@@ -328,6 +467,7 @@ function SessionList({
 }
 
 function ServerViewerPanel(props: {
+  embedded?: boolean;
   tab: Tab;
   selectedSession: string | null;
   loadingContent: boolean;
@@ -338,10 +478,11 @@ function ServerViewerPanel(props: {
   renderLogs: () => ReactNode;
 }) {
   if (props.tab === "logs") return <LogsPanel {...props} />;
-  return <DocsPanel />;
+  return <DocsPanel embedded={props.embedded} />;
 }
 
 function LogsPanel({
+  embedded = false,
   selectedSession,
   loadingContent,
   autoScroll,
@@ -350,6 +491,7 @@ function LogsPanel({
   hasLogContent,
   renderLogs,
 }: {
+  embedded?: boolean;
   selectedSession: string | null;
   loadingContent: boolean;
   autoScroll: boolean;
@@ -359,8 +501,14 @@ function LogsPanel({
   renderLogs: () => ReactNode;
 }) {
   return (
-    <div className="min-h-0 p-4">
-      <section className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-lg border border-(--color-card-border) bg-(--color-card)">
+    <div className={`min-h-0 ${embedded ? "pt-3" : "p-3"}`}>
+      <section
+        className={`flex h-full min-h-[32rem] flex-col overflow-hidden ${
+          embedded
+            ? "border-y border-(--border) bg-(--color-card)/30"
+            : "rounded-md border border-(--color-card-border) bg-(--color-card)"
+        }`}
+      >
         <div className="flex min-h-10 items-center justify-between border-b border-(--color-card-border) px-3">
           <div className="truncate font-mono text-xs text-(--color-foreground-subtle)">
             {selectedSession ?? "select a log stream"}
@@ -402,10 +550,16 @@ function LogContent({
   return <div className="text-(--color-foreground-subtle)">No log content selected.</div>;
 }
 
-function DocsPanel() {
+function DocsPanel({ embedded = false }: { embedded?: boolean }) {
   return (
-    <div className="min-h-0 p-4">
-      <section className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-lg border border-(--color-card-border) bg-(--color-card)">
+    <div className={`min-h-0 ${embedded ? "pt-3" : "p-3"}`}>
+      <section
+        className={`flex h-full min-h-[32rem] flex-col overflow-hidden ${
+          embedded
+            ? "border-y border-(--border) bg-(--color-card)/30"
+            : "rounded-md border border-(--color-card-border) bg-(--color-card)"
+        }`}
+      >
         <div className="flex min-h-10 items-center justify-between border-b border-(--color-card-border) px-3 text-xs">
           <span className="text-(--color-foreground-subtle)">OpenAPI reference</span>
           <a
@@ -425,8 +579,8 @@ function DocsPanel() {
 
 function StatusGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="border-b border-(--border) px-4 py-3">
-      <div className="mb-2 text-[length:var(--fs-sm)] font-medium text-(--color-foreground-subtlest)">
+    <div className="border-b border-(--border) px-3 py-2">
+      <div className="mb-1.5 text-[length:var(--fs-xs)] font-medium text-(--color-foreground-subtlest)">
         {title}
       </div>
       <dl className="space-y-1 text-[length:var(--fs-sm)]">{children}</dl>

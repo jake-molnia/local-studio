@@ -23,7 +23,7 @@ export function TerminalRow({ owner, index }: { owner: TerminalOwner; index: num
   };
 
   return (
-    <div className="group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-1.5 text-(--fg) transition-colors hover:bg-(--hover)">
+    <div className="group relative flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] pl-2 pr-1.5 text-(--fg) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover)">
       <button
         type="button"
         onClick={open}
@@ -31,7 +31,7 @@ export function TerminalRow({ owner, index }: { owner: TerminalOwner; index: num
         className="flex min-w-0 flex-1 items-center gap-2 pr-6 text-left"
       >
         <TerminalSquare
-          className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity group-hover:opacity-90"
+          className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-90"
           strokeWidth={1.75}
         />
         <span className="truncate text-[length:var(--fs-md)] font-normal">{label}</span>
@@ -39,7 +39,7 @@ export function TerminalRow({ owner, index }: { owner: TerminalOwner; index: num
       <button
         type="button"
         onClick={() => removePersistentTerminalOwner(owner.mountKey)}
-        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity hover:text-(--err) group-hover:opacity-100"
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center text-(--dim)/55 opacity-0 transition-opacity duration-[var(--motion-fast)] hover:text-(--err) group-hover:opacity-100"
         title="Close terminal"
         aria-label={`Close terminal ${label}`}
       >
