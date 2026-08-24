@@ -433,11 +433,11 @@
 }
 
 :root {
-  --sidebar-w: 194px;
-  --sidebar-row-height: 26px;
-  --sidebar-row-gap: 1px;
-  --sidebar-row-radius: 6px;
-  --sidebar-padding-x: 6px;
+  --sidebar-w: 240px;
+  --sidebar-row-height: 32px;
+  --sidebar-row-gap: 2px;
+  --sidebar-row-radius: 7px;
+  --sidebar-padding-x: 8px;
   --row-h: 32px;
   --row-radius: var(--rad-md);
   --h-toolbar: 34px;

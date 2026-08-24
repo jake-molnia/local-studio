@@ -39,9 +39,9 @@ export interface AppSlice {
   setLastOpenFileByProject: (cwd: string, rel: string) => void;
 }
 
-export const DEFAULT_SIDEBAR_WIDTH = 194;
+export const DEFAULT_SIDEBAR_WIDTH = 240;
 
-const LEGACY_DEFAULT_SIDEBAR_WIDTHS = new Set([168, 176, 204, 220, 224, 240, 260, 275]);
+const LEGACY_DEFAULT_SIDEBAR_WIDTHS = new Set([168, 176, 194, 204, 220, 224, 260, 275]);
 
 function restoredSidebarWidth(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;

@@ -143,7 +143,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
           <button
             type="button"
             onClick={handleAddProject}
-            className="px-2 py-1 text-left text-[length:var(--fs-md)] text-(--dim) hover:text-(--fg)"
+            className="px-2 py-1.5 text-left text-[length:var(--fs-base)] leading-relaxed text-(--dim) hover:text-(--fg)"
           >
             No projects yet — pick a folder to get started.
           </button>

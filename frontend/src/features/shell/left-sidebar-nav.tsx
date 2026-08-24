@@ -119,10 +119,10 @@ export function NavItemDesktop({
       }`}
     >
       <Icon
-        className={`h-3.5 w-3.5 shrink-0 ${active ? "opacity-95" : "opacity-58"}`}
+        className={`h-4 w-4 shrink-0 ${active ? "opacity-95" : "opacity-58"}`}
         strokeWidth={1.6}
       />
-      <span className="whitespace-nowrap text-[length:var(--fs-xs)]">{label}</span>
+      <span className="whitespace-nowrap text-[length:var(--fs-md)]">{label}</span>
     </Link>
   );
 }
@@ -146,8 +146,8 @@ export function NavActionDesktop({
       title={shortcut ? `${label} (${shortcut})` : label}
       className="group flex h-[var(--sidebar-row-height)] w-full shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-(--fg)/85 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
     >
-      <Icon className="h-3.5 w-3.5 shrink-0 opacity-58 group-hover:opacity-95" strokeWidth={1.6} />
-      <span className="min-w-0 flex-1 truncate text-[length:var(--fs-xs)]">{label}</span>
+      <Icon className="h-4 w-4 shrink-0 opacity-58 group-hover:opacity-95" strokeWidth={1.6} />
+      <span className="min-w-0 flex-1 truncate text-[length:var(--fs-md)]">{label}</span>
       {shortcut ? (
         <kbd className="w-7 text-right text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
           {shortcut}

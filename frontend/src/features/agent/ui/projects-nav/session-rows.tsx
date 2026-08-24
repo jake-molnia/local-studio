@@ -99,18 +99,18 @@ export function ProjectRow({
           className="flex min-w-0 flex-1 items-center gap-2 px-0 pr-[62px] text-left"
         >
           {icon === "chat" ? (
-            <ChatIcon className="h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100" />
+            <ChatIcon className="h-4 w-4 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100" />
           ) : (
-            <span className="relative h-3.5 w-3.5 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
+            <span className="relative h-4 w-4 shrink-0 opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
               <Folder
-                className={`absolute inset-0 h-3.5 w-3.5 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
+                className={`absolute inset-0 h-4 w-4 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-90 opacity-0" : "scale-100 opacity-100"}`}
               />
               <FolderOpen
-                className={`absolute inset-0 h-3.5 w-3.5 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
+                className={`absolute inset-0 h-4 w-4 transition-[transform,opacity] duration-[var(--motion-fast)] ${open ? "scale-100 opacity-100" : "scale-90 opacity-0"}`}
               />
             </span>
           )}
-          <span className="truncate text-[length:var(--fs-sm)] font-normal">{project.name}</span>
+          <span className="truncate text-[length:var(--fs-md)] font-normal">{project.name}</span>
           {!project.exists ? (
             <span
               className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--warn)"

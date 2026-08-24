@@ -296,7 +296,7 @@ function SessionRowContent({
   const age = visibleSessionAge(activity === "running", timestamp, activity === "finished");
   return (
     <>
-      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-sm)] font-normal leading-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
+      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[length:var(--fs-md)] font-normal leading-5 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
         {label}
       </span>
       <SessionStatusMark

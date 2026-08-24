@@ -27,7 +27,7 @@ import {
 } from "@/features/shell/left-sidebar-nav";
 
 const HISTORY_STEPPER_CLASS =
-  "flex h-6 w-6 items-center justify-center rounded-[4px] text-(--hl2) opacity-0 transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:opacity-100 group-hover/sidebar:opacity-70";
+  "flex h-7 w-7 items-center justify-center rounded-[5px] text-(--hl2) opacity-0 transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:opacity-100 group-hover/sidebar:opacity-70";
 
 function handleDesktopSidebarKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
@@ -146,17 +146,17 @@ export function DesktopSidebar({
           isExpanded ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <div className="sticky top-0 z-50 flex h-[var(--h-toolbar)] shrink-0 items-center gap-0.5 bg-(--sidebar-bg) px-1.5">
+        <div className="sticky top-0 z-50 flex h-10 shrink-0 items-center gap-0.5 bg-(--sidebar-bg) px-2">
           <button
             onClick={() => onSetPinnedOpen(false)}
-            className="flex h-6 w-6 items-center justify-center rounded-[5px] text-(--hl2) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
+            className="flex h-7 w-7 items-center justify-center rounded-[5px] text-(--hl2) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
           >
-            <PanelLeftFilled className="h-3 w-3" strokeWidth={1.75} />
+            <PanelLeftFilled className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
           <div className="min-w-0 flex-1" />
-          <span className="flex h-6 w-8 shrink-0 items-center justify-center">
+          <span className="flex h-7 w-8 shrink-0 items-center justify-center">
             <SessionStatus running={runningSessions} finished={finishedSessions} />
           </span>
           <button
@@ -178,11 +178,11 @@ export function DesktopSidebar({
           <button
             onClick={onToggleNavView}
             aria-pressed={navView === "notifications"}
-            className="flex h-6 w-6 items-center justify-center rounded-[4px] text-(--hl2) opacity-0 transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:opacity-100 group-hover/sidebar:opacity-70 aria-pressed:opacity-100 aria-pressed:text-(--fg)"
+            className="flex h-7 w-7 items-center justify-center rounded-[5px] text-(--hl2) opacity-0 transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:opacity-100 group-hover/sidebar:opacity-70 aria-pressed:opacity-100 aria-pressed:text-(--fg)"
             title={navView === "notifications" ? "Show projects" : "Show notifications"}
             aria-label={navView === "notifications" ? "Show projects" : "Show notifications"}
           >
-            <BellIcon className="h-3.5 w-3.5" />
+            <BellIcon className="h-4 w-4" />
           </button>
         </div>
 
@@ -203,8 +203,8 @@ export function DesktopSidebar({
               className="group flex h-[var(--sidebar-row-height)] shrink-0 items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-(--fg)/90 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70"
               title="New task"
             >
-              <NewTaskIcon className="h-3.5 w-3.5 shrink-0 opacity-80" />
-              <span className="flex-1 truncate text-left text-[length:var(--fs-xs)] font-medium">
+              <NewTaskIcon className="h-4 w-4 shrink-0 opacity-80" />
+              <span className="flex-1 truncate text-left text-[length:var(--fs-md)] font-medium">
                 New task
               </span>
               <kbd className="w-7 text-right text-[10px] leading-4 text-(--dim) opacity-0 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100">
@@ -246,9 +246,9 @@ export function DesktopSidebar({
           >
             <summary
               onPointerUp={(event) => event.currentTarget.blur()}
-              className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1 rounded-[var(--sidebar-row-radius)] px-2 text-[10px] font-medium text-(--dim)/60 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
+              className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1.5 rounded-[var(--sidebar-row-radius)] px-2 text-[length:var(--fs-sm)] font-medium text-(--dim)/65 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
             >
-              <ChevronRight className="h-2.5 w-2.5 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
+              <ChevronRight className="h-3 w-3 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
               Studio
             </summary>
             <div className="flex flex-col gap-[var(--sidebar-row-gap)]">

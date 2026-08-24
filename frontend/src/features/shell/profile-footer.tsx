@@ -43,7 +43,7 @@ export function ProfileFooter({ settingsActive }: { settingsActive: boolean }) {
   const [profile] = useLocalProfile();
 
   return (
-    <div className="flex h-8 items-center gap-0.5 border-t border-(--border)/45 pt-0.5">
+    <div className="flex h-10 items-center gap-0.5 border-t border-(--border)/45 pt-0.5">
       <Link
         href="/settings#profile"
         prefetch={false}
@@ -51,7 +51,7 @@ export function ProfileFooter({ settingsActive }: { settingsActive: boolean }) {
         aria-label="Profile settings"
       >
         <ProfileAvatar profile={profile} />
-        <span className="truncate text-[12px] text-(--fg)">{profile.name}</span>
+        <span className="truncate text-[length:var(--fs-md)] text-(--fg)">{profile.name}</span>
       </Link>
       <UpdateButton />
       <Link

@@ -111,7 +111,7 @@ export function SidebarSectionHeader({
 }) {
   return (
     <div
-      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-2.5 text-[length:var(--fs-xs)] font-medium text-(--hl2) opacity-70 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100"
+      className="group flex cursor-default items-center justify-between pe-1 ps-2 pb-1 pt-3 text-[length:var(--fs-sm)] font-medium text-(--hl2) opacity-75 transition-opacity duration-[var(--motion-fast)] group-hover:opacity-100"
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
