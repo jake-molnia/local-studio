@@ -68,7 +68,7 @@ export function mainWindowAppearanceOptions(): Electron.BrowserWindowConstructor
 export function applyWindowAppearance(window: BrowserWindow): WindowAppearanceState {
   const state = getWindowAppearanceState();
   if (process.platform === "darwin") {
-    window.setVibrancy(macVibrancy(state.effectiveMaterial), { animationDuration: 160 });
+    window.setVibrancy(macVibrancy(state.effectiveMaterial));
   } else if (process.platform === "win32") {
     window.setBackgroundMaterial(windowsMaterial(state.effectiveMaterial));
   }
