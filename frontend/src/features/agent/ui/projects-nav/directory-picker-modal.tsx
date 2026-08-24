@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Button, ErrorBox } from "@/ui";
 import { Folder } from "@/ui/icons";
 import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
@@ -148,12 +149,12 @@ export function ProjectDirectoryPickerModal({
     }
   };
 
-  return (
+  const picker = (
     <>
       <button
         type="button"
         aria-label="Close project picker"
-        className={`fixed inset-0 z-40 cursor-default bg-transparent ${open ? "" : "pointer-events-none"}`}
+        className={`fixed inset-0 z-[1000] cursor-default bg-transparent ${open ? "" : "pointer-events-none"}`}
         onClick={closeAndFocus}
       />
       <div
@@ -164,7 +165,7 @@ export function ProjectDirectoryPickerModal({
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         style={{ top: position.top, left: position.left }}
-        className={`fixed z-50 flex max-h-[min(560px,calc(100vh-24px))] w-[min(420px,calc(100vw-24px))] flex-col overflow-hidden outline-none ${open ? "ui-popover-enter" : "ui-popover-exit pointer-events-none"} ${POPOVER_SURFACE_CLASS}`}
+        className={`fixed z-[1010] flex max-h-[min(560px,calc(100vh-24px))] w-[min(420px,calc(100vw-24px))] flex-col overflow-hidden outline-none ${open ? "ui-popover-enter" : "ui-popover-exit pointer-events-none"} ${POPOVER_SURFACE_CLASS}`}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-(--separator) px-3 py-2.5">
           <div className="flex min-w-0 items-center gap-2">
@@ -285,4 +286,6 @@ export function ProjectDirectoryPickerModal({
       </div>
     </>
   );
+
+  return typeof document === "undefined" ? null : createPortal(picker, document.body);
 }

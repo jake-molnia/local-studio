@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useId, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "@/ui/icon-registry";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { MODAL_SURFACE_CLASS } from "./popover";
@@ -23,8 +24,8 @@ function UiModal({ isOpen, onClose, children, className, maxWidth = "max-w-lg" }
 
   if (!isOpen) return null;
 
-  return (
-    <div className="ui-scrim-enter fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+  const modal = (
+    <div className="ui-scrim-enter fixed inset-0 z-[1000] flex items-center justify-center px-4 py-6">
       <button
         type="button"
         tabIndex={-1}
@@ -48,6 +49,8 @@ function UiModal({ isOpen, onClose, children, className, maxWidth = "max-w-lg" }
       </div>
     </div>
   );
+
+  return typeof document === "undefined" ? null : createPortal(modal, document.body);
 }
 
 interface UiModalHeaderProps {
