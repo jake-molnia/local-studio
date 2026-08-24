@@ -1,9 +1,8 @@
 // The /api/agent/turn wire contract: request parsing, command-result shape,
 // and the generic body-field helpers the other agent route parsers reuse.
 //
-// Moved here from frontend/src/features/agent/contracts.ts so the
-// @local-studio/agent-runtime HTTP handlers can share the exact parsing logic
-// with the frontend; the frontend module re-exports everything from this file.
+// Moved here from frontend/src/features/agent/contracts.ts so controller and
+// frontend callers share the exact parsing logic.
 
 import {
   agentImageDataError,
