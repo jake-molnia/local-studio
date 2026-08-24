@@ -661,6 +661,8 @@ pub const Manager = struct {
         try std.json.Stringify.value(manager.controller_origin, .{}, &new_request.writer);
         try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
         try std.json.Stringify.value(model_id, .{}, &new_request.writer);
+        try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"value\":");
+        try std.json.Stringify.value(session_id, .{}, &new_request.writer);
         if (manager.controller_api_key) |key| {
             try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
             try std.json.Stringify.value(key, .{}, &new_request.writer);

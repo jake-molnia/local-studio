@@ -7,6 +7,7 @@ const modern_protocol = "2026-07-28";
 pub fn run(init: std.process.Init) !void {
     const base_url = requiredEnvironment(init.environ_map, "LOCAL_STUDIO_MCP_BRIDGE_URL") orelse return error.BridgeUrlRequired;
     const model_id = requiredEnvironment(init.environ_map, "LOCAL_STUDIO_MCP_BRIDGE_MODEL") orelse return error.BridgeModelRequired;
+    const session_id = requiredEnvironment(init.environ_map, "LOCAL_STUDIO_MCP_BRIDGE_SESSION") orelse return error.BridgeSessionRequired;
     const api_key = requiredEnvironment(init.environ_map, "LOCAL_STUDIO_MCP_BRIDGE_KEY");
     var client: std.http.Client = .{ .allocator = init.gpa, .io = init.io };
     defer client.deinit();
@@ -18,7 +19,7 @@ pub fn run(init: std.process.Init) !void {
         const line = std.mem.trim(u8, line_value, " \t\r");
         if (line.len == 0) continue;
         if (line.len > max_document_bytes) return error.McpRequestTooLarge;
-        const response = handle(init.gpa, init.io, &client, base_url, api_key, model_id, line) catch |failure| try errorResponse(init.gpa, line, failure);
+        const response = handle(init.gpa, init.io, &client, base_url, api_key, model_id, session_id, line) catch |failure| try errorResponse(init.gpa, line, failure);
         defer init.gpa.free(response);
         if (response.len == 0) continue;
         try output.interface.writeAll(response);
@@ -27,7 +28,7 @@ pub fn run(init: std.process.Init) !void {
     }
 }
 
-fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, document: []const u8) ![]u8 {
+fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, session_id: []const u8, document: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpRequest;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidMcpRequest;
@@ -39,7 +40,7 @@ fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_u
     if (std.mem.eql(u8, method, "server/discover")) return discoverResponse(allocator, id.?);
     if (std.mem.eql(u8, method, "initialize")) return initializeResponse(allocator, id.?, object.get("params"));
     if (std.mem.eql(u8, method, "tools/list")) return toolsResponse(allocator, io, client, base_url, api_key, model_id, id.?);
-    if (std.mem.eql(u8, method, "tools/call")) return callResponse(allocator, io, client, base_url, api_key, model_id, id.?, object.get("params"));
+    if (std.mem.eql(u8, method, "tools/call")) return callResponse(allocator, io, client, base_url, api_key, model_id, session_id, id.?, object.get("params"));
     return rpcError(allocator, id.?, -32601, "unknown method");
 }
 
@@ -80,8 +81,8 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
     errdefer output.deinit();
     try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try std.json.Stringify.value(id, .{}, &output.writer);
-    try output.writer.writeAll(",\"result\":{\"tools\":[");
-    var wrote = false;
+    try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser__navigate\",\"description\":\"Open a public or localhost HTTP URL in the Local Studio browser and return its title and resolved URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser__get_text\",\"description\":\"Read the visible text from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser__get_html\",\"description\":\"Read HTML from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser__get_url\",\"description\":\"Return the URL currently associated with this Local Studio chat browser session\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
+    var wrote = true;
     for (connectors.array.items) |connector| {
         if (connector != .object) continue;
         const connector_id = stringField(connector.object, "id") orelse continue;
@@ -109,7 +110,7 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
     return output.toOwnedSlice();
 }
 
-fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, id: std.json.Value, params_value: ?std.json.Value) ![]u8 {
+fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, session_id: []const u8, id: std.json.Value, params_value: ?std.json.Value) ![]u8 {
     const params = params_value orelse return error.McpParamsRequired;
     if (params != .object) return error.McpParamsRequired;
     const namespaced = stringField(params.object, "name") orelse return error.McpToolRequired;
@@ -119,6 +120,7 @@ fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, 
     const tool_name = namespaced[separator + 2 ..];
     const arguments: std.json.Value = params.object.get("arguments") orelse .{ .object = .empty };
     if (arguments != .object) return error.InvalidMcpArguments;
+    if (std.mem.eql(u8, connector_id, "browser")) return browserCallResponse(allocator, io, client, base_url, api_key, session_id, id, tool_name, arguments.object);
     var body: Io.Writer.Allocating = .init(allocator);
     defer body.deinit();
     try body.writer.writeAll("{\"connector_id\":");
@@ -145,6 +147,42 @@ fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, 
     try output.writer.writeAll(",\"result\":");
     try std.json.Stringify.value(result, .{}, &output.writer);
     try output.writer.writeByte('}');
+    return output.toOwnedSlice();
+}
+
+fn browserCallResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, session_id: []const u8, id: std.json.Value, tool_name: []const u8, arguments: std.json.ObjectMap) ![]u8 {
+    const verb = if (std.mem.eql(u8, tool_name, "navigate")) "navigate" else if (std.mem.eql(u8, tool_name, "get_text")) "get-text" else if (std.mem.eql(u8, tool_name, "get_html")) "get-html" else if (std.mem.eql(u8, tool_name, "get_url")) "get-url" else return error.InvalidMcpToolName;
+    var body: Io.Writer.Allocating = .init(allocator);
+    defer body.deinit();
+    try body.writer.writeAll("{\"sessionId\":");
+    try std.json.Stringify.value(session_id, .{}, &body.writer);
+    var iterator = arguments.iterator();
+    while (iterator.next()) |entry| {
+        if (std.mem.eql(u8, entry.key_ptr.*, "sessionId")) continue;
+        try body.writer.writeByte(',');
+        try std.json.Stringify.value(entry.key_ptr.*, .{}, &body.writer);
+        try body.writer.writeByte(':');
+        try std.json.Stringify.value(entry.value_ptr.*, .{}, &body.writer);
+    }
+    try body.writer.writeByte('}');
+    const url = try std.fmt.allocPrint(allocator, "{s}/internal/node/v1/browser/{s}", .{ base_url, verb });
+    defer allocator.free(url);
+    const called = try request(allocator, io, client, url, api_key, .POST, body.writer.buffered());
+    defer allocator.free(called);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, called, .{}) catch return error.InvalidConnectorResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorResponse;
+    const failed = if (parsed.value.object.get("ok")) |ok| ok == .bool and !ok.bool else false;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try std.json.Stringify.value(id, .{}, &output.writer);
+    try output.writer.writeAll(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":");
+    try std.json.Stringify.value(called, .{}, &output.writer);
+    try output.writer.writeAll("}],\"structuredContent\":");
+    try std.json.Stringify.value(parsed.value, .{}, &output.writer);
+    if (failed) try output.writer.writeAll(",\"isError\":true");
+    try output.writer.writeAll("}}");
     return output.toOwnedSlice();
 }
 
