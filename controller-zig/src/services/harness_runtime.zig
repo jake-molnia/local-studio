@@ -69,6 +69,8 @@ pub const Manager = struct {
     io: Io,
     mode: config_module.Mode,
     data_dir: []u8,
+    controller_origin: []u8,
+    controller_api_key: ?[]u8,
     pi: harness_catalog.Installation,
     model_route: pi_model_route.Config,
     mutex: Io.Mutex = .init,
@@ -79,11 +81,19 @@ pub const Manager = struct {
         errdefer model_route.deinit();
         var pi = try harness_catalog.discoverPi(allocator, io, configuration);
         errdefer pi.deinit();
+        const data_dir = try allocator.dupe(u8, configuration.data_dir);
+        errdefer allocator.free(data_dir);
+        const controller_origin = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{configuration.port});
+        errdefer allocator.free(controller_origin);
+        const controller_api_key = if (configuration.api_key) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (controller_api_key) |value| allocator.free(value);
         return .{
             .allocator = allocator,
             .io = io,
             .mode = configuration.mode,
-            .data_dir = try allocator.dupe(u8, configuration.data_dir),
+            .data_dir = data_dir,
+            .controller_origin = controller_origin,
+            .controller_api_key = controller_api_key,
             .pi = pi,
             .model_route = model_route,
         };
@@ -94,6 +104,8 @@ pub const Manager = struct {
         while (iterator.next()) |session| session.*.deinit(manager.io);
         manager.sessions.deinit(manager.allocator);
         manager.allocator.free(manager.data_dir);
+        manager.allocator.free(manager.controller_origin);
+        if (manager.controller_api_key) |value| manager.allocator.free(value);
         manager.pi.deinit();
         manager.model_route.deinit();
         manager.* = undefined;
@@ -641,7 +653,20 @@ pub const Manager = struct {
         errdefer child.kill(manager.io);
         const initialized = try directFxRequest(manager.allocator, manager.io, &child, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":\"initialize\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}");
         defer manager.allocator.free(initialized);
-        const created = try directFxRequest(manager.allocator, manager.io, &child, "new", "{\"jsonrpc\":\"2.0\",\"id\":\"new\",\"method\":\"session/new\",\"params\":{\"mcpServers\":[]}}");
+        var new_request: Io.Writer.Allocating = .init(manager.allocator);
+        defer new_request.deinit();
+        try new_request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":\"new\",\"method\":\"session/new\",\"params\":{\"mcpServers\":[{\"name\":\"local-studio\",\"command\":");
+        try std.json.Stringify.value(executable, .{}, &new_request.writer);
+        try new_request.writer.writeAll(",\"args\":[\"mcp-bridge\"],\"env\":[{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"value\":");
+        try std.json.Stringify.value(manager.controller_origin, .{}, &new_request.writer);
+        try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
+        try std.json.Stringify.value(model_id, .{}, &new_request.writer);
+        if (manager.controller_api_key) |key| {
+            try new_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
+            try std.json.Stringify.value(key, .{}, &new_request.writer);
+        }
+        try new_request.writer.writeAll("}]}]}}");
+        const created = try directFxRequest(manager.allocator, manager.io, &child, "new", new_request.writer.buffered());
         defer manager.allocator.free(created);
         const native_id = try fxSessionId(manager.allocator, created);
         errdefer manager.allocator.free(native_id);
@@ -779,9 +804,18 @@ pub const Manager = struct {
         const method = optionalString(object, "method");
         const response_id = optionalString(object, "id");
         if (method == null and response_id == null) return;
+        if (method) |name| if (std.mem.eql(u8, name, "session/request_permission")) {
+            const id = object.get("id") orelse return;
+            var response: Io.Writer.Allocating = .init(manager.allocator);
+            defer response.deinit();
+            try response.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+            try std.json.Stringify.value(id, .{}, &response.writer);
+            try response.writer.writeAll(",\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"allow_once\"}}}");
+            try manager.send(session, response.writer.buffered());
+        };
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
-        if (response_id != null) session.active = false;
+        if (method == null and response_id != null) session.active = false;
         session.event_seq += 1;
         var timestamp: [24]u8 = undefined;
         _ = formatTimestamp(manager.io, &timestamp);

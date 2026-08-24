@@ -35,8 +35,19 @@ pub fn resolve(allocator: std.mem.Allocator, io: std.Io, environment: *const std
     if (std.mem.eql(u8, kind, "python")) {
         const uvx = try findExecutable(allocator, io, environment, "LOCAL_STUDIO_UVX_BIN", "uvx") orelse return error.PythonRuntimeUnavailable;
         const package_version = try std.fmt.allocPrint(allocator, "{s}=={s}", .{ package, version });
+        var prefix: std.ArrayList([]const u8) = .empty;
+        defer prefix.deinit(allocator);
+        try prefix.append(allocator, uvx);
+        if (runtime.get("with")) |requirements| {
+            if (requirements != .array or requirements.array.items.len > 16) return error.InvalidConnectorRuntime;
+            for (requirements.array.items) |requirement| {
+                if (requirement != .string or !validRequirement(requirement.string)) return error.InvalidConnectorRuntime;
+                try prefix.appendSlice(allocator, &.{ "--with", requirement.string });
+            }
+        }
+        try prefix.appendSlice(allocator, &.{ "--from", package_version, executable });
         return .{
-            .argv = try appendConnectorArgs(allocator, connector, &.{ uvx, "--from", package_version, executable }),
+            .argv = try appendConnectorArgs(allocator, connector, prefix.items),
             .cwd = cwd,
             .kind = .python,
         };
@@ -80,6 +91,10 @@ pub fn validate(runtime_value: std.json.Value) !void {
     const version = stringField(runtime, "version") orelse return error.ConnectorRuntimeVersionRequired;
     const executable = stringField(runtime, "executable") orelse return error.ConnectorRuntimeExecutableRequired;
     if (!validPackage(package) or !exactVersion(version) or !validExecutable(executable)) return error.InvalidConnectorRuntime;
+    if (runtime.get("with")) |requirements| {
+        if (!std.mem.eql(u8, kind, "python") or requirements != .array or requirements.array.items.len > 16) return error.InvalidConnectorRuntime;
+        for (requirements.array.items) |requirement| if (requirement != .string or !validRequirement(requirement.string)) return error.InvalidConnectorRuntime;
+    }
 }
 
 pub fn findExecutable(allocator: std.mem.Allocator, io: std.Io, environment: *const std.process.Environ.Map, override_name: []const u8, name: []const u8) !?[]const u8 {
@@ -138,6 +153,12 @@ fn exactVersion(value: []const u8) bool {
 fn validExecutable(value: []const u8) bool {
     if (value.len == 0 or value.len > 128) return false;
     for (value) |character| if (!(std.ascii.isAlphanumeric(character) or character == '-' or character == '_' or character == '.')) return false;
+    return true;
+}
+
+fn validRequirement(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |character| if (!(std.ascii.isAlphanumeric(character) or character == '@' or character == '/' or character == '-' or character == '_' or character == '.' or character == '<' or character == '>' or character == '=' or character == '!' or character == '~')) return false;
     return true;
 }
 

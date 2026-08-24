@@ -10,6 +10,7 @@ const Entry = struct {
     package: ?[]const u8 = null,
     version: ?[]const u8 = null,
     executable: ?[]const u8 = null,
+    requirements: []const []const u8 = &.{},
     url: ?[]const u8 = null,
     state: []const u8,
     filesystem_access: bool,
@@ -39,6 +40,7 @@ const entries = [_]Entry{
         .package = "mcp-server-fetch",
         .version = "2026.7.10",
         .executable = "mcp-server-fetch",
+        .requirements = &.{"mcp<2"},
         .state = "stateless",
         .filesystem_access = false,
         .recommended = true,
@@ -53,6 +55,7 @@ const entries = [_]Entry{
         .package = "mcp-server-time",
         .version = "2026.7.10",
         .executable = "mcp-server-time",
+        .requirements = &.{"mcp<2"},
         .state = "stateless",
         .filesystem_access = false,
         .recommended = true,
@@ -124,6 +127,7 @@ const entries = [_]Entry{
         .package = "mcp-server-git",
         .version = "2026.7.10",
         .executable = "mcp-server-git",
+        .requirements = &.{"mcp<2"},
         .state = "stateful",
         .filesystem_access = true,
         .recommended = false,
@@ -160,6 +164,14 @@ fn writeEntry(writer: *std.Io.Writer, entry: Entry) !void {
         try std.json.Stringify.value(entry.version.?, .{}, writer);
         try writer.writeAll(",\"executable\":");
         try std.json.Stringify.value(entry.executable.?, .{}, writer);
+        if (entry.requirements.len > 0) {
+            try writer.writeAll(",\"with\":[");
+            for (entry.requirements, 0..) |requirement, index| {
+                if (index > 0) try writer.writeByte(',');
+                try std.json.Stringify.value(requirement, .{}, writer);
+            }
+            try writer.writeByte(']');
+        }
         try writer.writeByte('}');
     }
     if (entry.url) |url| {
