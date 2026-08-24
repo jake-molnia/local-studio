@@ -2,9 +2,9 @@
 
 import { useState, type DragEvent } from "react";
 
-export type SectionId = "projects" | "tasks" | "terminals";
+export type SectionId = "projects" | "chats";
 
-const SECTION_IDS: SectionId[] = ["projects", "tasks", "terminals"];
+const SECTION_IDS: SectionId[] = ["projects", "chats"];
 const NAV_SECTION_ORDER_KEY = "local-studio.agent.nav-section-order.v1";
 
 function readSectionOrder(): SectionId[] {
@@ -14,7 +14,8 @@ function readSectionOrder(): SectionId[] {
       window.localStorage.getItem(NAV_SECTION_ORDER_KEY) ?? "[]",
     ) as unknown;
     if (!Array.isArray(parsed)) return [...SECTION_IDS];
-    const valid = parsed.filter((entry): entry is SectionId =>
+    const migrated = parsed.map((entry) => (entry === "tasks" ? "chats" : entry));
+    const valid = migrated.filter((entry): entry is SectionId =>
       SECTION_IDS.includes(entry as SectionId),
     );
     if (valid.length === 0) return [...SECTION_IDS];

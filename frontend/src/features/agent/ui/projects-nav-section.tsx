@@ -3,7 +3,6 @@
 import { useCallback, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Button, UiModal, UiModalBody, UiModalFooter, UiModalHeader } from "@/ui";
 import { PlusIcon } from "@/ui/icons";
-import { usePersistentTerminalOwners } from "@/features/agent/ui/use-persistent-terminal-owners";
 import {
   useProjectsNavAddProjectEffect,
   useProjectsNavSessionPrefs,
@@ -24,7 +23,6 @@ import { isProjectPinned, toggleProjectPin, usePinnedNav } from "./projects-nav/
 import { PinnedSection } from "./projects-nav/pinned-section";
 import { RecentSessionsSection } from "./projects-nav/recent-sessions-section";
 import { NewChatPlusButton, ProjectRow, ProjectSessions } from "./projects-nav/session-rows";
-import { TerminalRow } from "./projects-nav/terminal-rows";
 
 export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view: NavView }) {
   const projectsContext = useProjects();
@@ -35,7 +33,6 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
   const activity = useSessionActivity();
   const prefs = useProjectsNavSessionPrefs();
   const pinned = usePinnedNav({ expanded, projects, activeSessions, prefs });
-  const terminalOwners = usePersistentTerminalOwners(false, null).owners;
   const sections = useNavSectionOrder();
 
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(new Set());
@@ -43,7 +40,6 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
   const [directoryModalOpen, setDirectoryModalOpen] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [chatsExpanded, setChatsExpanded] = useState(true);
-  const [terminalsExpanded, setTerminalsExpanded] = useState(true);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
   const addProjectButtonRef = useRef<HTMLButtonElement>(null);
   const removal = useProjectRemoval(projectsContext.removeProject, setOpenIds, setAddError);
@@ -191,18 +187,18 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         )}
       </>
     ),
-    tasks: chatProject ? (
+    chats: chatProject ? (
       <>
         <SidebarSectionHeader
-          label="Tasks"
+          label="Chats"
           open={chatsExpanded}
           indicator={chatsHasActivity}
           onToggle={() => setChatsExpanded((value) => !value)}
-          {...sections.headerDragProps("tasks")}
+          {...sections.headerDragProps("chats")}
           action={
             <NewChatPlusButton
               project={chatProject}
-              label="New task"
+              label="New chat"
               className="flex h-5 w-5 items-center justify-center rounded text-(--dim) transition-colors hover:text-(--fg)"
             />
           }
@@ -217,22 +213,6 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         ) : null}
       </>
     ) : null,
-    terminals:
-      terminalOwners.length > 0 ? (
-        <>
-          <SidebarSectionHeader
-            label="Terminals"
-            open={terminalsExpanded}
-            onToggle={() => setTerminalsExpanded((value) => !value)}
-            {...sections.headerDragProps("terminals")}
-          />
-          {terminalsExpanded
-            ? terminalOwners.map((owner, index) => (
-                <TerminalRow key={owner.mountKey} owner={owner} index={index} />
-              ))
-            : null}
-        </>
-      ) : null,
   };
 
   return (
