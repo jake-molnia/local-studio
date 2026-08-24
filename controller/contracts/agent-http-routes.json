@@ -264,6 +264,30 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/git",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/git/branches",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/git/worktrees",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/plugins",
       "ownership": "head",
       "streaming": "never"
@@ -541,6 +565,30 @@
     {
       "method": "POST",
       "path": "/internal/node/v1/pr/merge",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/git",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/node/v1/git",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/git/branches",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/node/v1/git/worktrees",
       "ownership": "worker",
       "streaming": "never"
     },

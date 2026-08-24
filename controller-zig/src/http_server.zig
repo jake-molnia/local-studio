@@ -50,6 +50,7 @@ const agent_terminal = @import("services/agent_terminal.zig");
 const agent_pty = @import("services/agent_pty.zig");
 const agent_browser = @import("services/agent_browser.zig");
 const agent_goals = @import("services/agent_goals.zig");
+const agent_git = @import("services/agent_git.zig");
 const agent_subagents = @import("services/agent_subagents.zig");
 const request_auth = @import("services/request_auth.zig");
 const compute_plan = @import("services/compute_plan.zig");
@@ -472,6 +473,27 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/git") or std.mem.eql(u8, route.path, "/api/agent/git/branches") or std.mem.eql(u8, route.path, "/api/agent/git/worktrees")) {
+        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        defer if (node_id) |value| allocator.free(value);
+        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        defer if (cwd) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const workspace = cwd orelse return respondGitFailure(request, error.GitCwdRequired);
+        const response = if (std.mem.eql(u8, route.path, "/api/agent/git/branches"))
+            agent_git.branchesPayload(allocator, io, mode, configuration, client, database, node_id, workspace)
+        else if (std.mem.eql(u8, route.path, "/api/agent/git/worktrees"))
+            agent_git.worktreesPayload(allocator, io, mode, configuration, client, database, node_id, workspace)
+        else if (request.head.method == .POST)
+            agent_git.actionPayload(allocator, io, mode, configuration, client, database, node_id, workspace, document orelse return false)
+        else
+            agent_git.statePayload(allocator, io, mode, configuration, client, database, node_id, workspace);
+        const payload = response catch |failure| return respondGitFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/plugins") or std.mem.eql(u8, route.path, "/api/agent/plugins/source")) {
         const node_id = try queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
@@ -829,6 +851,25 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else
             agent_pr.mergeLocal(allocator, io, configuration, document orelse return false);
         const payload = response catch |failure| return respondPrFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/git") or std.mem.eql(u8, route.path, "/internal/node/v1/git/branches") or std.mem.eql(u8, route.path, "/internal/node/v1/git/worktrees")) {
+        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        defer if (cwd) |value| allocator.free(value);
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const workspace = cwd orelse return respondGitFailure(request, error.GitCwdRequired);
+        const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/git/branches"))
+            agent_git.branchesLocal(allocator, io, configuration, workspace)
+        else if (std.mem.eql(u8, route.path, "/internal/node/v1/git/worktrees"))
+            agent_git.worktreesLocal(allocator, io, configuration, workspace)
+        else if (request.head.method == .POST)
+            agent_git.actionLocal(allocator, io, configuration, workspace, document orelse return false)
+        else
+            agent_git.stateLocal(allocator, io, configuration, workspace);
+        const payload = response catch |failure| return respondGitFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -2219,6 +2260,36 @@ fn respondPrFailure(request: *http.Server.Request, failure: anyerror) !bool {
         error.ProjectPathOutsideRoots => "cwd is outside allowed workspace roots",
         error.PrNodeRequired => "No enrolled node offers GitHub operations",
         error.PrNodeUnavailable => "The GitHub operation node is unavailable",
+        else => @errorName(failure),
+    };
+    return respondDownloadError(request, status, detail);
+}
+
+fn respondGitFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.GitCwdRequired, error.InvalidGitPayload, error.GitActionRequired, error.InvalidGitAction, error.GitRefRequired, error.GitBranchRequired, error.InvalidGitRef, error.GitWorktreePathRequired, error.GitWorktreePathInvalid, error.GitCommitMessageRequired => .bad_request,
+        error.GitCommitMessageTooLarge => .payload_too_large,
+        error.ProjectPathNotFound => .not_found,
+        error.ProjectPathOutsideRoots => .forbidden,
+        error.GitNodeRequired => .conflict,
+        error.GitNodeUnavailable => .service_unavailable,
+        else => .internal_server_error,
+    };
+    const detail: []const u8 = switch (failure) {
+        error.GitCwdRequired => "cwd is required",
+        error.InvalidGitPayload => "invalid git payload",
+        error.GitActionRequired => "git action is required",
+        error.InvalidGitAction => "unknown git action",
+        error.GitRefRequired, error.InvalidGitRef => "a valid ref is required",
+        error.GitBranchRequired => "branch is required",
+        error.GitWorktreePathRequired, error.GitWorktreePathInvalid => "a valid worktree path is required",
+        error.GitCommitMessageRequired => "commit message is required",
+        error.GitCommitMessageTooLarge => "commit message is too large",
+        error.ProjectPathNotFound => "cwd not found",
+        error.ProjectPathOutsideRoots => "cwd is outside allowed workspace roots",
+        error.GitCommandFailed => "Git operation failed",
+        error.GitNodeRequired => "No enrolled node offers git operations",
+        error.GitNodeUnavailable => "The git operation node is unavailable",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
