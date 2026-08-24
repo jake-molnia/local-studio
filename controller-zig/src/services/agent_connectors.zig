@@ -154,6 +154,66 @@ pub fn deleteLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     return listLocked(allocator, database);
 }
 
+pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account: ?[]const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    const stored_document = try repository.get(allocator, database, "github");
+    defer if (stored_document) |value| allocator.free(value);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, stored_document orelse "{}", .{}) catch return error.InvalidConnectorRecord;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorRecord;
+    const arena = parsed.arena.allocator();
+    const object = &parsed.value.object;
+    try object.put(arena, "id", .{ .string = "github" });
+    const name = if (account) |value| try std.fmt.allocPrint(arena, "GitHub · {s}", .{value}) else "GitHub";
+    try object.put(arena, "name", .{ .string = name });
+    try object.put(arena, "transport", .{ .string = "stdio" });
+    try object.put(arena, "command", .{ .string = "npx" });
+    var args: std.json.Array = .init(arena);
+    try args.append(.{ .string = "-y" });
+    try args.append(.{ .string = "@modelcontextprotocol/server-github@2025.4.8" });
+    try object.put(arena, "args", .{ .array = args });
+    try object.put(arena, "protocolEra", .{ .string = "legacy" });
+    var auth: std.json.ObjectMap = .init(arena);
+    try auth.put("type", .{ .string = "oauth" });
+    try auth.put("provider", .{ .string = "github" });
+    try auth.put("account", .{ .string = account orelse "github" });
+    try object.put(arena, "auth", .{ .object = auth });
+    const enabled = booleanField(object.*, "enabled") orelse false;
+    try object.put(arena, "enabled", .{ .bool = enabled });
+    removeOAuthEnv(object);
+    const document = try stringify(allocator, parsed.value);
+    defer allocator.free(document);
+    try repository.save(database, "github", enabled, document);
+}
+
+pub fn disconnectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    const stored_document = (try repository.get(allocator, database, "github")) orelse return;
+    defer allocator.free(stored_document);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, stored_document, .{}) catch return error.InvalidConnectorRecord;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorRecord;
+    const object = &parsed.value.object;
+    _ = object.orderedRemove("auth");
+    try object.put(parsed.arena.allocator(), "name", .{ .string = "GitHub" });
+    try object.put(parsed.arena.allocator(), "enabled", .{ .bool = false });
+    removeOAuthEnv(object);
+    const document = try stringify(allocator, parsed.value);
+    defer allocator.free(document);
+    try repository.save(database, "github", false, document);
+}
+
+fn removeOAuthEnv(object: *std.json.ObjectMap) void {
+    for ([_][]const u8{ "env", "envSecret" }) |name| {
+        const record = object.getPtr(name) orelse continue;
+        if (record.* != .object) continue;
+        _ = record.object.orderedRemove("GITHUB_PERSONAL_ACCESS_TOKEN");
+        if (record.object.count() == 0) _ = object.orderedRemove(name);
+    }
+}
+
 pub fn grantsPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, probe_id: ?[]const u8) ![]u8 {
     if (probe_id) |value| if (!validId(value)) return error.InvalidConnectorId;
     if (mode == .standalone) return grantsLocal(allocator, io, configuration, client, database, probe_id);
