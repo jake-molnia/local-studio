@@ -165,6 +165,11 @@ a.nav-link:hover,
   contain-intrinsic-size: auto var(--sidebar-row-height);
 }
 
+.sidebar-virtual-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 54px;
+}
+
 /* Focus */
 :focus-visible {
   outline: 1px solid var(--focus-ring, var(--accent));

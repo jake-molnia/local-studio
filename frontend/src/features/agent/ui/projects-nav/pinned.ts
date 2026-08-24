@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useState } from "react";
+import { arrayMove } from "@dnd-kit/sortable";
 import type { AggregatedSession } from "@shared/agent/session-summary";
 import { safeJson } from "@/features/agent/safe-json";
 import {
@@ -13,7 +14,6 @@ import { isChatsProject, type Project as ProjectEntry } from "@/features/agent/p
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { mergeActiveSessionPref } from "./helpers";
 import {
-  movePinnedEntryBefore,
   orderPinnedEntries,
   readPinnedSessionOrder,
   writePinnedSessionOrder,
@@ -60,18 +60,9 @@ export type PinnedNav = {
   renderedSessionIds: ReadonlySet<string>;
   pinnedProjectIds: ReadonlySet<string>;
   dragging: boolean;
-  entryDragProps: (entryId: string) => {
-    dragging: boolean;
-    onReorderDragStart: () => void;
-    onReorderDragEnd: () => void;
-    onReorderDragOver: (event: DragEvent) => void;
-    onReorderDrop: (event: DragEvent) => void;
-  };
-  /** Drop target for the list itself — moves the dragged entry to the end. */
-  listDropProps: {
-    onDragOver: (event: DragEvent) => void;
-    onDrop: (event: DragEvent) => void;
-  };
+  draggingId: string | null;
+  setDraggingId: (entryId: string | null) => void;
+  moveEntry: (draggedId: string, targetId: string) => void;
 };
 
 /** Immutable start time of a pinned session entry; projects sort to the top. */
@@ -206,9 +197,13 @@ export function usePinnedNav({
     return orderPinnedEntries([...projectEntries, ...sessionEntries], order);
   }, [activeSessionIds, historySessions, order, pinnedActive, pinnedProjectIds, projects]);
 
-  const moveBefore = (draggedId: string, targetId: string | null) => {
+  const moveEntry = (draggedId: string, targetId: string) => {
     setOrder((current) => {
-      const next = movePinnedEntryBefore(entries, current, draggedId, targetId);
+      const ids = orderPinnedEntries(entries, current).map((entry) => entry.id);
+      const from = ids.indexOf(draggedId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0 || from === to) return current;
+      const next = arrayMove(ids, from, to);
       writePinnedSessionOrder(next);
       return next;
     });
@@ -219,32 +214,9 @@ export function usePinnedNav({
     renderedSessionIds,
     pinnedProjectIds,
     dragging: dragId !== null,
-    entryDragProps: (entryId: string) => ({
-      dragging: dragId === entryId,
-      onReorderDragStart: () => setDragId(entryId),
-      onReorderDragEnd: () => setDragId(null),
-      onReorderDragOver: (event: DragEvent) => {
-        if (dragId && dragId !== entryId) event.preventDefault();
-      },
-      onReorderDrop: (event: DragEvent) => {
-        if (!dragId) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (dragId !== entryId) moveBefore(dragId, entryId);
-        setDragId(null);
-      },
-    }),
-    listDropProps: {
-      onDragOver: (event: DragEvent) => {
-        if (dragId) event.preventDefault();
-      },
-      onDrop: (event: DragEvent) => {
-        if (!dragId) return;
-        event.preventDefault();
-        moveBefore(dragId, null);
-        setDragId(null);
-      },
-    },
+    draggingId: dragId,
+    setDraggingId: setDragId,
+    moveEntry,
   };
 }
 

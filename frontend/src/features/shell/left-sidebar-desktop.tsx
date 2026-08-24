@@ -29,6 +29,34 @@ import {
 const HISTORY_STEPPER_CLASS =
   "flex h-6 w-6 items-center justify-center rounded-[4px] text-(--hl2) opacity-0 transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) focus-visible:opacity-100 group-hover/sidebar:opacity-70";
 
+function handleDesktopSidebarKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const candidates = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex="0"]',
+    ),
+  ).filter(
+    (element) => element.offsetParent !== null && element.getAttribute("aria-hidden") !== "true",
+  );
+  if (candidates.length === 0) return;
+  const current =
+    target instanceof Element ? target.closest<HTMLElement>("a, button, [tabindex]") : null;
+  const currentIndex = current ? candidates.indexOf(current) : -1;
+  const nextIndex =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? candidates.length - 1
+        : event.key === "ArrowUp"
+          ? Math.max(0, currentIndex - 1)
+          : Math.min(candidates.length - 1, currentIndex + 1);
+  event.preventDefault();
+  candidates[nextIndex]?.focus();
+}
+
 export function DesktopSidebar({
   pathname,
   isExpanded,
@@ -158,7 +186,10 @@ export function DesktopSidebar({
           </button>
         </div>
 
-        <nav className="sidebar-scroller flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-[var(--sidebar-padding-x)] py-1 [contain:layout_paint]">
+        <nav
+          onKeyDown={handleDesktopSidebarKeyDown}
+          className="sidebar-scroller flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-[var(--sidebar-padding-x)] py-1 [contain:layout_paint]"
+        >
           <div className="flex shrink-0 flex-col gap-[var(--sidebar-row-gap)]">
             <Link
               href="/agent?new=1&replace=1"

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useAutoAnimate } from "@formkit/auto-animate/react";
 import type { SessionActivity } from "@/features/agent/session-index";
 import { Spinner } from "@/ui";
 import { PinIcon } from "@/ui/icon-registry";
@@ -74,8 +75,19 @@ export function PinButton({
   );
 }
 
-export function SidebarRail({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col">{children}</div>;
+export function SidebarRail({
+  children,
+  animate = true,
+}: {
+  children: ReactNode;
+  animate?: boolean;
+}) {
+  const [animationRef] = useAutoAnimate<HTMLDivElement>({ duration: 150, easing: "ease-out" });
+  return (
+    <div ref={animate ? animationRef : undefined} className="flex flex-col">
+      {children}
+    </div>
+  );
 }
 
 export function SidebarSectionHeader({
