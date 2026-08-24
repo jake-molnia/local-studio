@@ -11,6 +11,8 @@ import { cleanSessionTitle } from "@/features/agent/messages/helpers";
 import { SESSIONS_CHANGED_EVENT } from "@/lib/workspace-events";
 import { useSidebarStatus } from "@/features/settings/use-sidebar-status";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import api from "@/lib/api/client";
+import type { RuntimeTarget } from "@/lib/types";
 
 const HarnessCatalogSchema = Schema.Struct({
   harnesses: Schema.Array(
@@ -167,6 +169,7 @@ export function SetupChecksSettings({
   };
   const [checks, setChecks] = useState<Check[]>([]);
   const [harnesses, setHarnesses] = useState<HarnessCatalog["harnesses"]>([]);
+  const [runtimeTargets, setRuntimeTargets] = useState<RuntimeTarget[]>([]);
   const controllerStatus = useSidebarStatus();
 
   useMountSubscription(() => {
@@ -180,6 +183,10 @@ export function SetupChecksSettings({
         setHarnesses([...Schema.decodeUnknownSync(HarnessCatalogSchema)(payload).harnesses]),
       )
       .catch(() => setHarnesses([]));
+    void api
+      .getRuntimeTargets()
+      .then((payload) => setRuntimeTargets(payload.targets))
+      .catch(() => setRuntimeTargets([]));
   }, []);
   const controllerCheck: Check = {
     id: "controller",
@@ -200,22 +207,43 @@ export function SetupChecksSettings({
       : `${harness.transport}; install or enroll a node that offers this harness.`,
     blocking: false,
   }));
-  const rows = [...checks, ...harnessChecks, controllerCheck];
+  const runtimeChecks: Check[] = (
+    [
+      ["vllm", "vLLM"],
+      ["sglang", "SGLang"],
+      ["llamacpp", "llama.cpp"],
+      ["mlx", "MLX"],
+    ] as const
+  ).map(([backend, label]) => {
+    const installed = runtimeTargets.find(
+      (target) => target.backend === backend && target.installed,
+    );
+    return {
+      id: `runtime-${backend}`,
+      label,
+      ok: Boolean(installed),
+      value: installed?.version ?? (installed ? "Installed" : "Not installed"),
+      guidance: `Model-serving runtime discovered by the controller.`,
+      blocking: false,
+    };
+  });
+  const rows = [...runtimeChecks, ...checks, ...harnessChecks, controllerCheck].filter(
+    (check, index, all) => all.findIndex((candidate) => candidate.label === check.label) === index,
+  );
   const blockers = rows.filter((check) => !check.ok && check.blocking !== false);
   const setupRows: SettingsFactRow[] = rows.map((check) => ({
     key: check.id,
     label: check.label,
-    description: check.guidance,
     value: check.value,
     mono: true,
-    status: { label: check.ok ? "ok" : "missing", tone: check.ok ? "good" : "warning" },
+    status: { label: check.ok ? "installed" : "missing", tone: check.ok ? "good" : "danger" },
   }));
   return (
     <SettingsGroup
       title={title}
       description={description}
       actions={
-        <StatusPill tone={blockers.length ? "warning" : "good"}>
+        <StatusPill tone={blockers.length ? "danger" : "good"}>
           {blockers.length ? `${blockers.length} blockers` : "ready"}
         </StatusPill>
       }

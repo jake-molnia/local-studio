@@ -56,7 +56,6 @@ export { ColorField } from "./color-field";
 
 export { ProgressBar } from "./progress-bar";
 export { PreviewScroll } from "./preview-scroll";
-export { Stat } from "./stat";
 export { ErrorBox } from "./error-box";
 export { Spinner } from "./spinner";
 export type { SpinnerSize } from "./spinner";
