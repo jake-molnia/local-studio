@@ -7,26 +7,26 @@ import { log } from "../helpers/logger";
 import { resolveStablePort } from "../helpers/ports";
 import { resolveAugmentedPath } from "../helpers/resolve-path";
 
-export type AgentRuntimeHandle = {
+export type ControllerHandle = {
   frontendUrl: string;
   process?: ChildProcess;
   url: string;
 };
 
-type StartAgentRuntimeOptions = {
+type StartControllerOptions = {
   frontendUrl: string;
   preferredPort?: number;
 };
 
-let currentAgentRuntime: ChildProcess | null = null;
+let currentController: ChildProcess | null = null;
 
 process.once("exit", () => {
-  if (currentAgentRuntime && !currentAgentRuntime.killed) {
-    currentAgentRuntime.kill("SIGTERM");
+  if (currentController && !currentController.killed) {
+    currentController.kill("SIGTERM");
   }
 });
 
-function agentRuntimeEntry(): string {
+function controllerEntry(): string {
   const executable =
     process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller";
   return app.isPackaged
@@ -41,7 +41,31 @@ function agentRuntimeEntry(): string {
       );
 }
 
-async function isAgentRuntimeHealthy(url: string): Promise<boolean> {
+function controllerPiEntry(): string | null {
+  const entry = app.isPackaged
+    ? path.join(
+        process.resourcesPath,
+        "app",
+        "frontend",
+        ".next",
+        "standalone",
+        "frontend",
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+        "dist",
+        "cli.js",
+      )
+    : path.resolve(
+        resolveDevelopmentFrontendDir(),
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "pi.cmd" : "pi",
+      );
+  return existsSync(entry) ? entry : null;
+}
+
+async function isControllerHealthy(url: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_000) });
     if (!response.ok) return false;
@@ -52,7 +76,7 @@ async function isAgentRuntimeHealthy(url: string): Promise<boolean> {
   }
 }
 
-async function waitForAgentRuntime(
+async function waitForController(
   child: ChildProcess,
   url: string,
   timeoutMs: number,
@@ -60,12 +84,12 @@ async function waitForAgentRuntime(
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (child.exitCode !== null) {
-      throw new Error(`Agent runtime exited with code ${child.exitCode}`);
+      throw new Error(`Controller exited with code ${child.exitCode}`);
     }
-    if (await isAgentRuntimeHealthy(url)) return;
+    if (await isControllerHealthy(url)) return;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`Timed out waiting for agent runtime: ${url}`);
+  throw new Error(`Timed out waiting for controller: ${url}`);
 }
 
 async function stopChild(child: ChildProcess): Promise<void> {
@@ -88,22 +112,21 @@ async function stopChild(child: ChildProcess): Promise<void> {
   });
 }
 
-export async function startAgentRuntime(
-  options: StartAgentRuntimeOptions,
-): Promise<AgentRuntimeHandle> {
+export async function startController(options: StartControllerOptions): Promise<ControllerHandle> {
   const preferredUrl = options.preferredPort ? `http://127.0.0.1:${options.preferredPort}` : null;
-  if (preferredUrl && (await isAgentRuntimeHealthy(preferredUrl))) {
-    log.info(`Using agent runtime at ${preferredUrl}`);
+  if (preferredUrl && (await isControllerHealthy(preferredUrl))) {
+    log.info(`Using controller at ${preferredUrl}`);
     return { frontendUrl: options.frontendUrl, url: preferredUrl };
   }
 
-  const entry = agentRuntimeEntry();
+  const entry = controllerEntry();
   if (!existsSync(entry)) {
-    throw new Error(`Missing agent runtime bundle: ${entry}`);
+    throw new Error(`Missing controller bundle: ${entry}`);
   }
 
   const port = await resolveStablePort(options.preferredPort);
   const url = `http://127.0.0.1:${port}`;
+  const piEntry = controllerPiEntry();
   const child = spawn(
     entry,
     ["--mode", "standalone", "--host", "127.0.0.1", "--port", String(port)],
@@ -112,6 +135,7 @@ export async function startAgentRuntime(
       detached: false,
       env: {
         ...process.env,
+        ...(process.env.LOCAL_STUDIO_PI_BIN || !piEntry ? {} : { LOCAL_STUDIO_PI_BIN: piEntry }),
         PATH: resolveAugmentedPath(),
         LOCAL_STUDIO_DATA_DIR: DESKTOP_CONFIG.userDataDir,
         LOCAL_STUDIO_MODELS_DIR: path.join(DESKTOP_CONFIG.userDataDir, "models"),
@@ -129,12 +153,12 @@ export async function startAgentRuntime(
     log.warn(`controller: ${String(chunk).trim()}`);
   });
   child.once("exit", (code, signal) => {
-    log.warn(`Agent runtime exited code=${code ?? "null"} signal=${signal ?? "null"}`);
+    log.warn(`Controller exited code=${code ?? "null"} signal=${signal ?? "null"}`);
   });
 
-  currentAgentRuntime = child;
+  currentController = child;
   try {
-    await waitForAgentRuntime(child, url, DESKTOP_CONFIG.startupTimeoutMs);
+    await waitForController(child, url, DESKTOP_CONFIG.startupTimeoutMs);
     return { frontendUrl: options.frontendUrl, process: child, url };
   } catch (error) {
     await stopChild(child);
@@ -142,23 +166,20 @@ export async function startAgentRuntime(
   }
 }
 
-export async function startOrReuseAgentRuntime(
-  options: StartAgentRuntimeOptions,
-  existing?: AgentRuntimeHandle,
-): Promise<AgentRuntimeHandle> {
-  if (
-    existing?.frontendUrl === options.frontendUrl &&
-    (await isAgentRuntimeHealthy(existing.url))
-  ) {
-    log.info(`Reusing agent runtime at ${existing.url}`);
+export async function startOrReuseController(
+  options: StartControllerOptions,
+  existing?: ControllerHandle,
+): Promise<ControllerHandle> {
+  if (existing?.frontendUrl === options.frontendUrl && (await isControllerHealthy(existing.url))) {
+    log.info(`Reusing controller at ${existing.url}`);
     return existing;
   }
-  if (existing) await stopAgentRuntime(existing);
-  return startAgentRuntime(options);
+  if (existing) await stopController(existing);
+  return startController(options);
 }
 
-export async function stopAgentRuntime(handle?: AgentRuntimeHandle): Promise<void> {
+export async function stopController(handle?: ControllerHandle): Promise<void> {
   if (!handle?.process) return;
   await stopChild(handle.process);
-  if (currentAgentRuntime === handle.process) currentAgentRuntime = null;
+  if (currentController === handle.process) currentController = null;
 }

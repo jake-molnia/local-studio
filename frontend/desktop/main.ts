@@ -159,9 +159,9 @@ async function checkFrontendHealth(): Promise<void> {
     expectedFrontendStopPids.add(pid);
     setTimeout(() => expectedFrontendStopPids.delete(pid), 30_000);
   }
-  await stopFrontendServer(stalledServer, { stopAgentRuntime: false });
+  await stopFrontendServer(stalledServer, { stopController: false });
   if (frontendServer === stalledServer) frontendServer = undefined;
-  await restartFrontendServer(stalledServer.runtime.port, stalledServer.agentRuntime, rendererUrl);
+  await restartFrontendServer(stalledServer.runtime.port, stalledServer.controller, rendererUrl);
 }
 
 function handleFrontendServerExit(details: {
@@ -179,16 +179,12 @@ function handleFrontendServerExit(details: {
   log.error(
     `Embedded frontend stopped unexpectedly code=${details.code ?? "null"} signal=${details.signal ?? "null"}`,
   );
-  void restartFrontendServer(
-    previousServer?.runtime.port,
-    previousServer?.agentRuntime,
-    rendererUrl,
-  );
+  void restartFrontendServer(previousServer?.runtime.port, previousServer?.controller, rendererUrl);
 }
 
 async function restartFrontendServer(
   port?: number,
-  agentRuntime?: ServerHandle["agentRuntime"],
+  controller?: ServerHandle["controller"],
   rendererUrl?: string,
 ): Promise<void> {
   if (restartingFrontend || appState === "stopping") return;
@@ -208,7 +204,7 @@ async function restartFrontendServer(
       if (isAppStopping()) return;
     }
     const started = await startFrontendServer({
-      agentRuntime,
+      controller,
       port,
       onExit: handleFrontendServerExit,
     });
@@ -247,7 +243,7 @@ async function restartFrontendServer(
 
 // Resolve a renderer-supplied file reference to a real path inside the user's
 // home tree, or null. Assistant output cites files the way people write them —
-// repo-relative, "services/agent-runtime/src/foo.ts". Passing that straight to
+// repo-relative, "shared/agent/agent-turn.ts". Passing that straight to
 // realpath resolves it against the MAIN PROCESS cwd, which is the app bundle,
 // so it throws; try it as given, then against each known project root.
 function resolveHomeConfinedPath(target: unknown): string | null {

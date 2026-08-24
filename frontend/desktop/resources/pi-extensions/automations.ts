@@ -6,15 +6,14 @@
 // cron-like schedule in its own fresh session.
 //
 // Every tool here calls the SAME endpoints the tab calls
-// (/api/agent/automations…, proxied verbatim to the runtime's automations
+// (/api/agent/automations…, proxied verbatim to the controller's automations
 // store). There is deliberately no state in this file: if a tool and the tab
 // ever showed different automations, that would mean a second store had been
 // introduced. Calls proxy through the frontend like the subagents/connectors
 // bridges, so this file stays a plain pi extension with no runtime imports.
 //
-// The record shape mirrors services/agent-runtime automations-store.ts
-// (Automation): name, prompt, modelId, cwd, schedule{interval|daily|weekly},
-// status, nextRunAt, lastRun and runs[].
+// The record shape is Automation: name, prompt, modelId, cwd,
+// schedule{interval|daily|weekly}, status, nextRunAt, lastRun and runs[].
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "./schema.ts";
