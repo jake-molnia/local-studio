@@ -23,20 +23,6 @@ export function orderPinnedEntries<T extends PinnedOrderEntry>(
     .map(({ entry }) => entry);
 }
 
-export function movePinnedEntryBefore<T extends PinnedOrderEntry>(
-  entries: readonly T[],
-  order: readonly string[],
-  draggedId: string,
-  targetId: string | null,
-): string[] {
-  const ids = orderPinnedEntries(entries, order)
-    .map((entry) => entry.id)
-    .filter((id) => id !== draggedId);
-  const targetIndex = targetId ? ids.indexOf(targetId) : -1;
-  ids.splice(targetIndex < 0 ? ids.length : targetIndex, 0, draggedId);
-  return [...new Set(ids)];
-}
-
 export function readPinnedSessionOrder(): string[] {
   if (typeof window === "undefined") return [];
   try {
