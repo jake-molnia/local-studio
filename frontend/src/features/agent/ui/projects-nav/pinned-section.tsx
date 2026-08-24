@@ -21,6 +21,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { sessionActivity, useSessionActivity } from "@/features/agent/session-index";
 import type { SessionPrefs } from "@/features/agent/messages/prefs";
 import type { Project as ProjectEntry } from "@/features/agent/projects/types";
+import { prewarmTranscriptSnapshots } from "@/features/agent/workspace/transcript-cache";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import { requestIdleWork } from "@/lib/idle-work";
 import { mergeActiveSessionPref } from "./helpers";
 import { SidebarRail, SidebarSectionHeader } from "./nav-chrome";
 import { toggleProjectPin, type PinnedNav, type PinnedNavEntry } from "./pinned";
@@ -44,6 +47,15 @@ export function PinnedSection({
   const [openProjectIds, setOpenProjectIds] = useState<ReadonlySet<string>>(new Set());
   const activity = useSessionActivity();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const prewarmIds = pinned.entries
+    .flatMap((entry) => (entry.kind === "history" ? [entry.session.id] : []))
+    .slice(0, 3)
+    .join("\u0000");
+
+  useMountSubscription(() => {
+    if (!prewarmIds) return;
+    return requestIdleWork(() => prewarmTranscriptSnapshots(prewarmIds.split("\u0000")));
+  }, [prewarmIds]);
 
   if (pinned.entries.length === 0) return null;
 

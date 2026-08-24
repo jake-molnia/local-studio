@@ -13,6 +13,9 @@ const MAX_MESSAGES_PER_SESSION = 200;
 const MAX_CHARS_PER_SESSION = 512 * 1024;
 const MAX_SESSIONS = 24;
 const MAX_BLOCK_TEXT = 16 * 1024;
+const PREWARMED_SESSIONS = 3;
+
+const prewarmedEntries = new Map<string, CachedTranscript>();
 
 export type CachedTranscript = {
   version: 2;
@@ -27,6 +30,19 @@ function defaultStorage(): TranscriptStorage | null {
 
 function sessionKey(piSessionId: string): string {
   return `${TRANSCRIPT_CACHE_PREFIX}${piSessionId}`;
+}
+
+function rememberPrewarmedEntry(piSessionId: string, entry: CachedTranscript): void {
+  prewarmedEntries.delete(piSessionId);
+  prewarmedEntries.set(piSessionId, entry);
+  const stale = prewarmedEntries.size - PREWARMED_SESSIONS;
+  if (stale <= 0) return;
+  for (const id of [...prewarmedEntries.keys()].slice(0, stale)) prewarmedEntries.delete(id);
+}
+
+function forgetPrewarmedKey(key: string): void {
+  if (!key.startsWith(TRANSCRIPT_CACHE_PREFIX)) return;
+  prewarmedEntries.delete(key.slice(TRANSCRIPT_CACHE_PREFIX.length));
 }
 
 function truncateText(text: string | undefined): string | undefined {
@@ -121,6 +137,7 @@ function evictStaleSessions(storage: TranscriptStorage, keepKey: string): void {
     .sort((a, b) => a.updatedAt - b.updatedAt);
   for (const { key } of dated.slice(0, keys.length - MAX_SESSIONS)) {
     storage.removeItem(key);
+    if (storage === defaultStorage()) forgetPrewarmedKey(key);
   }
 }
 
@@ -137,10 +154,24 @@ export function readTranscriptSnapshotEntry(
   storage: TranscriptStorage | null = defaultStorage(),
 ): CachedTranscript | null {
   if (!storage || !piSessionId) return null;
+  const defaultCache = storage === defaultStorage();
+  const prewarmed = defaultCache ? prewarmedEntries.get(piSessionId) : undefined;
+  if (prewarmed) {
+    rememberPrewarmedEntry(piSessionId, prewarmed);
+    return prewarmed;
+  }
   try {
-    return parseCachedTranscript(storage.getItem(sessionKey(piSessionId)));
+    const entry = parseCachedTranscript(storage.getItem(sessionKey(piSessionId)));
+    if (defaultCache && entry) rememberPrewarmedEntry(piSessionId, entry);
+    return entry;
   } catch {
     return null;
+  }
+}
+
+export function prewarmTranscriptSnapshots(piSessionIds: readonly string[]): void {
+  for (const piSessionId of piSessionIds.slice(0, PREWARMED_SESSIONS)) {
+    readTranscriptSnapshotEntry(piSessionId);
   }
 }
 
@@ -162,6 +193,7 @@ export function writeTranscriptSnapshot(
   const payload = JSON.stringify(entry);
   try {
     storage.setItem(key, payload);
+    if (storage === defaultStorage()) rememberPrewarmedEntry(piSessionId, entry);
     evictStaleSessions(storage, key);
     return;
   } catch {
@@ -179,8 +211,10 @@ export function writeTranscriptSnapshot(
   // roughly nine.
   for (const stale of oldestFirst(storage, key)) {
     storage.removeItem(stale);
+    if (storage === defaultStorage()) forgetPrewarmedKey(stale);
     try {
       storage.setItem(key, payload);
+      if (storage === defaultStorage()) rememberPrewarmedEntry(piSessionId, entry);
       return;
     } catch {
       // Still too big — drop the next-oldest.
