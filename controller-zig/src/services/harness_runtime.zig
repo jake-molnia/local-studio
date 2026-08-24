@@ -72,6 +72,7 @@ pub const Manager = struct {
     controller_origin: []u8,
     controller_api_key: ?[]u8,
     pi: harness_catalog.Installation,
+    codex: harness_catalog.Installation,
     model_route: pi_model_route.Config,
     mutex: Io.Mutex = .init,
     tasks: Io.Group = .init,
@@ -81,6 +82,8 @@ pub const Manager = struct {
         errdefer model_route.deinit();
         var pi = try harness_catalog.discoverPi(allocator, io, configuration);
         errdefer pi.deinit();
+        var codex = try harness_catalog.discoverCodex(allocator, io, configuration);
+        errdefer codex.deinit();
         const data_dir = try allocator.dupe(u8, configuration.data_dir);
         errdefer allocator.free(data_dir);
         const controller_origin = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{configuration.port});
@@ -95,6 +98,7 @@ pub const Manager = struct {
             .controller_origin = controller_origin,
             .controller_api_key = controller_api_key,
             .pi = pi,
+            .codex = codex,
             .model_route = model_route,
         };
     }
@@ -107,6 +111,7 @@ pub const Manager = struct {
         manager.allocator.free(manager.controller_origin);
         if (manager.controller_api_key) |value| manager.allocator.free(value);
         manager.pi.deinit();
+        manager.codex.deinit();
         manager.model_route.deinit();
         manager.* = undefined;
     }
@@ -126,13 +131,16 @@ pub const Manager = struct {
     pub fn piVersion(manager: *const Manager) ?[]const u8 {
         return manager.pi.version;
     }
+    pub fn codexIsAvailable(manager: *const Manager) bool {
+        return manager.codex.available();
+    }
     pub fn piSource(manager: *const Manager) []const u8 {
         return manager.pi.source;
     }
     pub fn catalogPayload(manager: *Manager) ![]u8 {
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
-        try harness_catalog.writeCatalog(&output.writer, &manager.pi);
+        try harness_catalog.writeCatalog(&output.writer, &manager.pi, &manager.codex);
         return output.toOwnedSlice();
     }
     pub fn sessionsPayload(manager: *Manager) ![]u8 {

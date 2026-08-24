@@ -45,7 +45,29 @@ pub fn discoverPi(allocator: std.mem.Allocator, io: Io, configuration: *const co
     };
 }
 
-pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation) !void {
+pub fn discoverCodex(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Installation {
+    if (configuration.environment.get("LOCAL_STUDIO_CODEX_BIN")) |configured| {
+        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+        if (trimmed.len > 0) return probeCodex(allocator, io, configuration.environment, "configured", trimmed);
+    }
+    if (try pathExecutable(allocator, io, configuration.environment, "codex")) |executable| {
+        defer allocator.free(executable);
+        return probeCodex(allocator, io, configuration.environment, "system", executable);
+    }
+    for (knownCodexLocations()) |candidate| {
+        if (!executableFile(io, candidate)) continue;
+        return probeCodex(allocator, io, configuration.environment, "system", candidate);
+    }
+    return .{
+        .allocator = allocator,
+        .source = try allocator.dupe(u8, "missing"),
+        .executable = try allocator.dupe(u8, "codex"),
+        .version = null,
+        .rpc_supported = false,
+    };
+}
+
+pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const Installation) !void {
     try writer.writeAll("{\"harnesses\":[");
     try writePi(writer, pi);
     try writer.writeAll(",");
@@ -53,7 +75,7 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation) !void {
     try writer.writeAll(",");
     try writeUnavailable(writer, "opencode", "OpenCode", "http-sse");
     try writer.writeAll(",");
-    try writeUnavailable(writer, "codex", "Codex", "app-server");
+    try writeInstallation(writer, "codex", "Codex", "app-server", codex);
     try writer.writeAll(",");
     try writeUnavailable(writer, "claude", "Claude Code", "stream-json");
     try writer.writeAll("]}");
@@ -62,6 +84,7 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation) !void {
 pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
     if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
     try writer.writeAll("[]");
 }
 
@@ -129,6 +152,24 @@ fn probePi(allocator: std.mem.Allocator, io: Io, environment: *const std.process
     };
 }
 
+fn probeCodex(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, source: []const u8, executable: []const u8) !Installation {
+    const owned_source = try allocator.dupe(u8, source);
+    errdefer allocator.free(owned_source);
+    const owned_executable = try allocator.dupe(u8, executable);
+    errdefer allocator.free(owned_executable);
+    const version = commandOutput(allocator, io, environment, &.{ executable, "--version" });
+    errdefer if (version) |value| allocator.free(value);
+    const help = commandOutput(allocator, io, environment, &.{ executable, "app-server", "--help" });
+    defer if (help) |value| allocator.free(value);
+    return .{
+        .allocator = allocator,
+        .source = owned_source,
+        .executable = owned_executable,
+        .version = version,
+        .rpc_supported = if (help) |value| std.mem.indexOf(u8, value, "--listen") != null or std.mem.indexOf(u8, value, "stdio") != null else false,
+    };
+}
+
 fn commandOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, argv: []const []const u8) ?[]u8 {
     const result = std.process.run(allocator, io, .{
         .argv = argv,
@@ -155,16 +196,26 @@ fn executableFile(io: Io, path: []const u8) bool {
 }
 
 fn writePi(writer: *Io.Writer, installation: *const Installation) !void {
-    try writer.writeAll("{\"id\":\"pi\",\"name\":\"Pi\",\"status\":");
+    try writeInstallation(writer, "pi", "Pi", "jsonl-rpc", installation);
+}
+
+fn writeInstallation(writer: *Io.Writer, id: []const u8, name: []const u8, transport: []const u8, installation: *const Installation) !void {
+    try writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(id, .{}, writer);
+    try writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(",\"status\":");
     try std.json.Stringify.value(if (installation.available()) "available" else if (installation.version != null) "unsupported" else "missing", .{}, writer);
-    try writer.writeAll(",\"transport\":\"jsonl-rpc\",\"installation\":{\"source\":");
+    try writer.writeAll(",\"transport\":");
+    try std.json.Stringify.value(transport, .{}, writer);
+    try writer.writeAll(",\"installation\":{\"source\":");
     try std.json.Stringify.value(installation.source, .{}, writer);
     try writer.writeAll(",\"executable\":");
     try std.json.Stringify.value(installation.executable, .{}, writer);
     try writer.writeAll(",\"version\":");
     if (installation.version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll("},\"capabilities\":");
-    try writeCapabilities(writer, "pi");
+    try writeCapabilities(writer, id);
     try writer.writeByte('}');
 }
 
@@ -186,4 +237,8 @@ fn writeUnavailable(writer: *Io.Writer, id: []const u8, name: []const u8, transp
 
 fn knownPiLocations() []const []const u8 {
     return &.{ "/opt/homebrew/bin/pi", "/usr/local/bin/pi", "/usr/bin/pi" };
+}
+
+fn knownCodexLocations() []const []const u8 {
+    return &.{ "/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/usr/bin/codex" };
 }
