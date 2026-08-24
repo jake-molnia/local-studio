@@ -3,8 +3,8 @@
 
 import { chmod, readFile, rename, writeFile } from "fs/promises";
 import { existsSync } from "fs";
-import { resolveSettingsDefaultBackendUrl } from "../../../shared/agent/backend-url";
-import { resolveDataDir, resolveSettingsFilePath } from "./data-dir";
+import { resolveSettingsDefaultBackendUrl } from "@shared/agent/backend-url";
+import { resolveDataDir, resolveSettingsFilePath } from "./settings-data-dir";
 
 export interface ApiSettings {
   backendUrl: string;

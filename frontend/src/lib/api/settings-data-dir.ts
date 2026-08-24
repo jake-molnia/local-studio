@@ -34,27 +34,9 @@ function legacySettingsFileCandidates(): string[] {
     path.join(homedir(), LEGACY_DOT_DIR, SETTINGS_FILENAME),
     path.join(tmpdir(), "local-studio", SETTINGS_FILENAME),
     // Past Electron userData siblings.
-    path.join(
-      homedir(),
-      "Library",
-      "Application Support",
-      "local-studio-app",
-      SETTINGS_FILENAME,
-    ),
-    path.join(
-      homedir(),
-      "Library",
-      "Application Support",
-      LEGACY_APP_DATA_SLUG,
-      SETTINGS_FILENAME,
-    ),
-    path.join(
-      homedir(),
-      "Library",
-      "Application Support",
-      LEGACY_APP_DATA_DIR,
-      SETTINGS_FILENAME,
-    ),
+    path.join(homedir(), "Library", "Application Support", "local-studio-app", SETTINGS_FILENAME),
+    path.join(homedir(), "Library", "Application Support", LEGACY_APP_DATA_SLUG, SETTINGS_FILENAME),
+    path.join(homedir(), "Library", "Application Support", LEGACY_APP_DATA_DIR, SETTINGS_FILENAME),
     path.join(homedir(), "Library", "Application Support", "Electron", SETTINGS_FILENAME),
     path.join(homedir(), "Library", "Application Support", "frontend", SETTINGS_FILENAME),
   ];
