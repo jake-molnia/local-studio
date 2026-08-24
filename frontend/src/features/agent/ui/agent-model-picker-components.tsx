@@ -37,7 +37,7 @@ export function ModelPickerPanel({
   selectedModel: string;
   defaultModel?: string;
   onSelect: (choice: ModelChoice) => void;
-  onSetDefault?: (modelId: string) => void;
+  onSetDefault?: (modelId: string, routeId: string) => void;
   activeRoute: ModelRoute | null;
   onClose: () => void;
 }) {
@@ -75,9 +75,9 @@ export function ModelPickerPanel({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pt-1">
           {visibleChoices.length ? (
             visibleChoices.map((choice) => {
-              const selected = choice.routes.some((route) => route.model.id === selectedModel);
-              const preferredRoute = routeForChoice(choice, activeRoute, defaultModel);
-              const isDefault = choice.routes.some((route) => route.model.id === defaultModel);
+              const selected = choice.model.id === selectedModel;
+              const preferredRoute = routeForChoice(choice, activeRoute);
+              const isDefault = choice.model.id === defaultModel;
               return (
                 <ModelChoiceRow
                   key={choice.key}
@@ -85,9 +85,12 @@ export function ModelPickerPanel({
                   selected={selected}
                   showCompany={searching}
                   isDefault={isDefault}
+                  disabled={!preferredRoute}
                   onSelect={() => onSelect(choice)}
                   onSetDefault={
-                    onSetDefault ? () => onSetDefault(preferredRoute.model.id) : undefined
+                    onSetDefault && preferredRoute
+                      ? () => onSetDefault(choice.model.id, preferredRoute.route.id)
+                      : undefined
                   }
                 />
               );
@@ -182,6 +185,7 @@ function ModelChoiceRow({
   selected,
   showCompany,
   isDefault,
+  disabled,
   onSelect,
   onSetDefault,
 }: {
@@ -189,6 +193,7 @@ function ModelChoiceRow({
   selected: boolean;
   showCompany: boolean;
   isDefault: boolean;
+  disabled: boolean;
   onSelect: () => void;
   onSetDefault?: () => void;
 }) {
@@ -203,21 +208,22 @@ function ModelChoiceRow({
         type="button"
         role="menuitemradio"
         aria-checked={selected}
+        disabled={disabled}
         onClick={onSelect}
-        className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-(--focus-ring)"
+        className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-(--focus-ring) disabled:cursor-not-allowed disabled:opacity-45"
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-[length:var(--fs-xs)] font-medium leading-snug text-(--fg)">
             {choice.label}
           </div>
-          {showCompany ? (
+          {showCompany || disabled ? (
             <div className="mt-1 truncate text-[length:var(--fs-xs)] font-normal leading-snug text-(--dim)/70">
-              {choice.company.label}
+              {disabled ? "No connected route" : choice.company.label}
             </div>
           ) : null}
         </div>
       </button>
-      {onSetDefault ? (
+      {onSetDefault && !disabled ? (
         <button
           type="button"
           onClick={(event) => {

@@ -23,7 +23,10 @@ import {
 import { writePaneState } from "@/features/agent/workspace/persistence";
 import { writeSessionDrafts } from "@/features/agent/workspace/session-drafts";
 import { writeTranscriptSnapshot } from "@/features/agent/workspace/transcript-cache";
-import { readDefaultAgentModel } from "@/features/agent/workspace/model-preference";
+import {
+  readDefaultAgentModel,
+  readDefaultAgentRoute,
+} from "@/features/agent/workspace/model-preference";
 import { SESSIONS_CHANGED_EVENT } from "@/lib/workspace-events";
 import { syncHeadSessionMetadata } from "@/features/agent/workspace/session-metadata-sync";
 
@@ -134,6 +137,7 @@ function runInitialApiEffects(state: WorkspaceState, deps: WorkspaceEffectDeps):
             type: "setModels",
             models: normalized.models,
             preferredModelId: readDefaultAgentModel(deps.storage),
+            preferredRouteId: readDefaultAgentRoute(deps.storage),
           });
           if (normalized.models.length > 0) {
             deps.dispatch?.({ type: "setSetupWarning", warning: "" });

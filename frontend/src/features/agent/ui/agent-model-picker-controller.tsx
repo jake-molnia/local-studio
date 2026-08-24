@@ -33,9 +33,10 @@ import {
 type AgentModelPickerProps = {
   models: AgentModel[];
   selectedModel: string;
+  selectedRoute?: string;
   defaultModel?: string;
-  onSelect: (id: string) => void;
-  onSetDefault?: (id: string) => void;
+  onSelect: (modelId: string, routeId: string) => void;
+  onSetDefault?: (modelId: string, routeId: string) => void;
   loading: boolean;
   reasoningLevel?: AgentThinkingLevel;
   reasoningLevels?: readonly AgentThinkingLevel[];
@@ -73,6 +74,7 @@ const REASONING_MENU_LEVELS: readonly AgentThinkingLevel[] = [
 export function AgentModelPicker({
   models,
   selectedModel,
+  selectedRoute,
   defaultModel,
   onSelect,
   onSetDefault,
@@ -97,8 +99,8 @@ export function AgentModelPicker({
     [choices, selectedModel],
   );
   const activeRoute = useMemo(
-    () => selectedModelRoute(models, selectedModel),
-    [models, selectedModel],
+    () => selectedModelRoute(models, selectedModel, selectedRoute),
+    [models, selectedModel, selectedRoute],
   );
   const companies = useMemo(() => availableModelCompanies(choices), [choices]);
   const effectiveReasoning = reasoningLevels.includes(reasoningLevel ?? "off")
@@ -242,11 +244,12 @@ export function AgentModelPicker({
 
   const selectChoice = useCallback(
     (choice: ModelChoice) => {
-      const route = routeForChoice(choice, activeRoute, defaultModel);
-      onSelect(route.model.id);
+      const route = routeForChoice(choice, activeRoute);
+      if (!route) return;
+      onSelect(choice.model.id, route.route.id);
       close(true);
     },
-    [activeRoute, close, defaultModel, onSelect],
+    [activeRoute, close, onSelect],
   );
 
   return (
@@ -352,16 +355,16 @@ export function AgentModelPicker({
                     ),
                   )}
                 </SimplePickerPanel>
-              ) : view === "provider" && activeRoute ? (
+              ) : view === "provider" && activeRoute && activeChoice ? (
                 <SimplePickerPanel title="Provider">
                   {providerRoutes.map((route) => (
                     <SimplePickerOption
-                      key={route.model.id}
+                      key={route.route.id}
                       label={route.label}
-                      selected={route.model.id === selectedModel}
-                      disabled={false}
+                      selected={route.route.id === selectedRoute}
+                      disabled={!route.route.active}
                       onSelect={() => {
-                        onSelect(route.model.id);
+                        onSelect(activeChoice.model.id, route.route.id);
                         close(true);
                       }}
                     />
