@@ -175,6 +175,44 @@
   background: transparent;
 }
 
+.assistant-markdown-table .chat-markdown table,
+.chat-markdown .assistant-markdown-table table {
+  min-width: 100%;
+}
+
+.chat-markdown-alert {
+  margin: 12px 0;
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 14px;
+  color: color-mix(in srgb, var(--fg) 84%, transparent);
+}
+
+.chat-markdown-alert-title {
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.chat-markdown-alert[data-markdown-alert="tip"] {
+  border-left-color: var(--ui-success);
+}
+
+.chat-markdown-alert[data-markdown-alert="tip"] .chat-markdown-alert-title {
+  color: var(--ui-success);
+}
+
+.chat-markdown-alert[data-markdown-alert="warning"],
+.chat-markdown-alert[data-markdown-alert="caution"] {
+  border-left-color: var(--ui-warning);
+}
+
+.chat-markdown-alert[data-markdown-alert="warning"] .chat-markdown-alert-title,
+.chat-markdown-alert[data-markdown-alert="caution"] .chat-markdown-alert-title {
+  color: var(--ui-warning);
+}
+
 .chat-markdown thead th {
   background: transparent;
   border-bottom: 1px solid var(--separator);
@@ -297,7 +335,7 @@
 }
 
 .agent-composer-form {
-  max-width: min(672px, 57%);
+  max-width: min(var(--thread-w), calc(100% - 2rem));
 }
 
 @media (max-width: 768px) {
