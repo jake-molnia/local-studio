@@ -180,7 +180,9 @@ function startPromptCommand(
       catch: (error) => ({ _tag: "SubmitFailed" as const, error }),
     });
     const canonicalSessionId =
-      result.piSessionId || (result.harness === "fx" ? result.runtimeSessionId : null);
+      result.nativeSessionId ||
+      result.piSessionId ||
+      (result.harness === "fx" ? result.runtimeSessionId : null);
     deps.updateSession(context.sessionId, (session) => ({
       ...session,
       piSessionId: canonicalSessionId || session.piSessionId,
@@ -239,7 +241,11 @@ function startPromptCommand(
  */
 function settleFailedTurn(session: Session, assistantId: string, message: string): Session {
   if (session.activeAssistantId && session.activeAssistantId !== assistantId) return session;
-  return { ...settleTurn(session), error: message };
+  return {
+    ...settleTurn(session),
+    messages: session.messages.filter((entry) => entry.id !== assistantId),
+    error: message,
+  };
 }
 
 function promptTurnRequest(

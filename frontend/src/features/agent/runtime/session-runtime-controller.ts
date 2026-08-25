@@ -110,8 +110,9 @@ function resumeConnectionKey(connectionKey: string, piSessionId: string | null):
 }
 
 function patchRuntimeStatus(status: RuntimeStatus): Partial<Session> {
+  const canonicalSessionId = status.nativeSessionId || status.piSessionId;
   return {
-    ...(status.piSessionId ? { piSessionId: status.piSessionId } : {}),
+    ...(canonicalSessionId ? { piSessionId: canonicalSessionId } : {}),
     ...(status.modelId ? { modelId: status.modelId } : {}),
     ...(status.contextUsage !== undefined ? { contextUsage: status.contextUsage } : {}),
   };
@@ -537,7 +538,7 @@ export function createSessionRuntimeController(): SessionRuntimeController {
           if (status.active) {
             commit(sessionId, (session) => ({
               ...session,
-              piSessionId: status.piSessionId || session.piSessionId,
+              piSessionId: status.nativeSessionId || status.piSessionId || session.piSessionId,
               contextUsage: runtimeContextUsage(status, session.contextUsage),
               status: session.status === "stopping" ? "stopping" : "running",
             }));

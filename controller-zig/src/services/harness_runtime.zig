@@ -676,6 +676,10 @@ pub const Manager = struct {
             if (session.harness != .codex) return error.SessionHarnessMismatch;
             if (session.running or session.active) return error.QueueMutationNotSupported;
             if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+            if (native_session_id == null and session.last_error != null) {
+                manager.allocator.free(session.native_id);
+                session.native_id = try manager.allocator.dupe(u8, "");
+            }
             session.child = try manager.spawnCodex(session.id, session.native_id, session.model_id, session.cwd, session.session_dir, message, thinking, tool_access);
             session.running = true;
             session.active = true;

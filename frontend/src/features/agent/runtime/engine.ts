@@ -32,7 +32,6 @@ import type {
 } from "@/features/agent/contracts";
 import * as api from "@/features/agent/runtime/api";
 import { submitPromptTurn, type SubmitArgs } from "@/features/agent/runtime/prompt-stream";
-import { readTranscriptSnapshot } from "@/features/agent/workspace/transcript-cache";
 
 import { sessionRuntimeController } from "@/features/agent/runtime/session-runtime-controller";
 
@@ -265,19 +264,8 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       inFlightReplays.add(sessionId);
       return Effect.runPromise(
         Effect.gen(function* () {
-          const cachedMessages = readTranscriptSnapshot(piSessionId);
-          const seedCached = (session: Session) =>
-            session.messages.length === 0 && cachedMessages
-              ? { ...session, messages: cachedMessages }
-              : session;
-          if (!cwd) {
-            updateSession(sessionId, (session) =>
-              seedCached(session.status === "loading" ? { ...session, status: "idle" } : session),
-            );
-            return;
-          }
           updateSession(sessionId, (session) => ({
-            ...seedCached(session),
+            ...session,
             status: "loading",
             error: "",
           }));
@@ -316,7 +304,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
             const replaySeq = replayCursorAfterRuntimeHydration(runtimeStatus, piSessionId);
             updateSession(sessionId, (session) => ({
               ...session,
-              messages: reconcileReplayMessages(session.messages, messages),
+              messages,
               piSessionId,
               cwd: session.cwd || cwd,
               // Head-scan meta carries the real session model/title; the fold's
@@ -342,9 +330,6 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               // A non-null cursor means the tail load left older history unread;
               // the timeline shows a "Load earlier" affordance while it is set.
               historyCursor: messages.length > 0 ? cursor : (session.historyCursor ?? null),
-              // The replay has landed, so whatever came from the snapshot has
-              // been superseded and must not keep asking to be replayed.
-              hydratedFromCache: false,
               error: "",
             }));
             // Reattach the live stream from the hydrated cursor so EventSource
@@ -382,7 +367,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
         ),
       );
     },
-    [cwd, modelId, updateSession],
+    [cwd, modelId, modelRouteId, updateSession],
   );
 
   // Page the previous (older) chunk of a tail-loaded transcript into view and
@@ -593,10 +578,4 @@ function mergeCanonicalAndRuntimeEvents(
     ...canonicalEventsBeforeRuntimeTail(canonicalEvents, runtime),
     ...runtime,
   ]);
-}
-
-function reconcileReplayMessages(current: ChatMessage[], canonical: ChatMessage[]): ChatMessage[] {
-  if (canonical.length === 0) return current;
-  if (canonical.length >= current.length) return canonical;
-  return current;
 }

@@ -142,6 +142,23 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const model_route_id = optionalString(object, "modelRouteId") orelse if (existing) |session| session.model_route_id orelse model_id else model_id;
     const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
+    var native_owner = if (native_session_id) |value| try lockedGetByNative(allocator, io, database, value) else null;
+    defer if (native_owner) |*session| session.deinit();
+    const resume_native_session_id = if (native_session_id) |value|
+        if (native_owner) |session|
+            if (canResumeNative(&session, requested_harness, model_route_id)) value else null
+        else
+            value
+    else
+        null;
+    var detached_document: ?[]u8 = null;
+    defer if (detached_document) |value| allocator.free(value);
+    if (native_session_id != null and resume_native_session_id == null) {
+        if (parsed.value.object.getPtr("nativeSessionId")) |value| value.* = .null;
+        if (parsed.value.object.getPtr("piSessionId")) |value| value.* = .null;
+        detached_document = try serialize(allocator, parsed.value);
+    }
+    const dispatch_document = detached_document orelse routed_document;
     if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "codex")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
@@ -158,7 +175,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
             target.?.harness_version orelse if (existing) |session| session.harness_version else null,
         .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else harnessCapabilities(requested_harness),
         .node_id = node_id,
-        .native_session_id = native_session_id,
+        .native_session_id = resume_native_session_id,
         .project_id = project_id,
         .project_path = project_path,
         .model_id = model_id,
@@ -178,9 +195,9 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     }
 
     const payload = if (mode == .standalone)
-        harness.turnPayloadAt(routed_document, if (existing) |session| session.event_cursor else 0, if (existing) |session| session.native_session_id else null)
+        harness.turnPayloadAt(dispatch_document, if (existing) |session| session.event_cursor else 0, resume_native_session_id)
     else
-        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", routed_document);
+        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", dispatch_document);
     const response = payload catch |failure| {
         try lockedFinish(io, database, command_id[0..], "rejected", @errorName(failure));
         try lockedRuntime(io, database, session_id, "unavailable", null, null);
@@ -490,6 +507,19 @@ fn lockedGet(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, s
     try database.lock(io);
     defer database.unlock(io);
     return records.get(allocator, database, session_id);
+}
+
+fn lockedGetByNative(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, native_session_id: []const u8) !?records.Session {
+    try database.lock(io);
+    defer database.unlock(io);
+    return records.getByNative(allocator, database, native_session_id);
+}
+
+fn canResumeNative(session: *const records.Session, harness: []const u8, model_route_id: []const u8) bool {
+    if (std.mem.eql(u8, session.status, "unavailable")) return false;
+    if (!std.mem.eql(u8, session.harness, harness)) return false;
+    const previous_route = session.model_route_id orelse return false;
+    return std.mem.eql(u8, previous_route, model_route_id);
 }
 
 fn lockedSave(_: std.mem.Allocator, io: Io, database: *sqlite.Database, input: records.SessionInput) !void {

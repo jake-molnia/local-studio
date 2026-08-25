@@ -22,7 +22,6 @@ import {
 } from "@/features/agent/workspace/store";
 import { writePaneState } from "@/features/agent/workspace/persistence";
 import { writeSessionDrafts } from "@/features/agent/workspace/session-drafts";
-import { writeTranscriptSnapshot } from "@/features/agent/workspace/transcript-cache";
 import {
   readDefaultAgentModel,
   readDefaultAgentRoute,
@@ -357,77 +356,6 @@ function paneMetadataKey(
   });
 }
 
-function isSettledStatus(status: string): boolean {
-  return status === "idle" || status === "done";
-}
-
-function transcriptSignature(session: Session): string {
-  const last = session.messages[session.messages.length - 1];
-  return [
-    session.piSessionId ?? "",
-    session.status,
-    session.messages.length,
-    last?.id ?? "",
-    last?.text.length ?? 0,
-    last?.blocks?.length ?? 0,
-  ].join("|");
-}
-
-function persistSettledTranscripts(
-  prevState: WorkspaceState,
-  nextState: WorkspaceState,
-  deps: WorkspaceEffectDeps,
-): void {
-  for (const [id, session] of nextState.sessions) {
-    if (!session.piSessionId || session.messages.length === 0) continue;
-    if (!isSettledStatus(session.status)) continue;
-    const before = prevState.sessions.get(id);
-    if (before && transcriptSignature(before) === transcriptSignature(session)) continue;
-    writeTranscriptSnapshot(
-      session.piSessionId,
-      session.messages,
-      cleanSessionTitle(session.title),
-      deps.storage,
-    );
-  }
-}
-
-function persistTurnStartTranscripts(
-  prevState: WorkspaceState,
-  nextState: WorkspaceState,
-  deps: WorkspaceEffectDeps,
-): void {
-  for (const [id, session] of nextState.sessions) {
-    if (!session.piSessionId || session.messages.length === 0) continue;
-    if (session.status !== "running" && session.status !== "starting") continue;
-    const before = prevState.sessions.get(id);
-    if (!before || before.status === session.status) continue;
-    writeTranscriptSnapshot(
-      session.piSessionId,
-      session.messages,
-      cleanSessionTitle(session.title),
-      deps.storage,
-    );
-  }
-}
-
-function persistExitedTranscripts(
-  prevState: WorkspaceState,
-  nextState: WorkspaceState,
-  deps: WorkspaceEffectDeps,
-): void {
-  for (const [id, session] of prevState.sessions) {
-    if (!session.piSessionId || session.messages.length === 0) continue;
-    if (nextState.sessions.has(id)) continue;
-    writeTranscriptSnapshot(
-      session.piSessionId,
-      session.messages,
-      cleanSessionTitle(session.title),
-      deps.storage,
-    );
-  }
-}
-
 export function runWorkspaceEffect(
   action: WorkspaceAction,
   prevState: WorkspaceState,
@@ -442,11 +370,6 @@ export function runWorkspaceEffect(
   }
 
   publishWorkspaceSessions(prevState, nextState, deps);
-  if (SESSIONS_CHANGED_ACTIONS.has(action.type)) {
-    persistSettledTranscripts(prevState, nextState, deps);
-    persistTurnStartTranscripts(prevState, nextState, deps);
-    persistExitedTranscripts(prevState, nextState, deps);
-  }
   if (
     SESSIONS_CHANGED_ACTIONS.has(action.type) &&
     storedSessionsKey(prevState) !== storedSessionsKey(nextState)
