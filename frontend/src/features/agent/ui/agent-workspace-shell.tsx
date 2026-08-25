@@ -100,7 +100,6 @@ export function AgentWorkspaceShell({
   });
   const focusedModel =
     state.models.find((model) => model.id === (focusedTab?.modelId ?? state.selectedModel)) ?? null;
-  const focusedGitSummary = projects.gitSummary(activeProject?.path ?? focusedTab?.cwd);
   const showProjectEmptyState = shouldShowProjectEmptyState(projects, projectParam);
   const focusedMessageCount = focusedTab?.messages.length ?? 0;
   const panelMode = quickPanelMode(compact, showProjectEmptyState, focusedMessageCount);
@@ -150,7 +149,6 @@ export function AgentWorkspaceShell({
             models={state.models}
             modelsLoading={state.modelsLoading}
             focusedModel={focusedModel}
-            focusedGitSummary={focusedGitSummary}
           />
         ) : null}
       </div>
@@ -168,7 +166,6 @@ function WorkspaceComputerSurface({
   models,
   modelsLoading,
   focusedModel,
-  focusedGitSummary,
 }: {
   open: boolean;
   handles: WorkspaceHandles;
@@ -179,7 +176,6 @@ function WorkspaceComputerSurface({
   models: AgentModel[];
   modelsLoading: boolean;
   focusedModel: AgentModel | null;
-  focusedGitSummary: ReturnType<ProjectsContextValue["gitSummary"]>;
 }) {
   return (
     <Suspense fallback={open ? <ComputerPanelFallback /> : null}>
@@ -190,7 +186,6 @@ function WorkspaceComputerSurface({
         sessions={[...sessions.values()]}
         activeModelId={focusedTab?.modelId ?? selectedModel}
         activeModel={focusedModel}
-        gitSummary={focusedGitSummary}
         models={models}
         modelsLoading={modelsLoading}
       />

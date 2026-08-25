@@ -62,12 +62,6 @@ export function terminalOwnerFor(
   };
 }
 
-export function terminalOwnerLabel(owner: TerminalOwner, index: number): string {
-  const title = owner.title.trim();
-  if (title) return title;
-  return owner.kind === "project" ? "Project terminal" : `Terminal ${index + 1}`;
-}
-
 /** Cross-surface request to open a persistent terminal in the focused pane. */
 export const OPEN_TERMINAL_EVENT = "local-studio:open-terminal";
 

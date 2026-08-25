@@ -1,12 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
-import { Plus, TerminalSquare } from "@/ui/icon-registry";
-import { CloseIcon } from "@/ui/icons";
+import { useCallback, useMemo, useState } from "react";
 import {
-  rememberPersistentTerminalOwner,
   removePersistentTerminalOwner,
-  selectPersistentTerminalOwner,
   usePersistentTerminalOwners,
   type TerminalOwnersSnapshot,
 } from "@/features/agent/ui/use-persistent-terminal-owners";
@@ -16,15 +12,11 @@ import {
   sanitizeLocalFileUrl,
 } from "@/features/agent/sanitize-embedded-browser-url";
 import { useTools } from "@/features/agent/tools/context";
-import type { GitSummary, Project } from "@/features/agent/projects/types";
+import type { Project } from "@/features/agent/projects/types";
 import type { Session } from "@/features/agent/runtime/types";
 import { makeFreshTab } from "@/features/agent/messages/helpers";
 import type { AgentModel } from "@/features/agent/workspace/types";
-import {
-  terminalKeysMatch,
-  terminalOwnerFor,
-  terminalOwnerLabel,
-} from "@/features/agent/terminal-owners";
+import { terminalKeysMatch, terminalOwnerFor } from "@/features/agent/terminal-owners";
 import { ComputerTabPanel, type SideChatTabsUpdater } from "@/features/agent/ui/computer-tab-panel";
 import { PersistentTerminals } from "@/features/agent/ui/persistent-terminals";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
@@ -32,7 +24,7 @@ import { useMountSubscription } from "@/hooks/use-mount-subscription";
 
 type AgentBrowserPanelHandles = Pick<
   WorkspaceHandles,
-  "compactFocusedSession" | "updateDetachedSession" | "removeDetachedSession"
+  "updateDetachedSession" | "removeDetachedSession"
 >;
 
 type AgentBrowserPanelProps = {
@@ -44,7 +36,6 @@ type AgentBrowserPanelProps = {
   activeModel: AgentModel | null;
   models: AgentModel[];
   modelsLoading: boolean;
-  gitSummary?: GitSummary | null;
 };
 
 function createSideChatSession(
@@ -88,7 +79,6 @@ export function AgentBrowserPanel({
   activeModel,
   models,
   modelsLoading,
-  gitSummary,
 }: AgentBrowserPanelProps) {
   const tools = useTools();
   const { closeComputerTab, registerComputerTabCloseHandler } = tools;
@@ -132,36 +122,6 @@ export function AgentBrowserPanel({
       : (owners[0]?.mountKey ?? null);
     return { owners, activeOwnerKey };
   }, [terminalOwner, terminalState]);
-  const openTerminalForFocusedSession = useCallback(() => {
-    if (terminalOwner) rememberPersistentTerminalOwner(terminalOwner, { select: true });
-    tools.setComputerTab("terminal");
-  }, [terminalOwner, tools]);
-  const selectTerminalOwner = useCallback(
-    (ownerKey: string) => {
-      selectPersistentTerminalOwner(ownerKey);
-      tools.setComputerTab("terminal");
-    },
-    [tools],
-  );
-  const closeTerminalOwner = useCallback(
-    (ownerKey: string) => {
-      closePersistedTerminalOwner(ownerKey);
-      if (visibleTerminalState.owners.length <= 1) tools.closeComputerTab("terminal");
-    },
-    [visibleTerminalState.owners.length, tools],
-  );
-  const handleComputerKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLElement>) => {
-      if (!(event.metaKey || event.ctrlKey) || !event.altKey) return;
-      const index = Number(event.key) - 1;
-      if (!Number.isInteger(index) || index < 0) return;
-      const owner = visibleTerminalState.owners[index];
-      if (!owner) return;
-      event.preventDefault();
-      selectTerminalOwner(owner.mountKey);
-    },
-    [selectTerminalOwner, visibleTerminalState.owners],
-  );
   const navigateBrowser = (value: string) => {
     const next = normalizeBrowserInput(value, focusedSession?.cwd ?? activeProject?.path ?? "");
     if (!next) return;
@@ -175,20 +135,6 @@ export function AgentBrowserPanel({
       body: JSON.stringify({ url: accepted }),
     }).catch(() => undefined);
   };
-  const openSideChat = useCallback(() => {
-    handles.updateDetachedSession(sideChatSeed, (current) =>
-      current.messages.length
-        ? current
-        : {
-            ...current,
-            status: current.status === "loading" ? "idle" : current.status,
-            cwd: focusedSession?.cwd ?? activeProject?.path,
-            projectId: focusedSession?.projectId ?? activeProject?.id,
-            modelId: current.modelId || focusedSession?.modelId || activeModelId,
-          },
-    );
-    tools.setComputerTab("side-chat");
-  }, [activeModelId, activeProject, focusedSession, handles, sideChatSeed, tools]);
   const updateSideChatTabs = useCallback(
     (nextTabsOrUpdater: SideChatTabsUpdater) => {
       handles.updateDetachedSession(sideChatSeed, (current) => {
@@ -232,30 +178,16 @@ export function AgentBrowserPanel({
     <section
       className={`agent-computer-panel ${tools.computer.open ? "relative flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col bg-(--color-panel)`}
       tabIndex={-1}
-      onKeyDown={handleComputerKeyDown}
     >
-      {workspaceToolsEnabled && tools.computer.tab === "terminal" ? (
-        <TerminalOwnerBar
-          terminalState={visibleTerminalState}
-          onOpenCurrentTerminal={openTerminalForFocusedSession}
-          onSelectTerminalOwner={selectTerminalOwner}
-          onCloseTerminalOwner={closeTerminalOwner}
-        />
-      ) : null}
-
       <ComputerTabPanel
         activeModel={activeModel}
         activeModelId={activeModelId}
         activeProject={activeProject}
         focusedSession={focusedSession}
-        gitSummary={gitSummary}
         models={models}
         modelsLoading={modelsLoading}
         onCloseSideChat={closeSideChat}
-        onCompactSession={handles.compactFocusedSession}
         onNavigateBrowser={navigateBrowser}
-        onOpenSideChat={openSideChat}
-        onOpenTerminal={openTerminalForFocusedSession}
         onRenameSideChat={renameSideChat}
         onUpdateSideChatTabs={updateSideChatTabs}
         sessions={sessions}
@@ -270,63 +202,5 @@ export function AgentBrowserPanel({
         terminals={terminalState.owners}
       />
     </section>
-  );
-}
-function TerminalOwnerBar({
-  terminalState,
-  onOpenCurrentTerminal,
-  onSelectTerminalOwner,
-  onCloseTerminalOwner,
-}: {
-  terminalState: TerminalOwnersSnapshot;
-  onOpenCurrentTerminal: () => void;
-  onSelectTerminalOwner: (ownerKey: string) => void;
-  onCloseTerminalOwner: (ownerKey: string) => void;
-}) {
-  return (
-    <div className="flex h-7 shrink-0 items-center gap-1 border-b border-(--border) bg-(--color-header) px-1">
-      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {terminalState.owners.map((owner, index) => {
-          const label = terminalOwnerLabel(owner, index);
-          const selected = terminalState.activeOwnerKey === owner.mountKey;
-          const shortcut = index < 9 ? `⌘⌥${index + 1}` : undefined;
-          return (
-            <div
-              key={owner.mountKey}
-              title={shortcut ? `${label} (${shortcut})` : label}
-              className={`group flex h-6 min-w-0 max-w-52 items-center rounded-[var(--rad-sm)] ${
-                selected ? "bg-(--active) text-(--fg)" : "text-(--dim) hover:bg-(--hover)"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => onSelectTerminalOwner(owner.mountKey)}
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-[11px]"
-              >
-                <TerminalSquare className="h-3 w-3 shrink-0" />
-                <span className="truncate">{label}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onCloseTerminalOwner(owner.mountKey)}
-                className="mr-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] opacity-0 hover:bg-(--fg)/8 group-hover:opacity-80 focus-visible:opacity-100"
-                aria-label={`Close ${label}`}
-              >
-                <CloseIcon className="h-2.5 w-2.5" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      <button
-        type="button"
-        onClick={onOpenCurrentTerminal}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--rad-sm)] text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
-        title="Open terminal for current task"
-        aria-label="Open terminal for current task"
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
-    </div>
   );
 }
