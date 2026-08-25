@@ -554,6 +554,29 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/accounts/sandboxes")) {
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        defer if (account_id) |value| allocator.free(value);
+        const response = if (mode != .standalone) remote: {
+            const internal_path = if (account_id) |value|
+                try std.fmt.allocPrint(allocator, "/internal/node/v1/accounts/sandboxes?accountId={s}", .{value})
+            else
+                try allocator.dupe(u8, "/internal/node/v1/accounts/sandboxes");
+            defer allocator.free(internal_path);
+            break :remote agent_code_storage.forward(allocator, io, client, database, internal_path, request.head.method, document);
+        } else switch (request.head.method) {
+            .GET => code_storage.sandboxAccountsPayload(),
+            .POST => code_storage.connectSandboxPayload(document orelse return false),
+            .DELETE => code_storage.disconnectSandboxPayload(account_id orelse return respondDownloadError(request, .bad_request, "accountId is required")),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondCodeStorageFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/grants")) {
         const node_id = try queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
@@ -993,6 +1016,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = switch (request.head.method) {
             .GET => code_storage.credentialStorePayload(),
             .PUT => code_storage.updateCredentialStorePayload(document orelse return false),
+            else => unreachable,
+        };
+        const payload = response catch |failure| return respondCodeStorageFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/accounts/sandboxes")) {
+        const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        defer if (account_id) |value| allocator.free(value);
+        const response = switch (request.head.method) {
+            .GET => code_storage.sandboxAccountsPayload(),
+            .POST => code_storage.connectSandboxPayload(document orelse return false),
+            .DELETE => code_storage.disconnectSandboxPayload(account_id orelse return respondDownloadError(request, .bad_request, "accountId is required")),
             else => unreachable,
         };
         const payload = response catch |failure| return respondCodeStorageFailure(request, failure);
@@ -2375,8 +2414,8 @@ fn respondGoogleFailure(request: *http.Server.Request, failure: anyerror) !bool 
 
 fn respondCodeStorageFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.InvalidCodeStorageAccountPayload, error.InvalidCredentialStorePayload, error.SecretProviderRequired, error.CodeStorageOrganizationRequired, error.CodeStoragePrivateKeyRequired, error.InvalidCodeStorageOrganization, error.InvalidCodeStoragePrivateKey, error.InvalidSecretProvider, error.CodeStorageAccountRequired => .bad_request,
-        error.CodeStorageAccountNotFound => .not_found,
+        error.InvalidCodeStorageAccountPayload, error.InvalidCredentialStorePayload, error.InvalidSandboxAccountPayload, error.SecretProviderRequired, error.SandboxProviderRequired, error.SandboxCredentialRequired, error.SandboxAccountRequired, error.CodeStorageOrganizationRequired, error.CodeStoragePrivateKeyRequired, error.InvalidCodeStorageOrganization, error.InvalidCodeStoragePrivateKey, error.InvalidSecretProvider, error.CodeStorageAccountRequired => .bad_request,
+        error.CodeStorageAccountNotFound, error.SandboxAccountNotFound => .not_found,
         error.SecretSpecUnavailable, error.SecretStoreWriteFailed, error.SecretStoreReadFailed, error.SecretStoreDeleteFailed => .service_unavailable,
         error.ConnectorNodeRequired => .conflict,
         error.NodeUnavailable, error.NodeRequestRejected => .bad_gateway,
@@ -2386,6 +2425,11 @@ fn respondCodeStorageFailure(request: *http.Server.Request, failure: anyerror) !
         error.InvalidCodeStorageAccountPayload => "Invalid Code.Storage account request",
         error.InvalidCredentialStorePayload => "Invalid credential store request",
         error.SecretProviderRequired => "Choose a SecretSpec credential store",
+        error.InvalidSandboxAccountPayload => "Invalid sandbox account request",
+        error.SandboxProviderRequired => "Choose Modal or Daytona",
+        error.SandboxCredentialRequired => "Enter the credentials required by this sandbox provider",
+        error.SandboxAccountRequired => "Choose a sandbox account",
+        error.SandboxAccountNotFound => "Sandbox account not found",
         error.CodeStorageOrganizationRequired, error.InvalidCodeStorageOrganization => "Enter the lowercase Code.Storage organization identifier",
         error.CodeStoragePrivateKeyRequired => "Paste the PKCS8 private key shown when the Code.Storage API key was created",
         error.InvalidCodeStoragePrivateKey => "The Code.Storage private key must be a valid ES256 PKCS8 PEM key",

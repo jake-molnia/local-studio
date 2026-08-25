@@ -55,6 +55,87 @@ pub const State = struct {
         return writeCredentialStore(state.allocator, store.secret_provider);
     }
 
+    pub fn sandboxAccountsPayload(state: *State) ![]u8 {
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        return writeSandboxAccounts(state.allocator, &store);
+    }
+
+    pub fn connectSandboxPayload(state: *State, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidSandboxAccountPayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidSandboxAccountPayload;
+        const provider = stringField(parsed.value.object, "provider") orelse return error.SandboxProviderRequired;
+        const label = stringField(parsed.value.object, "label") orelse if (std.mem.eql(u8, provider, "modal")) "Modal" else "Daytona";
+        const endpoint = stringField(parsed.value.object, "endpoint") orelse if (std.mem.eql(u8, provider, "modal")) "modal.com" else "app.daytona.io";
+        var secret: Io.Writer.Allocating = .init(state.allocator);
+        defer secret.deinit();
+        if (std.mem.eql(u8, provider, "modal")) {
+            const token_id = stringField(parsed.value.object, "tokenId") orelse return error.SandboxCredentialRequired;
+            const token_secret = stringField(parsed.value.object, "tokenSecret") orelse return error.SandboxCredentialRequired;
+            try secret.writer.writeAll("{\"tokenId\":");
+            try std.json.Stringify.value(token_id, .{}, &secret.writer);
+            try secret.writer.writeAll(",\"tokenSecret\":");
+            try std.json.Stringify.value(token_secret, .{}, &secret.writer);
+            try secret.writer.writeByte('}');
+        } else if (std.mem.eql(u8, provider, "daytona")) {
+            const api_key = stringField(parsed.value.object, "apiKey") orelse return error.SandboxCredentialRequired;
+            try secret.writer.writeAll("{\"apiKey\":");
+            try std.json.Stringify.value(api_key, .{}, &secret.writer);
+            try secret.writer.writeByte('}');
+        } else return error.SandboxProviderRequired;
+        const id_buffer = repository.accountId(provider, endpoint, secret.writer.buffered());
+        const secret_ref = try std.fmt.allocPrint(state.allocator, "SANDBOX_CREDENTIAL_{s}", .{id_buffer});
+        defer state.allocator.free(secret_ref);
+        var timestamp_buffer: [24]u8 = undefined;
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        var account = store.find(&id_buffer);
+        if (account == null) {
+            try store.accounts.append(state.allocator, .{
+                .allocator = state.allocator,
+                .id = try state.allocator.dupe(u8, &id_buffer),
+                .provider = try state.allocator.dupe(u8, provider),
+                .subject = try state.allocator.dupe(u8, endpoint),
+                .label = try state.allocator.dupe(u8, label),
+                .credential_kind = try state.allocator.dupe(u8, "json"),
+                .secret_provider = try state.allocator.dupe(u8, store.secret_provider),
+                .secret_ref = try state.allocator.dupe(u8, secret_ref),
+                .connected_at = try state.allocator.dupe(u8, formatTimestamp(state.io, &timestamp_buffer)),
+            });
+            account = &store.accounts.items[store.accounts.items.len - 1];
+        }
+        try repository.setSecret(state.allocator, state.io, state.environment, state.data_dir, &store, account.?.secret_ref, account.?.secret_provider, secret.writer.buffered());
+        try repository.save(state.allocator, state.io, state.data_dir, &store);
+        return writeSandboxAccounts(state.allocator, &store);
+    }
+
+    pub fn disconnectSandboxPayload(state: *State, account_id: []const u8) ![]u8 {
+        if (!repository.validId(account_id)) return error.SandboxAccountRequired;
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        var index: ?usize = null;
+        for (store.accounts.items, 0..) |account, account_index| {
+            if (std.mem.eql(u8, account.id, account_id) and isSandboxProvider(account.provider)) {
+                index = account_index;
+                break;
+            }
+        }
+        const account_index = index orelse return error.SandboxAccountNotFound;
+        const account = &store.accounts.items[account_index];
+        try repository.deleteSecret(state.allocator, state.io, state.environment, state.data_dir, &store, account.secret_ref, account.secret_provider);
+        var removed = store.accounts.orderedRemove(account_index);
+        removed.deinit();
+        try repository.save(state.allocator, state.io, state.data_dir, &store);
+        return writeSandboxAccounts(state.allocator, &store);
+    }
+
     pub fn connectPayload(state: *State, database: *sqlite.Database, document: []const u8) ![]u8 {
         var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidCodeStorageAccountPayload;
         defer parsed.deinit();
@@ -167,6 +248,37 @@ fn writeCredentialStore(allocator: std.mem.Allocator, provider: []const u8) ![]u
     try std.json.Stringify.value(provider, .{}, &output.writer);
     try output.writer.writeByte('}');
     return output.toOwnedSlice();
+}
+
+fn writeSandboxAccounts(allocator: std.mem.Allocator, store: *repository.Store) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"accounts\":[");
+    var wrote = false;
+    for (store.accounts.items) |account| {
+        if (!isSandboxProvider(account.provider)) continue;
+        if (wrote) try output.writer.writeByte(',');
+        wrote = true;
+        try output.writer.writeAll("{\"id\":");
+        try std.json.Stringify.value(account.id, .{}, &output.writer);
+        try output.writer.writeAll(",\"provider\":");
+        try std.json.Stringify.value(account.provider, .{}, &output.writer);
+        try output.writer.writeAll(",\"label\":");
+        try std.json.Stringify.value(account.label, .{}, &output.writer);
+        try output.writer.writeAll(",\"endpoint\":");
+        try std.json.Stringify.value(account.subject, .{}, &output.writer);
+        try output.writer.writeAll(",\"connectedAt\":");
+        try std.json.Stringify.value(account.connected_at, .{}, &output.writer);
+        try output.writer.writeAll(",\"secretProvider\":");
+        try std.json.Stringify.value(account.secret_provider, .{}, &output.writer);
+        try output.writer.writeByte('}');
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
+fn isSandboxProvider(provider: []const u8) bool {
+    return std.mem.eql(u8, provider, "modal") or std.mem.eql(u8, provider, "daytona");
 }
 
 fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {
