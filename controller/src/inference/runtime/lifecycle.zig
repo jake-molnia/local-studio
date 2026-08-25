@@ -1,11 +1,11 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const instances = @import("../repository/instances.zig");
-const recipe_repository = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const config_module = @import("../../app/config.zig");
+const instances = @import("instance_store.zig");
+const recipe_repository = @import("../recipes/store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 const launch_plan = @import("launch_plan.zig");
 const processes = @import("processes.zig");
-const recipes = @import("recipes.zig");
+const recipes = @import("../recipes/service.zig");
 
 const Io = std.Io;
 const http = std.http;

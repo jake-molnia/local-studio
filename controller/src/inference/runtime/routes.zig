@@ -1,9 +1,9 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const system_info = @import("../platform/system_info.zig");
-const runtime_info = @import("runtime_info.zig");
+const config_module = @import("../../app/config.zig");
+const system_info = @import("../../system/platform/system_info.zig");
+const runtime_info = @import("info.zig");
 const lifecycle = @import("lifecycle.zig");
-const settings_file = @import("../repository/studio_settings.zig");
+const settings_file = @import("../../system/settings/studio_store.zig");
 
 pub const Backend = enum { vllm, sglang, llamacpp, mlx };
 

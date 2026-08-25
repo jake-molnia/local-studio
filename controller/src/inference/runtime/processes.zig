@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const instances = @import("../repository/instances.zig");
+const instances = @import("instance_store.zig");
 
 const launch_marker = "LOCAL_STUDIO_LAUNCH_NONCE";
 

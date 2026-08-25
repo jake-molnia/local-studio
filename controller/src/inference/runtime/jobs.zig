@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config_module = @import("../config.zig");
-const runtime_info = @import("runtime_info.zig");
+const config_module = @import("../../app/config.zig");
+const runtime_info = @import("info.zig");
 
 const max_finished_jobs = 50;
 const max_jobs = 64;

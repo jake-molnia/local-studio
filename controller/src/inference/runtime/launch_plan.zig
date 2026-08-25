@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config_module = @import("../config.zig");
-const studio_settings = @import("../repository/studio_settings.zig");
+const config_module = @import("../../app/config.zig");
+const studio_settings = @import("../../system/settings/studio_store.zig");
 
 pub const EnvironmentEntry = struct {
     key: []const u8,

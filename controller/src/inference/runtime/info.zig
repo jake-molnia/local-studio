@@ -1,6 +1,6 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const system_info = @import("../platform/system_info.zig");
+const config_module = @import("../../app/config.zig");
+const system_info = @import("../../system/platform/system_info.zig");
 
 const Io = std.Io;
 const cache_seconds = 30;
