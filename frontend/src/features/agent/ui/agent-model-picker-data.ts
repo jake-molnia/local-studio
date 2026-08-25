@@ -31,14 +31,25 @@ export type ModelChoice = {
   routes: ModelRoute[];
 };
 
-export function buildModelChoices(models: AgentModel[]): ModelChoice[] {
+export function buildModelChoices(
+  models: AgentModel[],
+  providerOrder: readonly string[] = [],
+): ModelChoice[] {
+  const providerPosition = new Map(providerOrder.map((id, index) => [id, index]));
   return models
     .map((model) => ({
       key: model.id,
       label: model.name,
       company: companyFromLab(model.lab),
       model,
-      routes: model.routes.map((route) => modelRoute(model, route)),
+      routes: model.routes
+        .map((route) => modelRoute(model, route))
+        .toSorted(
+          (left, right) =>
+            (providerPosition.get(left.key) ?? Number.MAX_SAFE_INTEGER) -
+              (providerPosition.get(right.key) ?? Number.MAX_SAFE_INTEGER) ||
+            left.label.localeCompare(right.label),
+        ),
     }))
     .toSorted(
       (left, right) =>

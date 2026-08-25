@@ -28,6 +28,7 @@ import {
 } from "./agent-model-picker-data";
 import { useHarnessCatalog } from "./use-harness-catalog";
 import { hasModelFavorites } from "./model-picker-favorites";
+import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
 import {
   ComposerPickerTrigger,
   filteredChoices,
@@ -118,7 +119,12 @@ export function AgentModelPicker({
     [harnesses],
   );
   const open = controlledOpen ?? internalOpen;
-  const choices = useMemo(() => buildModelChoices(models), [models]);
+  const providerOrder = useMemo(
+    () =>
+      typeof window === "undefined" ? [] : readAgentDefaults(window.localStorage).providerOrder,
+    [],
+  );
+  const choices = useMemo(() => buildModelChoices(models, providerOrder), [models, providerOrder]);
   const activeChoice = useMemo(
     () => activeModelChoice(choices, selectedModel),
     [choices, selectedModel],

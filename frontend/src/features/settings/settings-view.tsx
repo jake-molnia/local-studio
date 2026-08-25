@@ -27,6 +27,7 @@ import type { ApiConnectionSettings, ConnectionStatus } from "./types";
 import { ApiConnectionSection } from "./api-connection-section";
 import { ArchivedChatsSettings } from "./agent-settings-sections";
 import { AppVersionSection } from "./app-version-section";
+import { AgentDefaultsSection } from "./agent-defaults-section";
 import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -76,6 +77,10 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
     },
   ],
   connection: [
+    {
+      label: "New threads",
+      terms: ["default model", "provider", "harness", "effort", "title", "order"],
+    },
     { label: "Application", terms: ["release", "updates", "desktop"] },
     { label: "Update channel", terms: ["stable", "nightly"] },
     { label: "Version", terms: ["build", "release", "web ui"] },
@@ -389,7 +394,12 @@ export function SettingsView({
         />
       }
     >
-      {activeSection === "connection" ? <AppVersionSection /> : null}
+      {activeSection === "connection" ? (
+        <>
+          <AgentDefaultsSection />
+          <AppVersionSection />
+        </>
+      ) : null}
       {activeSection === "profile" ? <ProfileSettings /> : null}
       <SettingsUsage active={activeSection === "usage"} />
       <SettingsModels active={activeSection === "models"} />

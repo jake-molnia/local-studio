@@ -19,6 +19,7 @@ import { terminalOwnerFor } from "@/features/agent/terminal-owners";
 import { collectLeaves } from "@/features/agent/workspace/layout";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 import type { AgentHarness } from "@/features/agent/runtime/types";
+import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
 
 export type WorkspacePaneRenderContext = {
   paneId: PaneId;
@@ -187,6 +188,8 @@ const WorkspacePane = memo(function WorkspacePane({
 }: WorkspacePaneProps) {
   const sessions = view.session ? [view.session] : [];
   const chatWorkspace = isChatsProject(view.project);
+  const defaultHarness =
+    typeof window === "undefined" ? "pi" : readAgentDefaults(window.localStorage).harness;
   const composerFocus = useMemo(
     () => ({ tabId: view.pane.sessionId, composerFocusIntent }),
     [view.pane.sessionId, composerFocusIntent],
@@ -215,7 +218,7 @@ const WorkspacePane = memo(function WorkspacePane({
             selectedRoute={view.modelRouteId}
             defaultModel={defaultModel}
             onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
-            selectedHarness={chatWorkspace ? "chat" : (view.session?.harness ?? "pi")}
+            selectedHarness={chatWorkspace ? "chat" : (view.session?.harness ?? defaultHarness)}
             harnessDisabled={chatWorkspace || !view.isNewSession}
             {...(chatWorkspace
               ? {}

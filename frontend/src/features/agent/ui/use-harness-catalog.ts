@@ -4,6 +4,10 @@ import { Effect, Schema } from "effect";
 import { useState } from "react";
 import { HarnessCatalogSchema, type HarnessCatalogEntry } from "@shared/agent/harness-catalog";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import {
+  orderedByPreference,
+  readAgentDefaults,
+} from "@/features/agent/workspace/model-preference";
 
 export function useHarnessCatalog(): readonly HarnessCatalogEntry[] {
   const [harnesses, setHarnesses] = useState<readonly HarnessCatalogEntry[]>([]);
@@ -20,7 +24,11 @@ export function useHarnessCatalog(): readonly HarnessCatalogEntry[] {
         Effect.map(Schema.decodeUnknownSync(HarnessCatalogSchema)),
         Effect.catch(() => Effect.succeed({ harnesses: [] })),
       ),
-    ).then((catalog) => setHarnesses(catalog.harnesses));
+    ).then((catalog) =>
+      setHarnesses(
+        orderedByPreference(catalog.harnesses, readAgentDefaults(window.localStorage).harnessOrder),
+      ),
+    );
     return () => controller.abort();
   }, []);
   return harnesses;

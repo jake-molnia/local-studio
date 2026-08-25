@@ -27,6 +27,7 @@ import {
   runtimeCanHydrateCanonicalSession,
   settleTurn,
 } from "@/features/agent/runtime/session-status";
+import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
 
 const EMPTY_SKILLS: ComposerSkillRef[] = [];
 const EMPTY_PROMPT_TEMPLATES: ComposerPromptTemplateRef[] = [];
@@ -108,7 +109,12 @@ function createPromptTurnContext(
   const sessionId = args.targetSessionId ?? deps.activeTabId;
   const current = deps.tabsRef.current.find((tab) => tab.id === sessionId);
   if (!current || !deps.modelId) return null;
-  const selected = deps.forcedHarness ? { ...current, harness: deps.forcedHarness } : current;
+  const defaultHarness =
+    typeof window === "undefined" ? "pi" : readAgentDefaults(window.localStorage).harness;
+  const selected = {
+    ...current,
+    harness: deps.forcedHarness ?? current.harness ?? (defaultHarness as AgentHarness),
+  };
 
   const selection = deps.selectionFor(sessionId);
   const skills = args.skills ?? selection.skills ?? EMPTY_SKILLS;
