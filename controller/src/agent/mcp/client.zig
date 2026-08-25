@@ -1,7 +1,7 @@
 const std = @import("std");
-const connector_runtime = @import("connector_runtime.zig");
-const oauth_connector_store = @import("../repository/oauth_connector_store.zig");
-const account_store = @import("../repository/account_store.zig");
+const connector_runtime = @import("../connectors/runtime.zig");
+const oauth_connector_store = @import("../connectors/oauth_store.zig");
+const account_store = @import("../../accounts/store.zig");
 
 const Io = std.Io;
 const max_frame_bytes = 4 * 1024 * 1024;

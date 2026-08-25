@@ -1,5 +1,5 @@
 const std = @import("std");
-const config = @import("../config.zig");
+const config = @import("../../app/config.zig");
 
 const Io = std.Io;
 

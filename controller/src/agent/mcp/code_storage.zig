@@ -1,5 +1,5 @@
 const std = @import("std");
-const auth = @import("services/code_storage_auth.zig");
+const auth = @import("../../accounts/code_storage/auth.zig");
 
 const Io = std.Io;
 const max_line_bytes = 1024 * 1024;

@@ -1,9 +1,9 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const harness_catalog = @import("harness_catalog.zig");
-const harness_events = @import("harness_events.zig");
+const config_module = @import("../../app/config.zig");
+const harness_catalog = @import("catalog.zig");
+const harness_events = @import("events.zig");
 const pi_model_route = @import("pi_model_route.zig");
-const harness_session_id = @import("harness_session_id.zig");
+const harness_session_id = @import("session_id.zig");
 
 const Io = std.Io;
 const max_event_bytes = 16 * 1024 * 1024;

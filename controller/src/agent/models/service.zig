@@ -1,7 +1,7 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const head_connections = @import("../repository/head_connection.zig");
-const model_catalog = @import("model_catalog.zig");
+const config = @import("../../app/config.zig");
+const head_connections = @import("../../topology/head_connection_store.zig");
+const model_catalog = @import("../../inference/models/catalog.zig");
 
 const Io = std.Io;
 const http = std.http;

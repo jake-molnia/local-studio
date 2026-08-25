@@ -1,6 +1,6 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const head_connections = @import("../repository/head_connection.zig");
+const config_module = @import("../../app/config.zig");
+const head_connections = @import("../../topology/head_connection_store.zig");
 
 const Io = std.Io;
 

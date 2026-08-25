@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const harness_nodes = @import("harness_nodes.zig");
-const node_transport = @import("node_transport.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const harness_nodes = @import("../harness/nodes.zig");
+const node_transport = @import("../../topology/node_transport.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 const Io = std.Io;
 const max_response_bytes = 512 * 1024;
