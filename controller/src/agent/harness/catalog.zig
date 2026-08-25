@@ -27,7 +27,6 @@ pub fn discoverPi(allocator: std.mem.Allocator, io: Io, configuration: *const co
         const trimmed = std.mem.trim(u8, configured, " \t\r\n");
         if (trimmed.len > 0) return probePi(allocator, io, configuration.environment, "configured", trimmed);
     }
-    if (try managedPi(allocator, io, configuration)) |managed| return managed;
     if (try pathExecutable(allocator, io, configuration.environment, "pi")) |executable| {
         defer allocator.free(executable);
         return probePi(allocator, io, configuration.environment, "system", executable);
@@ -111,34 +110,6 @@ pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
     try writer.writeAll("[]");
-}
-
-fn managedPi(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !?Installation {
-    const root = try std.fs.path.join(allocator, &.{ configuration.data_dir, "harnesses", "pi" });
-    defer allocator.free(root);
-    var directory = Io.Dir.cwd().openDir(io, root, .{ .iterate = true }) catch return null;
-    defer directory.close(io);
-    var iterator = directory.iterateAssumeFirstIteration();
-    var selected: ?[]u8 = null;
-    defer if (selected) |value| allocator.free(value);
-    while (try iterator.next(io)) |entry| {
-        if (entry.kind != .directory or entry.name.len == 0) continue;
-        if (selected == null or versionOrder(entry.name, selected.?) == .gt) {
-            if (selected) |value| allocator.free(value);
-            selected = try allocator.dupe(u8, entry.name);
-        }
-    }
-    const version = selected orelse return null;
-    const executable = try std.fs.path.join(allocator, &.{ root, version, "bin", "pi" });
-    defer allocator.free(executable);
-    if (!executableFile(io, executable)) return null;
-    return try probePi(allocator, io, configuration.environment, "managed", executable);
-}
-
-fn versionOrder(left: []const u8, right: []const u8) std.math.Order {
-    const left_version = std.SemanticVersion.parse(left) catch return std.mem.order(u8, left, right);
-    const right_version = std.SemanticVersion.parse(right) catch return std.mem.order(u8, left, right);
-    return left_version.order(right_version);
 }
 
 fn pathExecutable(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, name: []const u8) !?[]u8 {

@@ -162,7 +162,6 @@ in
       LOCAL_STUDIO_DATA_DIR = localNodeDataDir;
       LOCAL_STUDIO_FRONTEND_BASE = frontendUrl;
       LOCAL_STUDIO_MODELS_DIR = modelsDir;
-      LOCAL_STUDIO_PI_BIN = "./frontend/node_modules/.bin/pi";
       LOCAL_STUDIO_PORT = toString localNodePort;
     };
     restart.on = "never";

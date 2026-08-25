@@ -15,9 +15,6 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   reactCompiler: true,
-  // Keep the Pi SDK out of the webpack/turbopack bundle so it loads from
-  // node_modules at runtime (Node-only deps, dynamic jiti loader, etc.).
-  //
   // `ws` (CDP browser host transport) must also stay external: when webpack
   // bundles it, the late `module.exports.mask = …` reassignment in ws's
   // buffer-util.js (the bufferutil-optional path) is mangled so the frame masker
@@ -26,28 +23,7 @@ const nextConfig: NextConfig = {
   // function", and every Page.startScreencast / Input.dispatchMouseEvent call
   // hangs until it times out. Loaded from node_modules, the unbundled masker
   // works and the screencast/input paths are solid.
-  serverExternalPackages: [
-    "@earendil-works/pi-coding-agent",
-    "@earendil-works/pi-agent-core",
-    "@earendil-works/pi-ai",
-    "@earendil-works/pi-tui",
-    "jiti",
-    "ws",
-  ],
-  // pi-ai's register-builtins.js pulls each provider (openai-completions, etc.)
-  // in dynamically, which Next's standalone tracer follows inconsistently — so a
-  // build can silently omit e.g. openai-completions.js and the agent then throws
-  // "Cannot find module …/providers/openai-completions.js" at runtime. Force the
-  // whole pi-ai dist (top-level AND the copy nested under pi-coding-agent) into
-  // the standalone output so the provider set is always complete.
-  outputFileTracingIncludes: {
-    "/api/**": [
-      "./node_modules/@earendil-works/pi-ai/dist/**/*.js",
-      "./node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/**/*.js",
-      "./node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/**/*",
-      "./node_modules/typebox/**/*",
-    ],
-  },
+  serverExternalPackages: ["ws"],
   outputFileTracingExcludes: {
     "/*": [
       // Dev-server output (NEXT_DIST_DIR=.next-dev) is not part of a build and
@@ -84,8 +60,7 @@ const nextConfig: NextConfig = {
   },
   transpilePackages: ["@local-studio/contracts"],
   // The package and shared/agent live outside frontend/, so their real paths
-  // don't have frontend/node_modules on the walk-up resolution path. Teach
-  // webpack to also look here for their external deps (effect, the pi SDK).
+  // don't have frontend/node_modules on the walk-up resolution path.
   webpack: (config, { nextRuntime }) => {
     config.resolve.modules = [
       ...(config.resolve.modules ?? ["node_modules"]),

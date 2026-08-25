@@ -41,30 +41,6 @@ function controllerEntry(): string {
       );
 }
 
-function controllerPiEntry(): string | null {
-  const entry = app.isPackaged
-    ? path.join(
-        process.resourcesPath,
-        "app",
-        "frontend",
-        ".next",
-        "standalone",
-        "frontend",
-        "node_modules",
-        "@earendil-works",
-        "pi-coding-agent",
-        "dist",
-        "cli.js",
-      )
-    : path.resolve(
-        resolveDevelopmentFrontendDir(),
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "pi.cmd" : "pi",
-      );
-  return existsSync(entry) ? entry : null;
-}
-
 async function isControllerHealthy(url: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_000) });
@@ -126,7 +102,6 @@ export async function startController(options: StartControllerOptions): Promise<
 
   const port = await resolveStablePort(options.preferredPort);
   const url = `http://127.0.0.1:${port}`;
-  const piEntry = controllerPiEntry();
   const child = spawn(
     entry,
     ["--mode", "standalone", "--host", "127.0.0.1", "--port", String(port)],
@@ -135,7 +110,6 @@ export async function startController(options: StartControllerOptions): Promise<
       detached: false,
       env: {
         ...process.env,
-        ...(process.env.LOCAL_STUDIO_PI_BIN || !piEntry ? {} : { LOCAL_STUDIO_PI_BIN: piEntry }),
         PATH: resolveAugmentedPath(),
         LOCAL_STUDIO_DATA_DIR: DESKTOP_CONFIG.userDataDir,
         LOCAL_STUDIO_MODELS_DIR: path.join(DESKTOP_CONFIG.userDataDir, "models"),
