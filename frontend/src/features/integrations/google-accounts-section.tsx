@@ -110,7 +110,7 @@ export function GoogleAccountsSection({ searchQuery = "" }: { searchQuery?: stri
         </div>
       ) : null}
       <TableSection
-        title="Accounts"
+        title="Google Workspace"
         description="Google services a session can read from. Each one can hold several signed-in mailboxes."
         actions={
           <div className="flex items-center gap-2">

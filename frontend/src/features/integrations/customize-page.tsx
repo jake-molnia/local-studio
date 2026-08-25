@@ -6,7 +6,7 @@ import { AppPage, SearchInput } from "@/ui";
 import { GraduationCap, KeyRound, Plug, Puzzle } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
-import { GoogleAccountsSection } from "./google-accounts-section";
+import { AccountsSection } from "./accounts-section";
 import { integrationSectionFromHash, type IntegrationSectionId } from "./integration-navigation";
 import { PluginsSection } from "./plugins-section";
 import { SkillsSection } from "./skills-section";
@@ -26,7 +26,7 @@ const CATEGORIES = [
 function CustomizeSection({ section, query }: { section: IntegrationSectionId; query: string }) {
   if (section === "connectors") return <ConnectorsSection searchQuery={query} />;
   if (section === "plugins") return <PluginsSection searchQuery={query} />;
-  if (section === "accounts") return <GoogleAccountsSection searchQuery={query} />;
+  if (section === "accounts") return <AccountsSection searchQuery={query} />;
   return <SkillsSection searchQuery={query} />;
 }
 

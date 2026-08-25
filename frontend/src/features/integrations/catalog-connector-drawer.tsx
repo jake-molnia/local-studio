@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { Schema } from "effect";
-import { ConnectorsResponseSchema, type ConnectorView } from "@shared/agent/connector-contract";
+import {
+  ConnectorTestResponseSchema,
+  ConnectorsResponseSchema,
+  type ConnectorView,
+} from "@shared/agent/connector-contract";
 import { Alert, Button, Checkbox, FormField, Input } from "@/ui";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";
 import { ResourceLogo } from "@/ui/resource-logo";
@@ -43,7 +47,9 @@ export function CatalogConnectorDrawer({
       entry.envFields.map((field) => [field.key, connector?.env?.[field.key] ?? ""]),
     ),
   );
-  const [enabled, setEnabled] = useState(connector?.enabled ?? false);
+  const [enabled, setEnabled] = useState(
+    connector?.enabled ?? entry.requiredConfiguration.includes("oauth"),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -84,6 +90,14 @@ export function CatalogConnectorDrawer({
         }),
       );
       onChanged(connectors);
+      if (entry.requiredConfiguration.includes("oauth")) {
+        const tested = await requestAgentJson(
+          "/api/agent/connectors/test",
+          Schema.decodeUnknownSync(ConnectorTestResponseSchema),
+          jsonBody({ id: entry.id }),
+        );
+        if (!tested.ok) throw new Error(tested.error || "Provider sign-in failed");
+      }
       onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "MCP configuration failed");
@@ -114,7 +128,11 @@ export function CatalogConnectorDrawer({
               disabled={Boolean(missingConfiguration)}
               onClick={() => void save()}
             >
-              {connector ? "Save changes" : "Add MCP"}
+              {connector
+                ? "Save changes"
+                : entry.requiredConfiguration.includes("oauth")
+                  ? "Connect MCP"
+                  : "Add MCP"}
             </Button>
           ) : null}
         </>
@@ -125,6 +143,12 @@ export function CatalogConnectorDrawer({
       </p>
 
       {entry.unavailableReason ? <Alert variant="warning">{entry.unavailableReason}</Alert> : null}
+      {entry.requiredConfiguration.includes("oauth") ? (
+        <Alert variant="info">
+          The first connection opens the provider’s sign-in page. Local Studio keeps the OAuth
+          session in its private account directory and refreshes it for later tool calls.
+        </Alert>
+      ) : null}
       {entry.transport === "builtin" ? (
         <Alert variant="info">
           This capability ships inside Local Studio and is always available.
