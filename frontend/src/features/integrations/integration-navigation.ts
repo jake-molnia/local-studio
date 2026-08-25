@@ -1,4 +1,10 @@
-export const INTEGRATION_SECTION_IDS = ["connectors", "accounts", "skills"] as const;
+export const INTEGRATION_SECTION_IDS = [
+  "connectors",
+  "accounts",
+  "repositories",
+  "sandboxes",
+  "skills",
+] as const;
 
 export type IntegrationSectionId = (typeof INTEGRATION_SECTION_IDS)[number];
 
