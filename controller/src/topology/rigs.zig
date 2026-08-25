@@ -1,8 +1,8 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const system_info = @import("../platform/system_info.zig");
-const repository = @import("../repository/rigs.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const config = @import("../app/config.zig");
+const system_info = @import("../system/platform/system_info.zig");
+const repository = @import("rig_store.zig");
+const sqlite = @import("../storage/sqlite.zig");
 
 pub fn payload(allocator: std.mem.Allocator, io: std.Io, mode: config.Mode, system: *const system_info.Snapshot, database: *sqlite.Database, pi_available: bool) ![]u8 {
     try database.lock(io);

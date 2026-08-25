@@ -1,6 +1,6 @@
 const std = @import("std");
-const config = @import("config.zig");
-const route_registry = @import("route_registry.zig");
+const config = @import("../app/config.zig");
+const route_registry = @import("../http/route_registry.zig");
 
 pub const Disposition = enum {
     local,

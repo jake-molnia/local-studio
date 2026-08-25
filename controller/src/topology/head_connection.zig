@@ -1,7 +1,7 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const repository = @import("../repository/head_connection.zig");
-const harness_runtime = @import("harness_runtime.zig");
+const config = @import("../app/config.zig");
+const repository = @import("head_connection_store.zig");
+const harness_runtime = @import("../agent/harness/runtime.zig");
 
 const Io = std.Io;
 const http = std.http;

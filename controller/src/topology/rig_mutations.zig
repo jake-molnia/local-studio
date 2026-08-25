@@ -1,8 +1,8 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const credentials = @import("../repository/rig_node_credentials.zig");
-const repository = @import("../repository/rigs.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const config = @import("../app/config.zig");
+const credentials = @import("credential_store.zig");
+const repository = @import("rig_store.zig");
+const sqlite = @import("../storage/sqlite.zig");
 
 const Io = std.Io;
 

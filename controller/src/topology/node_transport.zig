@@ -1,5 +1,5 @@
 const std = @import("std");
-const harness_nodes = @import("harness_nodes.zig");
+const harness_nodes = @import("../agent/harness/nodes.zig");
 
 const Io = std.Io;
 const http = std.http;
