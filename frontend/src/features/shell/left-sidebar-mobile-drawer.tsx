@@ -1,12 +1,11 @@
 "use client";
 
-import { ChevronRight, NewTaskIcon, SearchIcon, SettingsIcon } from "@/ui/icon-registry";
+import { NewTaskIcon, SearchIcon, SettingsIcon } from "@/ui/icon-registry";
 import { Drawer, DrawerHeader, DrawerOverlay } from "@/ui/drawer";
 import type { ProjectsNavSectionComponent } from "@/features/shell/left-sidebar-lazy";
 import {
   NavItemMobile,
   primaryTabs,
-  studioTabs,
   customizeTab,
   ProjectsNavPlaceholder,
   isRouteActive,
@@ -93,25 +92,6 @@ export function MobileNavigationDrawer({
               <ProjectsNavPlaceholder />
             )
           ) : null}
-          <details
-            className="group/studio mt-3 border-t border-(--border)/45 pt-1"
-            open={studioTabs.some((tab) => isRouteActive(pathname, tab.href)) || undefined}
-          >
-            <summary className="flex h-10 cursor-pointer list-none items-center gap-1.5 rounded-[4px] px-3 text-[11px] font-medium text-(--dim) active:bg-(--hover) [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="h-3 w-3 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
-              Studio
-            </summary>
-            {studioTabs.map((tab) => (
-              <NavItemMobile
-                key={tab.href}
-                href={tab.href}
-                label={tab.label}
-                Icon={tab.icon}
-                active={isRouteActive(pathname, tab.href)}
-                onClick={onClose}
-              />
-            ))}
-          </details>
           <NavItemMobile
             href="/settings"
             label="Settings"

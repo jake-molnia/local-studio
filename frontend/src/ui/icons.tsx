@@ -173,17 +173,6 @@ export function StatusIcon(props: IconProps) {
   );
 }
 
-/** Models — stacked layers: many weights, one shelf. */
-export function ModelsIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M8 1.2 14.8 5 8 8.8 1.2 5 8 1.2Z" />
-      <path d="M1.2 7.6 3.1 6.55 8 9.3l4.9-2.75L14.8 7.6 8 11.4 1.2 7.6Z" />
-      <path d="M1.2 10.6 3.1 9.55 8 12.3l4.9-2.75 1.9 1.05L8 14.4l-6.8-3.8Z" />
-    </Svg>
-  );
-}
-
 /** Automations — a bolt: something fires without you. */
 export function AutomationsIcon(props: IconProps) {
   return (

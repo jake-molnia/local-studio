@@ -21,7 +21,6 @@ import {
   NavActionDesktop,
   ProjectsNavPlaceholder,
   primaryTabs,
-  studioTabs,
   customizeTab,
   isRouteActive,
   SETTINGS_SIDEBAR_PORTAL_ID,
@@ -248,29 +247,6 @@ export function DesktopSidebar({
                   <ProjectsNavPlaceholder />
                 )
               ) : null}
-              <details
-                className="group/studio mt-2 shrink-0 border-t border-(--border)/35 pt-1"
-                open={studioTabs.some((tab) => isRouteActive(pathname, tab.href)) || undefined}
-              >
-                <summary
-                  onPointerUp={(event) => event.currentTarget.blur()}
-                  className="flex h-[var(--sidebar-row-height)] cursor-pointer list-none items-center gap-1.5 rounded-[var(--sidebar-row-radius)] px-2 text-[length:var(--fs-sm)] font-medium text-(--dim)/65 transition-[background-color,color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--dim) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) focus-visible:ring-offset-[-1px] active:bg-(--active)/70 [&::-webkit-details-marker]:hidden"
-                >
-                  <ChevronRight className="h-3 w-3 transition-transform duration-[var(--motion-fast)] group-open/studio:rotate-90" />
-                  Studio
-                </summary>
-                <div className="flex flex-col gap-[var(--sidebar-row-gap)]">
-                  {studioTabs.map((tab) => (
-                    <NavItemDesktop
-                      key={tab.href}
-                      href={tab.href}
-                      label={tab.label}
-                      Icon={tab.icon}
-                      active={isRouteActive(pathname, tab.href)}
-                    />
-                  ))}
-                </div>
-              </details>
             </>
           )}
         </div>

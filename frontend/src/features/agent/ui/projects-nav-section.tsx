@@ -140,13 +140,9 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
           }
         />
         {!projectsExpanded ? null : unpinnedProjects.length === 0 ? (
-          <button
-            type="button"
-            onClick={handleAddProject}
-            className="px-2 py-1.5 text-left text-[length:var(--fs-base)] leading-relaxed text-(--dim) hover:text-(--fg)"
-          >
+          <div className="px-2 py-1 text-[length:var(--fs-xs)] leading-relaxed text-(--dim)/65">
             No projects yet — pick a folder to get started.
-          </button>
+          </div>
         ) : (
           <>
             {unpinnedProjects.map((project) => (

@@ -33,8 +33,10 @@ export function useChatPaneSessionTitle({
   }, "");
   const sessionLooksEmpty =
     !activeTab || (activeTab.messages.length === 0 && !activeTab.input.trim() && !running);
+  const emptySessionTitle =
+    activeTab?.harness === "chat" || activeTab?.projectId === "chats" ? "New chat" : "New task";
   const displayedSessionTitle = sessionLooksEmpty
-    ? "New task"
+    ? emptySessionTitle
     : sessionPrefTitle || cleanSessionTitle(activeTab?.title) || "";
   const sessionPinned = sessionPrefKeys.some((key) => Boolean(sessionPrefs[key]?.pinned));
   const patchActiveSessionPrefs = useCallback(

@@ -220,13 +220,13 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         {sidebarHost
           ? createPortal(
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex h-9 shrink-0 items-center px-2">
+                <div className="flex shrink-0 px-1.5 pb-1 pt-1.5">
                   <button
                     type="button"
                     onClick={navigateBack}
-                    className="inline-flex h-6 items-center gap-1 rounded-[4px] px-1.5 text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
+                    className="flex h-[var(--sidebar-row-height)] w-full items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-[length:var(--fs-md)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
                   >
-                    <ChevronLeft className="h-3 w-3" />
+                    <ChevronLeft className="h-4 w-4" />
                     Back
                   </button>
                 </div>
@@ -305,7 +305,6 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
 
 export function SettingsGroup({
   title,
-  description,
   actions,
   children,
   collapsible,
@@ -350,11 +349,6 @@ export function SettingsGroup({
               {title}
             </h3>
           )}
-          {description ? (
-            <p className="mt-0.5 text-[length:var(--fs-2xs)] leading-[1.4] text-(--ui-muted)">
-              {description}
-            </p>
-          ) : null}
         </div>
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
@@ -367,15 +361,7 @@ export function SettingsGroup({
   );
 }
 
-export function SettingsRow({
-  label,
-  description,
-  value,
-  control,
-  status,
-  actions,
-  children,
-}: RowProps) {
+export function SettingsRow({ label, value, control, status, actions, children }: RowProps) {
   const primaryValue = control ?? value;
 
   return (
@@ -392,11 +378,6 @@ export function SettingsRow({
           >
             {label}
           </div>
-          {description ? (
-            <div className="mt-0.5 text-[length:var(--fs-2xs)] leading-[1.4] text-(--ui-muted)">
-              {description}
-            </div>
-          ) : null}
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {primaryValue ? (

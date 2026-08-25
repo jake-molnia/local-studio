@@ -26,7 +26,6 @@ export {
   Folder,
   FolderOpen,
   StatusIcon,
-  ModelsIcon,
   AutomationsIcon,
   UsageIcon,
   NewTaskIcon,

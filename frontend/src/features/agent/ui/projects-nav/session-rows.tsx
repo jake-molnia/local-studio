@@ -251,7 +251,9 @@ export function ProjectSessions({
       {loading && !sessions ? (
         <div className="pl-2 pr-2 py-0.5 text-[length:var(--fs-sm)] text-(--dim)">Loading...</div>
       ) : orderedRows.length === 0 ? (
-        <div className="pl-2 pr-2 py-0.5 text-[length:var(--fs-sm)] text-(--dim)">No chats</div>
+        <div className="px-2 py-1 text-center text-[length:var(--fs-xs)] text-(--dim)/55">
+          No chats
+        </div>
       ) : (
         visibleRows.map((row) => {
           const parentId = row.kind === "open" ? row.session.threadId : row.session.id;
