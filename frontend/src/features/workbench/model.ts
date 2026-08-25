@@ -23,8 +23,6 @@ export type WorkbenchState = {
 };
 
 export const COMPUTER_TAB_TITLES: Record<ComputerTab, string> = {
-  status: "Session",
-  tools: "Tools",
   "side-chat": "Side chat",
   browser: "Browser",
   files: "Files",
@@ -124,17 +122,18 @@ export function reorderTabs(
   tabs: readonly WorkbenchTab[],
   sourceId: string,
   targetId: string,
+  position: "before" | "after" = "before",
 ): WorkbenchTab[] {
   if (sourceId === targetId) return [...tabs];
   const sourceIndex = tabs.findIndex((tab) => tab.id === sourceId);
   const targetIndex = tabs.findIndex((tab) => tab.id === targetId);
   if (sourceIndex < 0 || targetIndex < 0) return [...tabs];
   if (tabs[sourceIndex]?.groupId !== tabs[targetIndex]?.groupId) return [...tabs];
-  if (tabs[sourceIndex]?.kind === "task" || tabs[targetIndex]?.kind === "task") return [...tabs];
   const next = [...tabs];
   const [source] = next.splice(sourceIndex, 1);
   if (!source) return [...tabs];
-  const insertAt = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  const insertAt = position === "after" ? adjustedTarget + 1 : adjustedTarget;
   next.splice(insertAt, 0, source);
   return next;
 }

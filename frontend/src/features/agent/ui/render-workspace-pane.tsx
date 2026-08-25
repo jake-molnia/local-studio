@@ -257,7 +257,7 @@ const WorkspacePane = memo(function WorkspacePane({
         rightPanelOpen={tools.computer.open}
         onToggleRightPanel={tools.toggleComputerOpen}
         onRegisterHandle={(handle) => handles.registerPaneHandle(view.paneId, handle)}
-        showHeader={!compact}
+        showHeader={!compact && chatWorkspace}
         composerOnly={composerOnly}
       />
     </ComposerFocusContext.Provider>

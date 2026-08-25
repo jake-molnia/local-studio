@@ -55,8 +55,8 @@ export function AgentChatPaneHeader({
     setRenaming(false);
   };
   return (
-    <div className="grid h-[var(--h-toolbar-pane)] shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 border-b border-(--separator) bg-(--agent-bg) py-0 pl-2 pr-1.5 text-xs md:pl-3">
-      <div className="flex min-w-0 items-center gap-1">
+    <div className="grid h-[var(--h-toolbar-pane)] shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-(--separator) bg-(--color-header) px-2 text-xs">
+      <div className="flex min-w-0 items-center justify-start">
         <button
           type="button"
           onClick={() => setMobileNavOpen(true)}
@@ -66,96 +66,99 @@ export function AgentChatPaneHeader({
         >
           <Menu className="pointer-events-none h-[18px] w-[18px]" />
         </button>
-        <div ref={ref} className="relative flex min-w-0 items-center gap-1.5">
-          {renaming ? (
-            <input
-              autoFocus
-              value={draftTitle}
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              onBlur={finishRename}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") finishRename();
-                if (event.key === "Escape") {
-                  setDraftTitle(title);
-                  setRenaming(false);
-                }
-              }}
-              className="h-6 min-w-0 flex-1 rounded-sm bg-(--surface) px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-(--fg) outline-none"
-              aria-label="Rename session"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={startRename}
-              className="block min-w-0 truncate whitespace-nowrap rounded-sm text-left text-[length:var(--fs-sm)] font-medium leading-none text-(--fg) hover:bg-(--hover) md:text-[length:var(--fs-md)]"
-              title={title}
-              aria-label={`Rename session: ${title}`}
-            >
-              {title}
-            </button>
-          )}
+      </div>
+      <div
+        ref={ref}
+        className="relative flex min-w-0 max-w-[min(32rem,55vw)] items-center justify-center gap-1"
+      >
+        {renaming ? (
+          <input
+            autoFocus
+            value={draftTitle}
+            onFocus={(event) => event.currentTarget.select()}
+            onChange={(event) => setDraftTitle(event.target.value)}
+            onBlur={finishRename}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") finishRename();
+              if (event.key === "Escape") {
+                setDraftTitle(title);
+                setRenaming(false);
+              }
+            }}
+            className="h-6 min-w-0 flex-1 rounded-sm bg-(--surface) px-1.5 py-0.5 text-[length:var(--fs-sm)] font-medium text-(--fg) outline-none"
+            aria-label="Rename session"
+          />
+        ) : (
           <button
             type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={() => setOpen((value) => !value)}
-            className={`relative z-10 -my-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-              open
-                ? "text-(--fg) hover:bg-(--hover)"
-                : "text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
-            }`}
-            aria-label="Session settings"
-            title="Session settings"
-            aria-haspopup="menu"
-            aria-expanded={open}
+            onClick={startRename}
+            className="block min-w-0 truncate whitespace-nowrap text-center text-[length:var(--fs-sm)] font-medium leading-none text-(--fg) md:text-[length:var(--fs-md)]"
+            title={title}
+            aria-label={`Rename session: ${title}`}
           >
-            <MoreIcon className="pointer-events-none h-3.5 w-3.5" />
+            {title}
           </button>
-          {open ? (
-            <div
-              className={CHAT_HEADER_MENU_CLASS}
-              role="menu"
-              onKeyDown={(event) => handleMenuKeyboard(event, () => setOpen(false))}
+        )}
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => setOpen((value) => !value)}
+          className={`relative z-10 -my-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+            open
+              ? "text-(--fg) hover:bg-(--hover)"
+              : "text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+          }`}
+          aria-label="Session settings"
+          title="Session settings"
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          <MoreIcon className="pointer-events-none h-3.5 w-3.5" />
+        </button>
+        {open ? (
+          <div
+            className={CHAT_HEADER_MENU_CLASS}
+            role="menu"
+            onKeyDown={(event) => handleMenuKeyboard(event, () => setOpen(false))}
+          >
+            <MenuItem onClick={startRename}>Rename</MenuItem>
+            <MenuItem
+              onClick={() => {
+                onTogglePinned();
+                setOpen(false);
+              }}
             >
-              <MenuItem onClick={startRename}>Rename</MenuItem>
-              <MenuItem
-                onClick={() => {
-                  onTogglePinned();
-                  setOpen(false);
-                }}
-              >
-                {pinned ? "Unpin" : "Pin"}
-              </MenuItem>
-              <MenuItem
-                disabled={!canFork}
-                onClick={() => {
-                  onFork?.();
-                  setOpen(false);
-                }}
-              >
-                Fork
-              </MenuItem>
-              <MenuItem
-                disabled={!canExport || !onExport}
-                onClick={() => {
-                  onExport?.();
-                  setOpen(false);
-                }}
-              >
-                Export as Markdown
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setReasoningVisible(!reasoningVisible);
-                  setOpen(false);
-                }}
-              >
-                {reasoningVisible ? "Hide reasoning" : "Show reasoning"}
-              </MenuItem>
-            </div>
-          ) : null}
-        </div>
+              {pinned ? "Unpin" : "Pin"}
+            </MenuItem>
+            <MenuItem
+              disabled={!canFork}
+              onClick={() => {
+                onFork?.();
+                setOpen(false);
+              }}
+            >
+              Fork
+            </MenuItem>
+            <MenuItem
+              disabled={!canExport || !onExport}
+              onClick={() => {
+                onExport?.();
+                setOpen(false);
+              }}
+            >
+              Export as Markdown
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setReasoningVisible(!reasoningVisible);
+                setOpen(false);
+              }}
+            >
+              {reasoningVisible ? "Hide reasoning" : "Show reasoning"}
+            </MenuItem>
+          </div>
+        ) : null}
       </div>
       <div />
     </div>

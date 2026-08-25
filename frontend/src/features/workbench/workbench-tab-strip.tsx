@@ -88,6 +88,11 @@ function ProjectWorkbenchTabStrip() {
   const [state, setState] = useState<WorkbenchState>(() => initialState());
   const [hydrated, setHydrated] = useState(false);
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    position: "before" | "after";
+  } | null>(null);
   const [pendingTool, setPendingTool] = useState<PendingTool | null>(null);
   const [pendingTask, setPendingTask] = useState<WorkbenchTab | null>(null);
   const [sessionCatalog, setSessionCatalog] = useState<{
@@ -110,10 +115,7 @@ function ProjectWorkbenchTabStrip() {
     sessionCatalog.sessions,
   );
   const currentSessionTabs = state.tabs.filter((tab) => tab.groupId === navigationTask.groupId);
-  const sessionTabs = [
-    ...currentSessionTabs.filter((tab) => tab.kind === "task"),
-    ...currentSessionTabs.filter((tab) => tab.kind === "tool"),
-  ];
+  const sessionTabs = currentSessionTabs;
   const orderedTabs = sessionTabs.some((tab) => tab.kind === "task")
     ? sessionTabs
     : [navigationTask, ...sessionTabs];
@@ -409,9 +411,6 @@ function ProjectWorkbenchTabStrip() {
       for (const tool of computer.tabs) {
         const tab = toolTab(tool, scope);
         const explicitlyOpened = computer.open && computer.tab === tool;
-        if (tool === "status" && !explicitlyOpened && !tabs.some((item) => item.id === tab.id)) {
-          continue;
-        }
         if (closedTabIds.includes(tab.id) && !explicitlyOpened) continue;
         if (explicitlyOpened) closedTabIds = closedTabIds.filter((id) => id !== tab.id);
         tabs = upsertTab(tabs, tab);
@@ -528,14 +527,20 @@ function ProjectWorkbenchTabStrip() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [shortcutSyncKey]);
 
-  const dropTab = (event: DragEvent<HTMLDivElement>, targetId: string) => {
+  const dropTab = (
+    event: DragEvent<HTMLDivElement>,
+    targetId: string,
+    position: "before" | "after",
+  ) => {
     event.preventDefault();
     const sourceId = draggedTabRef.current;
     draggedTabRef.current = null;
+    setDraggedTabId(null);
+    setDropTarget(null);
     if (!sourceId) return;
     setState((current) => ({
       ...current,
-      tabs: reorderTabs(current.tabs, sourceId, targetId),
+      tabs: reorderTabs(current.tabs, sourceId, targetId, position),
     }));
   };
 
@@ -565,8 +570,17 @@ function ProjectWorkbenchTabStrip() {
         onFocusTab={focusTabAtIndex}
         onDragStart={(tabId) => {
           draggedTabRef.current = tabId;
+          setDraggedTabId(tabId);
         }}
+        onDragEnd={() => {
+          draggedTabRef.current = null;
+          setDraggedTabId(null);
+          setDropTarget(null);
+        }}
+        onDragOver={(id, position) => setDropTarget({ id, position })}
         onDrop={dropTab}
+        draggedId={draggedTabId}
+        dropTarget={dropTarget}
         register={(tabId, element) => {
           if (element) tabElementsRef.current.set(tabId, element);
           else tabElementsRef.current.delete(tabId);

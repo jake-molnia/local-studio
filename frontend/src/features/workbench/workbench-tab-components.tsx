@@ -6,14 +6,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  Activity,
   ChatIcon,
   CloseIcon,
   FolderTree,
   GitBranch,
   Globe2,
   TerminalSquare,
-  Wrench,
 } from "@/ui/icon-registry";
 import { isWorkingStatus } from "@/features/agent/runtime/session-status";
 import type { ComputerTab } from "@/features/agent/tools/types";
@@ -25,8 +23,6 @@ import { cx } from "@/ui/utils";
 type WorkbenchIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
 const TOOL_ICONS: Record<ComputerTab, WorkbenchIcon> = {
-  status: Activity,
-  tools: Wrench,
   "side-chat": ChatIcon,
   browser: Globe2,
   files: FolderTree,
@@ -35,7 +31,7 @@ const TOOL_ICONS: Record<ComputerTab, WorkbenchIcon> = {
 };
 
 function tabIcon(tab: WorkbenchTab): WorkbenchIcon {
-  return tab.kind === "task" ? ChatIcon : TOOL_ICONS[tab.tool ?? "tools"];
+  return tab.kind === "task" ? ChatIcon : TOOL_ICONS[tab.tool ?? "side-chat"];
 }
 
 export function WorkbenchProjectTabList({
@@ -48,7 +44,11 @@ export function WorkbenchProjectTabList({
   onClose,
   onFocusTab,
   onDragStart,
+  onDragEnd,
+  onDragOver,
   onDrop,
+  draggedId,
+  dropTarget,
   register,
 }: {
   projectName: string;
@@ -60,12 +60,20 @@ export function WorkbenchProjectTabList({
   onClose: (tabId: string) => void;
   onFocusTab: (index: number) => void;
   onDragStart: (tabId: string) => void;
-  onDrop: (event: DragEvent<HTMLDivElement>, targetId: string) => void;
+  onDragEnd: () => void;
+  onDragOver: (targetId: string, position: "before" | "after") => void;
+  onDrop: (
+    event: DragEvent<HTMLDivElement>,
+    targetId: string,
+    position: "before" | "after",
+  ) => void;
+  draggedId: string | null;
+  dropTarget: { id: string; position: "before" | "after" } | null;
   register: (tabId: string, element: HTMLButtonElement | null) => void;
 }) {
   return (
     <div
-      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-[calc(1.75rem+var(--desktop-titlebar-left-inset))]" : ""}`}
+      className={`flex min-w-0 flex-1 items-stretch overflow-hidden ${sidebarCollapsed ? "md:pl-[calc(3rem+var(--desktop-titlebar-left-inset))]" : ""}`}
     >
       <div
         role="tablist"
@@ -103,7 +111,11 @@ export function WorkbenchProjectTabList({
               }
             }}
             onDragStart={() => onDragStart(tab.id)}
-            onDrop={(event) => onDrop(event, tab.id)}
+            onDragEnd={onDragEnd}
+            onDragOver={(position) => onDragOver(tab.id, position)}
+            onDrop={(event, position) => onDrop(event, tab.id, position)}
+            dragging={draggedId === tab.id}
+            dropPosition={dropTarget?.id === tab.id ? dropTarget.position : null}
             register={(element) => register(tab.id, element)}
           />
         ))}
@@ -123,7 +135,11 @@ export function WorkbenchTabButton({
   onClose,
   onKeyDown,
   onDragStart,
+  onDragEnd,
+  onDragOver,
   onDrop,
+  dragging,
+  dropPosition,
   register,
 }: {
   tab: WorkbenchTab;
@@ -136,7 +152,11 @@ export function WorkbenchTabButton({
   onClose: () => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onDragStart: () => void;
-  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  onDragOver: (position: "before" | "after") => void;
+  onDrop: (event: DragEvent<HTMLDivElement>, position: "before" | "after") => void;
+  dragging: boolean;
+  dropPosition: "before" | "after" | null;
   register: (element: HTMLButtonElement | null) => void;
 }) {
   const Icon = tabIcon(tab);
@@ -145,14 +165,22 @@ export function WorkbenchTabButton({
   return (
     <div
       role="none"
-      draggable={tab.kind === "tool"}
+      draggable
       onDragStart={onDragStart}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onDragOver(event.clientX < bounds.left + bounds.width / 2 ? "before" : "after");
+      }}
+      onDrop={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onDrop(event, event.clientX < bounds.left + bounds.width / 2 ? "before" : "after");
+      }}
       style={{
         flex: "0 1 clamp(var(--workbench-tab-min-width), 12vw, var(--workbench-tab-max-width))",
       }}
-      className={`workbench-tab group/tab relative flex h-[30px] min-w-[var(--workbench-tab-min-width)] max-w-[var(--workbench-tab-max-width)] shrink-0 items-center self-end border-x border-t px-2 text-left text-[length:var(--fs-xs)] transition-[background-color,border-color,color,box-shadow] duration-[var(--motion-fast)] ${
+      className={`workbench-tab group/tab relative flex h-[30px] min-w-[var(--workbench-tab-min-width)] max-w-[var(--workbench-tab-max-width)] shrink-0 items-center self-end border-x border-t px-2 text-left text-[length:var(--fs-xs)] transition-[background-color,border-color,color,box-shadow,opacity] duration-[var(--motion-fast)] ${
         active
           ? "z-10 -mb-px rounded-t-[8px] border-(--border)/70 border-b-0 bg-(--agent-bg) text-(--fg) shadow-[0_-1px_0_color-mix(in_srgb,var(--border)_55%,transparent)]"
           : "rounded-t-[7px] border-transparent bg-transparent text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
@@ -160,8 +188,13 @@ export function WorkbenchTabButton({
         active
           ? ""
           : "after:absolute after:right-0 after:top-1/2 after:h-4 after:w-px after:-translate-y-1/2 after:bg-(--border)/45"
-      }`}
+      } ${dragging ? "opacity-40" : ""}`}
     >
+      {dropPosition ? (
+        <span
+          className={`pointer-events-none absolute bottom-0 top-0 z-20 w-0.5 bg-(--accent) ${dropPosition === "before" ? "-left-px" : "-right-px"}`}
+        />
+      ) : null}
       <button
         ref={register}
         type="button"
@@ -234,8 +267,6 @@ export function WorkbenchLauncher({
         ["browser", Globe2],
         ["files", FolderTree],
         ["diff", GitBranch],
-        ["status", Activity],
-        ["tools", Wrench],
       ] as const,
     [],
   );

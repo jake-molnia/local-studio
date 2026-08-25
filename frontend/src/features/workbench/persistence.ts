@@ -29,15 +29,7 @@ const WorkbenchStoreSchema = Schema.Struct({
 });
 
 const decodeWorkbenchStore = Schema.decodeUnknownOption(WorkbenchStoreSchema);
-const COMPUTER_TABS = new Set<ComputerTab>([
-  "status",
-  "tools",
-  "side-chat",
-  "browser",
-  "files",
-  "diff",
-  "terminal",
-]);
+const COMPUTER_TABS = new Set<ComputerTab>(["side-chat", "browser", "files", "diff", "terminal"]);
 
 function normalizeTab(value: typeof WorkbenchTabSchema.Type): WorkbenchTab | null {
   const id = value.id.trim();
