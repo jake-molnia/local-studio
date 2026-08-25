@@ -4,10 +4,11 @@ const harness_catalog = @import("catalog.zig");
 const harness_events = @import("events.zig");
 const pi_model_route = @import("pi_model_route.zig");
 const harness_session_id = @import("session_id.zig");
+const runtime_limits = @import("../runtime/limits.zig");
+const runtime_window = @import("../runtime/window.zig");
+const chat_runtime = @import("../../chat/runtime.zig");
 
 const Io = std.Io;
-const max_event_bytes = 16 * 1024 * 1024;
-const max_events = 4000;
 const Harness = enum {
     pi,
     chat,
@@ -29,6 +30,7 @@ const LoggedEvent = struct {
         event.* = undefined;
     }
 };
+const EventWindow = runtime_window.Window(LoggedEvent);
 const Session = struct {
     allocator: std.mem.Allocator,
     harness: Harness,
@@ -38,16 +40,18 @@ const Session = struct {
     model_id: []u8,
     cwd: []u8,
     session_dir: []u8,
-    child: std.process.Child,
+    child: ?std.process.Child = null,
+    chat: ?chat_runtime.Runtime = null,
     running: bool = true,
     active: bool = false,
     event_seq: u64 = 0,
     last_error: ?[]u8 = null,
-    events: std.ArrayList(LoggedEvent) = .empty,
+    events: EventWindow = .{ .maximum = runtime_limits.harness_events },
     responses: std.StringHashMapUnmanaged([]u8) = .empty,
 
     fn deinit(session: *Session, io: Io) void {
-        if (session.child.id != null) session.child.kill(io);
+        if (session.child) |*child| if (child.id != null) child.kill(io);
+        if (session.chat) |*chat| chat.deinit();
         session.allocator.free(session.id);
         session.allocator.free(session.native_id);
         if (session.harness_version) |value| session.allocator.free(value);
@@ -55,8 +59,7 @@ const Session = struct {
         session.allocator.free(session.cwd);
         session.allocator.free(session.session_dir);
         if (session.last_error) |value| session.allocator.free(value);
-        for (session.events.items) |*event| event.deinit();
-        session.events.deinit(session.allocator);
+        session.events.deinit(session.allocator, LoggedEvent.deinit);
         var response_iterator = session.responses.iterator();
         while (response_iterator.next()) |entry| {
             session.allocator.free(entry.key_ptr.*);
@@ -245,7 +248,7 @@ pub const Manager = struct {
         try output.writer.writeAll(",\"nativeSessionId\":");
         try std.json.Stringify.value(session.native_id, .{}, &output.writer);
         try output.writer.writeAll(",\"entries\":[");
-        for (session.events.items, 0..) |event, index| {
+        for (session.events.values(), 0..) |event, index| {
             if (index > 0) try output.writer.writeByte(',');
             if (session.harness == .codex)
                 try harness_events.writeCanonical(manager.allocator, &output.writer, "codex", event.document)
@@ -253,7 +256,7 @@ pub const Manager = struct {
                 try output.writer.writeAll(event.document);
         }
         try output.writer.writeAll("],\"leafId\":");
-        if (session.events.items.len > 0) try output.writer.print("\"{d}\"", .{session.event_seq}) else try output.writer.writeAll("null");
+        if (session.events.values().len > 0) try output.writer.print("\"{d}\"", .{session.event_seq}) else try output.writer.writeAll("null");
         try output.writer.writeByte('}');
         return output.toOwnedSlice();
     }
@@ -321,7 +324,7 @@ pub const Manager = struct {
                 else => return failure,
             };
             if (count == 0) break;
-            if (received.items.len + count > max_event_bytes) return error.TranscriptTooLarge;
+            if (received.items.len + count > runtime_limits.harness_event_bytes) return error.TranscriptTooLarge;
             try received.appendSlice(manager.allocator, chunk[0..count]);
         }
         var lines = std.mem.splitScalar(u8, received.items, '\n');
@@ -405,11 +408,16 @@ pub const Manager = struct {
         if ((harness_kind == .chat or harness_kind == .fx) and session.active) return error.QueueMutationNotSupported;
         const was_active = session.active;
         if (harness_kind == .chat or harness_kind == .fx) {
-            if (harness_kind == .chat)
-                try manager.sendChatPrompt(session, message, thinking, browser_tool_enabled)
-            else
+            if (harness_kind == .chat) {
+                session.active = true;
+                manager.sendChatPrompt(session, message, thinking, browser_tool_enabled) catch |failure| {
+                    session.active = false;
+                    return failure;
+                };
+            } else {
                 try manager.sendAcpPrompt(session, message);
-            session.active = true;
+                session.active = true;
+            }
         }
         if (harness_kind == .chat or harness_kind == .fx) return manager.turnResponse(session, was_active);
         if (harness_kind == .codex) {
@@ -483,10 +491,14 @@ pub const Manager = struct {
             try manager.send(session, "{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{}}");
             return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
         }
-        if (session.harness == .chat or session.harness == .codex) {
+        if (session.harness == .chat) {
+            if (session.chat) |*chat| chat.cancel();
+            return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
+        }
+        if (session.harness == .codex) {
             try manager.mutex.lock(manager.io);
             defer manager.mutex.unlock(manager.io);
-            if (session.child.id != null) session.child.kill(manager.io);
+            if (session.child) |*child| if (child.id != null) child.kill(manager.io);
             return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
         }
         const command_id = manager.commandId();
@@ -571,7 +583,7 @@ pub const Manager = struct {
                 return error.SessionNotFound;
             }
             var sent = false;
-            for (session.?.events.items) |event| if (event.seq > after) {
+            for (session.?.events.values()) |event| if (event.seq > after) {
                 try body.writer.print("id: {d}\ndata: ", .{event.seq});
                 try harness_events.writeStreamEnvelope(manager.allocator, &body.writer, session.?.harness.name(), event.seq, event.document);
                 try body.writer.writeAll("\n\n");
@@ -689,7 +701,7 @@ pub const Manager = struct {
             if (session.last_error) |value| manager.allocator.free(value);
             session.last_error = null;
             manager.tasks.concurrent(manager.io, readHarness, .{ manager, session }) catch |failure| {
-                session.child.kill(manager.io);
+                if (session.child) |*child| child.kill(manager.io);
                 session.running = false;
                 session.active = false;
                 return failure;
@@ -883,37 +895,24 @@ pub const Manager = struct {
         const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "chat" });
         errdefer manager.allocator.free(session_dir);
         _ = try Io.Dir.cwd().createDirPathStatus(manager.io, session_dir, @enumFromInt(0o700));
-        const log_directory = try std.fs.path.join(manager.allocator, &.{ session_dir, "logs" });
-        defer manager.allocator.free(log_directory);
-        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, log_directory, @enumFromInt(0o700));
-        const log_filename = try std.fmt.allocPrint(manager.allocator, "{s}.log", .{session_id});
-        defer manager.allocator.free(log_filename);
-        const log_path = try std.fs.path.join(manager.allocator, &.{ log_directory, log_filename });
-        defer manager.allocator.free(log_path);
-        var log_file = try Io.Dir.cwd().createFile(manager.io, log_path, .{ .permissions = @enumFromInt(0o600), .truncate = false });
-        defer log_file.close(manager.io);
-        const controller_executable = try std.process.executablePathAlloc(manager.io, manager.allocator);
-        defer manager.allocator.free(controller_executable);
         const native_id = try harness_session_id.resolve(manager.allocator, session_id, native_session_id);
         errdefer manager.allocator.free(native_id);
         var model_route = try manager.model_route.prepare(model_id);
         defer model_route.deinit();
-        try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
-        try model_route.environment.put("LOCAL_STUDIO_CHAT_SESSION_ID", native_id);
-        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_URL", manager.controller_origin);
-        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_MODEL", model_id);
-        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_SESSION", session_id);
-        if (manager.controller_api_key) |value| try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_KEY", value);
-        var child = try std.process.spawn(manager.io, .{
-            .argv = &.{ controller_executable, "chat-runtime" },
-            .environ_map = &model_route.environment,
-            .cwd = .{ .path = session_dir },
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .{ .file = log_file },
-            .pgid = 0,
+        const api_key = model_route.environment.get("LOCAL_STUDIO_CHAT_API_KEY") orelse return error.ChatCredentialRequired;
+        const gateway_url = model_route.environment.get("LOCAL_STUDIO_CHAT_GATEWAY_URL") orelse return error.ChatGatewayRequired;
+        var chat = try chat_runtime.Runtime.init(manager.allocator, manager.io, .{
+            .api_key = api_key,
+            .model = model_id,
+            .gateway_url = gateway_url,
+            .home = session_dir,
+            .session_id = native_id,
+            .bridge_url = manager.controller_origin,
+            .bridge_key = manager.controller_api_key,
+            .bridge_model = model_id,
+            .bridge_session = session_id,
         });
-        errdefer child.kill(manager.io);
+        errdefer chat.deinit();
         const session = try manager.allocator.create(Session);
         errdefer manager.allocator.destroy(session);
         session.* = .{
@@ -925,7 +924,7 @@ pub const Manager = struct {
             .model_id = try manager.allocator.dupe(u8, model_id),
             .cwd = try manager.allocator.dupe(u8, session_dir),
             .session_dir = session_dir,
-            .child = child,
+            .chat = chat,
             .event_seq = initial_event_seq,
         };
         errdefer {
@@ -935,25 +934,21 @@ pub const Manager = struct {
             manager.allocator.free(session.cwd);
         }
         try manager.sessions.put(manager.allocator, session.id, session);
-        manager.tasks.concurrent(manager.io, readHarness, .{ manager, session }) catch |failure| {
-            _ = manager.sessions.remove(session.id);
-            return failure;
-        };
         return session;
     }
 
     fn sendChatPrompt(manager: *Manager, session: *Session, message: []const u8, thinking: ?[]const u8, browser_tool_enabled: bool) !void {
-        var document: Io.Writer.Allocating = .init(manager.allocator);
-        defer document.deinit();
-        try document.writer.writeAll("{\"message\":");
-        try std.json.Stringify.value(message, .{}, &document.writer);
-        if (thinking) |value| {
-            try document.writer.writeAll(",\"thinkingLevel\":");
-            try std.json.Stringify.value(value, .{}, &document.writer);
-        }
-        try document.writer.print(",\"browserToolEnabled\":{}", .{browser_tool_enabled});
-        try document.writer.writeByte('}');
-        try manager.send(session, document.writer.buffered());
+        const owned_message = try manager.allocator.dupe(u8, message);
+        errdefer manager.allocator.free(owned_message);
+        const owned_thinking = if (thinking) |value| try manager.allocator.dupe(u8, value) else null;
+        errdefer if (owned_thinking) |value| manager.allocator.free(value);
+        try manager.tasks.concurrent(manager.io, runChatPrompt, .{ChatPrompt{
+            .manager = manager,
+            .session = session,
+            .message = owned_message,
+            .thinking = owned_thinking,
+            .browser_enabled = browser_tool_enabled,
+        }});
     }
 
     fn sendAcpPrompt(manager: *Manager, session: *Session, message: []const u8) !void {
@@ -985,9 +980,12 @@ pub const Manager = struct {
     fn send(manager: *Manager, session: *Session, document: []const u8) !void {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
-        if (!session.running or session.child.stdin == null) return error.HarnessExited;
-        try session.child.stdin.?.writeStreamingAll(manager.io, document);
-        try session.child.stdin.?.writeStreamingAll(manager.io, "\n");
+        if (!session.running) return error.HarnessExited;
+        if (session.child) |*child| {
+            if (child.stdin == null) return error.HarnessExited;
+            try child.stdin.?.writeStreamingAll(manager.io, document);
+            try child.stdin.?.writeStreamingAll(manager.io, "\n");
+        } else return error.HarnessExited;
     }
 
     fn sendCommand(manager: *Manager, session: *Session, command_id: []const u8, document: []const u8) ![]u8 {
@@ -1021,7 +1019,7 @@ pub const Manager = struct {
 
     fn handleLine(manager: *Manager, session: *Session, line_value: []const u8) !void {
         const line = std.mem.trim(u8, line_value, " \t\r");
-        if (line.len == 0 or line.len > max_event_bytes) return;
+        if (line.len == 0 or line.len > runtime_limits.harness_event_bytes) return;
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, line, .{}) catch return;
         defer parsed.deinit();
         if (parsed.value != .object) return;
@@ -1045,19 +1043,7 @@ pub const Manager = struct {
         defer manager.mutex.unlock(manager.io);
         if (std.mem.eql(u8, event_type, "agent_start")) session.active = true;
         if (std.mem.eql(u8, event_type, "agent_settled")) session.active = false;
-        session.event_seq += 1;
-        var timestamp: [24]u8 = undefined;
-        _ = formatTimestamp(manager.io, &timestamp);
-        try session.events.append(manager.allocator, .{
-            .allocator = manager.allocator,
-            .seq = session.event_seq,
-            .document = try manager.allocator.dupe(u8, line),
-            .timestamp = timestamp,
-        });
-        if (session.events.items.len > max_events) {
-            session.events.items[0].deinit();
-            _ = session.events.orderedRemove(0);
-        }
+        try manager.appendEvent(session, line);
     }
 
     fn handleAcpLine(manager: *Manager, session: *Session, line: []const u8, object: std.json.ObjectMap) !void {
@@ -1076,19 +1062,7 @@ pub const Manager = struct {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
         if (method == null and response_id != null) session.active = false;
-        session.event_seq += 1;
-        var timestamp: [24]u8 = undefined;
-        _ = formatTimestamp(manager.io, &timestamp);
-        try session.events.append(manager.allocator, .{
-            .allocator = manager.allocator,
-            .seq = session.event_seq,
-            .document = try manager.allocator.dupe(u8, line),
-            .timestamp = timestamp,
-        });
-        if (session.events.items.len > max_events) {
-            session.events.items[0].deinit();
-            _ = session.events.orderedRemove(0);
-        }
+        try manager.appendEvent(session, line);
     }
 
     fn handleCodexLine(manager: *Manager, session: *Session, line: []const u8, object: std.json.ObjectMap) !void {
@@ -1102,6 +1076,10 @@ pub const Manager = struct {
         };
         if (std.mem.eql(u8, event_type, "turn.started")) session.active = true;
         if (std.mem.eql(u8, event_type, "turn.completed") or std.mem.eql(u8, event_type, "turn.failed")) session.active = false;
+        try manager.appendEvent(session, line);
+    }
+
+    fn appendEvent(manager: *Manager, session: *Session, line: []const u8) !void {
         session.event_seq += 1;
         var timestamp: [24]u8 = undefined;
         _ = formatTimestamp(manager.io, &timestamp);
@@ -1110,13 +1088,39 @@ pub const Manager = struct {
             .seq = session.event_seq,
             .document = try manager.allocator.dupe(u8, line),
             .timestamp = timestamp,
-        });
-        if (session.events.items.len > max_events) {
-            session.events.items[0].deinit();
-            _ = session.events.orderedRemove(0);
-        }
+        }, LoggedEvent.deinit);
     }
 };
+
+const ChatPrompt = struct {
+    manager: *Manager,
+    session: *Session,
+    message: []u8,
+    thinking: ?[]u8,
+    browser_enabled: bool,
+};
+
+const ChatSinkContext = struct {
+    manager: *Manager,
+    session: *Session,
+
+    fn emit(raw: *anyopaque, document: []const u8) !void {
+        const context: *ChatSinkContext = @ptrCast(@alignCast(raw));
+        try context.manager.handleLine(context.session, document);
+    }
+};
+
+fn runChatPrompt(prompt: ChatPrompt) Io.Cancelable!void {
+    defer prompt.manager.allocator.free(prompt.message);
+    defer if (prompt.thinking) |value| prompt.manager.allocator.free(value);
+    var context = ChatSinkContext{ .manager = prompt.manager, .session = prompt.session };
+    if (prompt.session.chat) |*chat| {
+        chat.prompt(prompt.message, prompt.thinking, prompt.browser_enabled, .{ .context = &context, .emit_fn = ChatSinkContext.emit });
+    } else {
+        ChatSinkContext.emit(&context, "{\"type\":\"extension_error\",\"message\":\"Chat runtime unavailable\"}") catch {};
+        ChatSinkContext.emit(&context, "{\"type\":\"agent_settled\"}") catch {};
+    }
+}
 
 fn directFxRequest(allocator: std.mem.Allocator, io: Io, child: *std.process.Child, request_id: []const u8, document: []const u8) ![]u8 {
     try child.stdin.?.writeStreamingAll(io, document);
@@ -1124,7 +1128,7 @@ fn directFxRequest(allocator: std.mem.Allocator, io: Io, child: *std.process.Chi
     var pending: std.ArrayList(u8) = .empty;
     defer pending.deinit(allocator);
     var chunk: [64 * 1024]u8 = undefined;
-    while (pending.items.len <= max_event_bytes) {
+    while (pending.items.len <= runtime_limits.harness_event_bytes) {
         const count = child.stdout.?.readStreaming(io, &.{&chunk}) catch |failure| switch (failure) {
             error.EndOfStream => return error.HarnessExited,
             else => return failure,
@@ -1197,18 +1201,19 @@ fn dropPrefix(buffer: *std.ArrayList(u8), count: usize) void {
 }
 
 fn readHarness(manager: *Manager, session: *Session) Io.Cancelable!void {
+    const child = if (session.child) |*value| value else return;
     var pending: std.ArrayList(u8) = .empty;
     defer pending.deinit(manager.allocator);
     var chunk: [64 * 1024]u8 = undefined;
     while (true) {
-        const count = session.child.stdout.?.readStreaming(manager.io, &.{&chunk}) catch |failure| switch (failure) {
+        const count = child.stdout.?.readStreaming(manager.io, &.{&chunk}) catch |failure| switch (failure) {
             error.EndOfStream => break,
             error.Canceled => return error.Canceled,
             else => break,
         };
         if (count == 0) break;
         pending.appendSlice(manager.allocator, chunk[0..count]) catch break;
-        if (pending.items.len > max_event_bytes) {
+        if (pending.items.len > runtime_limits.harness_event_bytes) {
             pending.clearRetainingCapacity();
             continue;
         }
@@ -1226,7 +1231,7 @@ fn readHarness(manager: *Manager, session: *Session) Io.Cancelable!void {
     if (pending.items.len > 0) manager.handleLine(session, pending.items) catch {};
     try manager.mutex.lock(manager.io);
     defer manager.mutex.unlock(manager.io);
-    const term = if (session.child.id != null) session.child.wait(manager.io) catch null else null;
+    const term = if (child.id != null) child.wait(manager.io) catch null else null;
     session.running = false;
     session.active = false;
     if (term) |value| switch (value) {
@@ -1275,7 +1280,7 @@ fn statusDocument(allocator: std.mem.Allocator, session: *const Session) ![]u8 {
 
 fn writeEvents(writer: *Io.Writer, session: *const Session, after: u64) !void {
     var wrote = false;
-    for (session.events.items) |event| if (event.seq > after) {
+    for (session.events.values()) |event| if (event.seq > after) {
         if (wrote) try writer.writeByte(',');
         try writer.print("{{\"seq\":{d},\"harness\":", .{event.seq});
         try std.json.Stringify.value(session.harness.name(), .{}, writer);

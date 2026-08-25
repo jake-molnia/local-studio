@@ -99,11 +99,14 @@ pub const Config = struct {
         errdefer environment.deinit();
         try environment.put("PI_CODING_AGENT_DIR", configuration.agent_dir);
         try environment.put("LOCAL_STUDIO_HEAD_API_KEY", api_key);
+        try environment.put("LOCAL_STUDIO_CHAT_API_KEY", api_key);
+        try environment.put("LOCAL_STUDIO_CHAT_MODEL", model_id);
         try environment.put("LOCAL_STUDIO_FX_API_KEY", api_key);
         try environment.put("LOCAL_STUDIO_FX_MODEL", model_id);
         const fx_gateway_url = try std.fmt.allocPrint(configuration.allocator, "{s}/responses", .{base_url});
         defer configuration.allocator.free(fx_gateway_url);
         try environment.put("LOCAL_STUDIO_FX_GATEWAY_URL", fx_gateway_url);
+        try environment.put("LOCAL_STUDIO_CHAT_GATEWAY_URL", fx_gateway_url);
         try environment.put("FX_GATEWAY_CHAT_URL", fx_gateway_url);
         return .{
             .allocator = configuration.allocator,
