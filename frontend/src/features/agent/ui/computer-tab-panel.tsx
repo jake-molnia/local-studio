@@ -1,16 +1,9 @@
 "use client";
 
 import { Suspense, lazy, useCallback, type ReactNode } from "react";
-import {
-  FolderTree,
-  GitBranch,
-  Globe2,
-  MessageSquarePlus,
-  TerminalSquare,
-} from "@/ui/icon-registry";
 import type { ToolsContextValue } from "@/features/agent/tools/context";
 import type { ComputerTab } from "@/features/agent/tools/types";
-import type { Project, GitSummary } from "@/features/agent/projects/types";
+import type { Project } from "@/features/agent/projects/types";
 import type { AgentHarness, Session, UpdateSession } from "@/features/agent/runtime/types";
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { AgentModelPicker } from "@/features/agent/ui/agent-model-picker";
@@ -19,11 +12,6 @@ import { ChatPane } from "@/features/agent/ui/chat-pane";
 const LazyAgentBrowser = lazy(() =>
   import("@/features/agent/ui/agent-browser").then(({ AgentBrowser }) => ({
     default: AgentBrowser,
-  })),
-);
-const LazyComputerStatusPanel = lazy(() =>
-  import("@/features/agent/ui/computer-status-panel").then(({ ComputerStatusPanel }) => ({
-    default: ComputerStatusPanel,
   })),
 );
 const LazyFilesystemPanel = lazy(() =>
@@ -40,8 +28,6 @@ const LazyGitDiffPanel = lazy(() =>
 export type SideChatTabsUpdater = Session[] | ((tabs: Session[]) => Session[]);
 
 const NON_TERMINAL_TABS: Exclude<ComputerTab, "terminal">[] = [
-  "status",
-  "tools",
   "side-chat",
   "browser",
   "files",
@@ -54,14 +40,10 @@ type ComputerTabPanelProps = {
   activeModelId: string;
   activeProject: Project | null;
   focusedSession: Session | null;
-  gitSummary?: GitSummary | null;
   models: AgentModel[];
   modelsLoading: boolean;
   onCloseSideChat: () => void;
-  onCompactSession?: () => Promise<void>;
   onNavigateBrowser: (value: string) => void;
-  onOpenSideChat: () => void;
-  onOpenTerminal: () => void;
   onRenameSideChat: (tabId: string, title: string) => void;
   onUpdateSideChatTabs: (nextTabsOrUpdater: SideChatTabsUpdater) => void;
   sessions: Session[];
@@ -74,12 +56,10 @@ export function ComputerTabPanel(props: ComputerTabPanelProps) {
   const focusedCwd = props.focusedSession?.cwd ?? props.activeProject?.path ?? null;
   const activeTab =
     !props.workspaceToolsEnabled && ["files", "diff", "terminal"].includes(props.tools.computer.tab)
-      ? "tools"
+      ? "side-chat"
       : props.tools.computer.tab;
   if (activeTab !== "terminal") visitedComputerTabs.add(activeTab);
   const panels: Record<ComputerTab, ReactNode> = {
-    status: <StatusTab {...props} />,
-    tools: <ComputerLauncherPanel activeTab={props.tools.computer.tab} {...props} />,
     "side-chat": <SideChatTab {...props} />,
     browser: <BrowserTab {...props} />,
     files: <FilesTab cwd={focusedCwd} />,
@@ -105,26 +85,6 @@ export function ComputerTabPanel(props: ComputerTabPanelProps) {
         )}
       </div>
     </Suspense>
-  );
-}
-
-function StatusTab({
-  activeModel,
-  activeProject,
-  focusedSession,
-  gitSummary,
-  onCompactSession,
-  sessions,
-}: ComputerTabPanelProps) {
-  return (
-    <LazyComputerStatusPanel
-      activeProject={activeProject}
-      activeModel={activeModel}
-      focusedSession={focusedSession}
-      sessions={sessions}
-      gitSummary={gitSummary}
-      onCompactSession={onCompactSession}
-    />
   );
 }
 
@@ -244,89 +204,6 @@ function ComputerTabFallback() {
   return (
     <section className="flex min-h-0 flex-1 items-center justify-center bg-(--color-panel) text-xs text-(--dim)">
       Loading...
-    </section>
-  );
-}
-
-function ComputerLauncherPanel({
-  activeTab,
-  onOpenSideChat,
-  onOpenTerminal,
-  tools,
-  workspaceToolsEnabled,
-}: ComputerTabPanelProps & { activeTab: ComputerTab }) {
-  const cards = [
-    {
-      key: "files",
-      title: "Files",
-      description: "Browse project files",
-      icon: FolderTree,
-      onClick: () => tools.setComputerTab("files"),
-    },
-    {
-      key: "side-chat",
-      title: "Side chat",
-      description: "Start a side conversation",
-      icon: MessageSquarePlus,
-      onClick: () => onOpenSideChat(),
-    },
-    {
-      key: "browser",
-      title: "Browser",
-      description: "Open a website",
-      icon: Globe2,
-      onClick: () => tools.setComputerTab("browser"),
-    },
-    {
-      key: "diff",
-      title: "Review",
-      description: "Diff, commit, push, and PR",
-      icon: GitBranch,
-      onClick: () => tools.setComputerTab("diff"),
-    },
-    {
-      key: "terminal",
-      title: "Terminal",
-      description: "Start an interactive shell",
-      icon: TerminalSquare,
-      onClick: onOpenTerminal,
-    },
-  ] as const;
-  const visibleCards = workspaceToolsEnabled
-    ? cards
-    : cards.filter((card) => !["files", "diff", "terminal"].includes(card.key));
-  return (
-    <section className="min-h-0 flex-1 overflow-y-auto bg-(--color-panel) px-4 py-4">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-0.5">
-        {visibleCards.map((card) => {
-          const Icon = "icon" in card ? card.icon : null;
-          const selected = card.key !== "side-chat" && activeTab === card.key;
-          return (
-            <button
-              key={card.key}
-              type="button"
-              onClick={card.onClick}
-              className={`group flex min-h-0 items-center gap-3 border-b border-(--border)/50 px-2.5 py-2 text-left transition-colors last:border-b-0 ${
-                selected
-                  ? "bg-(--color-surface-hover) text-(--fg)"
-                  : "text-(--fg)/75 hover:bg-(--hover) hover:text-(--fg)"
-              }`}
-            >
-              {Icon ? (
-                <Icon className="h-4 w-4 shrink-0 text-(--dim)/75 transition-colors group-hover:text-(--fg)/80" />
-              ) : null}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[length:var(--fs-base)] font-medium">
-                  {card.title}
-                </span>
-                <span className="block truncate text-[length:var(--fs-sm)] text-(--dim)">
-                  {card.description}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
     </section>
   );
 }
