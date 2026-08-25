@@ -114,39 +114,32 @@ export function sessionRows(
   activity: SessionActivitySnapshot = EMPTY_ACTIVITY,
 ): SessionIndexRow[] {
   const historyById = new Map(historySessions.map((session) => [session.id, session]));
-  const openThreadIds = new Set<string>();
-  const rowKeys = new Set<string>();
+  const openByThreadId = new Map(
+    uniqueOpenSessions(openSessions).flatMap((session) =>
+      session.threadId ? ([[session.threadId, session]] as const) : [],
+    ),
+  );
   const rows: SessionIndexRow[] = [];
-  for (const session of uniqueOpenSessions(openSessions)) {
-    const history = session.threadId ? historyById.get(session.threadId) : undefined;
-    if (session.threadId) openThreadIds.add(session.threadId);
-    const key = session.threadId ?? session.id;
-    if (rowKeys.has(key)) continue;
-    rowKeys.add(key);
-    rows.push({
-      kind: "open",
-      key,
-      threadId: session.threadId,
-      sortAt: timestamp(history?.startedAt ?? session.startedAt ?? session.updatedAt),
-      session,
-      activity: sessionActivity(
-        [session.id, session.threadId],
-        activity,
-        session.status,
-        session.focused,
-      ),
-    });
-  }
-  for (const session of historyById.values()) {
-    if (openThreadIds.has(session.id) || rowKeys.has(session.id)) continue;
-    rowKeys.add(session.id);
+  for (const history of historyById.values()) {
+    const open = openByThreadId.get(history.id);
+    if (open) {
+      rows.push({
+        kind: "open",
+        key: history.id,
+        threadId: history.id,
+        sortAt: timestamp(history.startedAt),
+        session: open,
+        activity: sessionActivity([open.id, history.id], activity, open.status, open.focused),
+      });
+      continue;
+    }
     rows.push({
       kind: "history",
-      key: session.id,
-      threadId: session.id,
-      sortAt: timestamp(session.startedAt),
-      session,
-      activity: sessionActivity([session.id], activity),
+      key: history.id,
+      threadId: history.id,
+      sortAt: timestamp(history.startedAt),
+      session: history,
+      activity: sessionActivity([history.id], activity),
     });
   }
   return rows.sort((left, right) => right.sortAt - left.sortAt);

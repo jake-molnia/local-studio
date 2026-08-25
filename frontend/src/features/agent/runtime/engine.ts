@@ -159,7 +159,6 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           });
           updateSession(sessionId, (session) => ({
             ...session,
-            headTracked: true,
             piSessionId: result.piSessionId || session.piSessionId,
             contextUsage: api.runtimeContextUsage(result.status, session.contextUsage),
             status: "running",
@@ -329,7 +328,8 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
                 replayModelId ||
                 runtimeStatus?.modelId ||
                 modelId,
-              modelRouteId: session.modelRouteId || modelRouteId,
+              modelRouteId: session.modelRouteId || meta?.modelRouteId || modelRouteId,
+              harness: meta?.harness ?? session.harness,
               title: meta?.title ?? title ?? session.title,
               startedAt: meta?.startedAt ?? startedAt ?? session.startedAt,
               tokenStats: tokenStats ?? undefined,

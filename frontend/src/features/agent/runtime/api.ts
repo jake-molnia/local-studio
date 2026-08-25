@@ -158,6 +158,8 @@ export type SessionUsageTotals = {
 export type CanonicalSessionMeta = {
   title: string | null;
   modelId: string | null;
+  modelRouteId: string | null;
+  harness: "chat" | "codex" | "fx" | "pi" | null;
   startedAt: string | null;
   piSessionId: string | null;
   usage?: SessionUsageTotals | null;
