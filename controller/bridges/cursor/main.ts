@@ -3,7 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import cursorExtension from "@rahularya01/pi-cursor";
 import { Effect, Schema } from "effect";
-import { createCursorResponsesFromStream } from "../controller/src/services/cursor-responses";
+import { createCursorResponsesFromStream } from "./responses";
 
 const BridgeRequestSchema = Schema.Struct({
   dataDirectory: Schema.String,

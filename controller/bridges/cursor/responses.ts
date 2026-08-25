@@ -15,7 +15,15 @@ import type {
   ToolCall,
 } from "@earendil-works/pi-ai";
 import { Effect } from "effect";
-import type { HeadProviderCompletion, HeadProviderResponse } from "./head-provider";
+type HeadProviderCompletion = {
+  response: Record<string, unknown>;
+  status: number;
+};
+
+type HeadProviderResponse = {
+  response: Response;
+  completion: Promise<HeadProviderCompletion | null>;
+};
 
 const encoder = new TextEncoder();
 
