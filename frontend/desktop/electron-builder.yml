@@ -16,7 +16,7 @@ files:
 extraResources:
   - from: desktop/resources/app-update.yml
     to: app-update.yml
-  - from: ../controller-zig/zig-out/bin
+  - from: ../controller/zig-out/bin
     to: app/controller
     filter:
       - "local-studio-controller*"

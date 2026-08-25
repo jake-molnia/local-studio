@@ -34,7 +34,7 @@ function controllerEntry(): string {
     : path.resolve(
         resolveDevelopmentFrontendDir(),
         "..",
-        "controller-zig",
+        "controller",
         "zig-out",
         "bin",
         executable,

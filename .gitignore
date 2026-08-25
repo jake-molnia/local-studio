@@ -60,7 +60,7 @@ Thumbs.db
 reports/
 **/.zig-cache/
 **/zig-out*/
-controller-zig/.managed/
+controller/.managed/
 **/zig-pkg/
 
 # Local proofs / scratch

@@ -1,9 +1,9 @@
 *
-!controller-zig/
-!controller-zig/**
-controller-zig/.managed/
-controller-zig/.zig-cache/
-controller-zig/zig-out/
 !controller/
-!controller/contracts/
-!controller/contracts/**
+!controller/**
+controller/.managed/
+controller/.zig-cache/
+controller/zig-out/
+!controller/
+!contracts/
+!contracts/**

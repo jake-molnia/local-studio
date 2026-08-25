@@ -23,7 +23,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@local-studio/contracts/*": ["../controller/contracts/*.ts"],
+      "@local-studio/contracts/*": ["../contracts/*.ts"],
       "@shared/agent/*": ["../shared/agent/*.ts"],
       "@shared/*": ["../shared/*"]
     }

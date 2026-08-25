@@ -29,7 +29,7 @@ let
   localNodeDataDir = "${localStudioState}/local-node";
   modelsDir = "${localStudioState}/models";
   desktopUserDataDir = "${localStudioState}/electron";
-  zigController = "./controller-zig/zig-out/bin/local-studio-controller";
+  zigController = "./controller/zig-out/bin/local-studio-controller";
   portPreflight = ports: ''
     ${lib.getExe pkgs.python311} -c '
     import socket, sys
@@ -89,9 +89,10 @@ in
     exec = "npm run setup";
     execIfModified = [
       "package.json"
-      "controller/package.json"
-      "controller/bun.lock"
-      "controller/contracts/package.json"
+      "controller/bridges/cursor/package.json"
+      "controller/bridges/cursor/bun.lock"
+      "contracts/package.json"
+      "contracts/bun.lock"
       "frontend/package.json"
       "frontend/package-lock.json"
       "shared/package.json"
@@ -111,7 +112,7 @@ in
   processes.head-node = {
     exec = ''
       ${portPreflight [ controllerPort ]}
-      node controller-zig/toolchain.mjs build -Doptimize=ReleaseSafe
+      node controller/toolchain.mjs build -Doptimize=ReleaseSafe
       exec ${zigController} --mode head --host 127.0.0.1 --port ${toString controllerPort}
     '';
     env = {

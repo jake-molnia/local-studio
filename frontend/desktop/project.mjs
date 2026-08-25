@@ -557,131 +557,6 @@ ${unverified.join(`
   console.log(`  standalone repaired: +${runtimeDependencyPaths.length} runtime dependency trees, -${pruned} traced non-runtime files`);
 });
 
-var exports_controller_standards_audit = {};
-import fs from "node:fs";
-import { createRequire as createRequire2 } from "node:module";
-import path3 from "node:path";
-function addSourceFinding(rule, filePath, node, detail) {
-  let sourceFile = node.getSourceFile(), { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-  findings.push({
-    level: "error",
-    rule,
-    path: filePath,
-    detail: `${line + 1}:${character + 1} ${detail}`
-  });
-}
-function identifierText(node) {
-  return ts.isIdentifier(node) ? node.text : null;
-}
-function isEffectCompositionCatch(node) {
-  return ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "catch" && ["Effect", "Stream"].includes(identifierText(node.expression.expression) ?? "");
-}
-function isInsideEffectTryPromise(node) {
-  let parent = node.parent;
-  while (parent) {
-    if (ts.isCallExpression(parent) && ts.isPropertyAccessExpression(parent.expression) && identifierText(parent.expression.expression) === "Effect" && parent.expression.name.text === "tryPromise")
-      return !0;
-    parent = parent.parent;
-  }
-  return !1;
-}
-function scanEffectStandards(filePath) {
-  if (!filePath.endsWith(".ts") || filePath.endsWith(".d.ts"))
-    return;
-  let source = fs.readFileSync(filePath, "utf8"), sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, !0), relativePath = path3.relative(SRC_DIR, filePath), isRuntimeBoundary = runtimeBoundaryFiles.has(relativePath), visit = (node) => {
-    if (ts.canHaveModifiers(node)) {
-      if (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) && !isInsideEffectTryPromise(node))
-        addSourceFinding("effect-async-boundary", filePath, node, "Use Effect for controller async work");
-    }
-    if (!isRuntimeBoundary && ts.isTypeReferenceNode(node) && ["Promise", "PromiseLike"].includes(identifierText(node.typeName) ?? ""))
-      addSourceFinding("effect-promise-type", filePath, node, "Promise types are restricted to runtime adapters");
-    if (!isRuntimeBoundary && ts.isNewExpression(node) && identifierText(node.expression) === "Promise")
-      addSourceFinding("effect-promise-constructor", filePath, node, "Use Effect.async or Effect.callback");
-    if (ts.isIdentifier(node) && ["AsyncLock", "AsyncQueue"].includes(node.text))
-      addSourceFinding("effect-legacy-concurrency", filePath, node, "Use Effect concurrency primitives");
-    if (ts.isCallExpression(node)) {
-      if (ts.isPropertyAccessExpression(node.expression) && identifierText(node.expression.expression) === "ManagedRuntime" && node.expression.name.text === "make")
-        managedRuntimeCount += 1;
-      if (!isRuntimeBoundary && ts.isPropertyAccessExpression(node.expression) && ["runPromise", "runPromiseExit", "runSync", "runFork"].includes(node.expression.name.text) && (identifierText(node.expression.expression) === "Effect" || /runtime/i.test(node.expression.expression.getText(sourceFile))))
-        addSourceFinding("effect-runner-boundary", filePath, node, "Effect runners are restricted to runtime adapters");
-      if (!isRuntimeBoundary && ts.isPropertyAccessExpression(node.expression) && ["then", "finally"].includes(node.expression.name.text))
-        addSourceFinding("effect-promise-chain", filePath, node, "Use Effect composition");
-      if (!isRuntimeBoundary && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "catch" && !isEffectCompositionCatch(node))
-        addSourceFinding("effect-promise-catch", filePath, node, "Use Effect.catch or Effect.catchTag");
-      if (!isRuntimeBoundary && ts.isPropertyAccessExpression(node.expression) && identifierText(node.expression.expression) === "Promise")
-        addSourceFinding("effect-promise-static", filePath, node, "Use Effect concurrency and coordination APIs");
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-}
-function scanDirectory(dir) {
-  let entries2 = fs.readdirSync(dir, { withFileTypes: !0 }), directFiles = entries2.filter((entry) => entry.isFile()), directDirectories = entries2.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !STRUCTURE_COUNT_EXCLUDED_DIRS.has(entry.name));
-  if (stats.directories += 1, stats.files += directFiles.length, directFiles.length > MAX_FILES_PER_DIR)
-    findings.push({
-      level: "error",
-      rule: "directory-file-limit",
-      path: dir,
-      detail: `${directFiles.length} files (limit ${MAX_FILES_PER_DIR})`
-    });
-  if (dir !== modulesRoot && directDirectories.length > MAX_SUBDIRS_PER_DIR)
-    findings.push({
-      level: "error",
-      rule: "directory-subdir-limit",
-      path: dir,
-      detail: `${directDirectories.length} subdirectories (limit ${MAX_SUBDIRS_PER_DIR})`
-    });
-  for (let entry of entries2) {
-    let fullPath = path3.join(dir, entry.name);
-    if (entry.name.startsWith("."))
-      continue;
-    if (entry.isDirectory() && !kebabCase.test(entry.name))
-      findings.push({
-        level: "warning",
-        rule: "kebab-case",
-        path: fullPath,
-        detail: `Name "${entry.name}" is not kebab-case`
-      });
-    if (entry.isDirectory())
-      scanDirectory(fullPath);
-    else if (entry.isFile())
-      scanEffectStandards(fullPath);
-  }
-}
-function printSummary() {
-  let errors = findings.filter((f) => f.level === "error"), warnings = findings.filter((f) => f.level === "warning");
-  console.log("=== Controller Standards Audit ==="), console.log(`Directories scanned: ${stats.directories}`), console.log(`Direct file entries scanned: ${stats.files}`), console.log(`Errors: ${errors.length}`), console.log(`Warnings: ${warnings.length}`), console.log("");
-  let sortedFindings = findings.sort((a, b) => {
-    if (a.level !== b.level)
-      return a.level === "error" ? -1 : 1;
-    return a.path.localeCompare(b.path);
-  });
-  for (let finding of sortedFindings) {
-    let emoji = finding.level === "error" ? "[ERR]" : "[WARN]";
-    console.log(`${emoji} ${finding.rule} | ${finding.path}`), console.log(`      ${finding.detail}`);
-  }
-}
-function run() {
-  if (!fs.existsSync(SRC_DIR))
-    return console.error("ERROR: src directory not found"), 1;
-  if (scanDirectory(SRC_DIR), managedRuntimeCount !== 1)
-    findings.push({
-      level: "error",
-      rule: "effect-single-runtime",
-      path: SRC_DIR,
-      detail: `${managedRuntimeCount} ManagedRuntime.make calls (expected exactly 1)`
-    });
-  return printSummary(), findings.some((finding) => finding.level === "error") ? 1 : 0;
-}
-var require2, ts, SRC_DIR, MAX_FILES_PER_DIR, MAX_SUBDIRS_PER_DIR, STRUCTURE_COUNT_EXCLUDED_DIRS, findings, stats, modulesRoot, runtimeBoundaryFiles, managedRuntimeCount = 0, kebabCase;
-var init_controller_standards_audit = __esm(() => {
-  require2 = createRequire2(path3.resolve(process.cwd(), "package.json")), ts = require2("typescript"), SRC_DIR = path3.resolve(process.cwd(), "src"), MAX_FILES_PER_DIR = Number.parseInt(process.env.MAX_FILES_PER_DIR ?? "20", 10), MAX_SUBDIRS_PER_DIR = Number.parseInt(process.env.MAX_SUBDIRS_PER_DIR ?? "8", 10), STRUCTURE_COUNT_EXCLUDED_DIRS = new Set(), findings = [], stats = {
-    directories: 0,
-    files: 0
-  }, modulesRoot = path3.join(SRC_DIR, "modules"), runtimeBoundaryFiles = new Set(["http/bounded-body.ts", "http/effect-handler.ts", "main.ts", "services/codex-provider.ts", "services/cursor-provider.ts", "services/cursor-responses.ts", "services/head-provider.ts", "services/oauth-credential-store.ts"]), kebabCase = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
-  process.exit(run());
-});
-
 var exports_perf_audit = {};
 import { performance } from "node:perf_hooks";
 function percentile(values, ratio) {
@@ -1109,7 +984,7 @@ async function startController() {
   let url = new URL(controllerUrl);
   if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
     throw Error(`Controller is unavailable: ${controllerUrl}`);
-  let executable = process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller", entry = resolve4(projectRoot3, "..", "controller-zig", "zig-out", "bin", executable);
+  let executable = process.platform === "win32" ? "local-studio-controller.exe" : "local-studio-controller", entry = resolve4(projectRoot3, "..", "controller", "zig-out", "bin", executable);
   if (!existsSync12(entry))
     throw Error(`Missing Zig controller executable: ${entry}`);
   let piEntry = resolve4(projectRoot3, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi"), child = spawn3(entry, ["--mode", "standalone", "--host", "127.0.0.1", "--port", url.port || "8081"], {
@@ -1266,21 +1141,19 @@ var init_validate_shared_contracts = __esm(() => {
     "Rig",
     "RigsPayload"
   ], allowedFiles = new Set([
-    "controller/contracts/recipes.ts",
-    "controller/contracts/system.ts",
-    "controller/contracts/controller-events.ts",
-    "controller/contracts/observability.ts",
-    "controller/contracts/usage.ts",
-    "controller/contracts/rigs.ts",
-    "controller/src/modules/shared/recipe-types.ts",
-    "controller/src/modules/shared/system-types.ts",
+    "contracts/recipes.ts",
+    "contracts/system.ts",
+    "contracts/controller-events.ts",
+    "contracts/observability.ts",
+    "contracts/usage.ts",
+    "contracts/rigs.ts",
     "frontend/src/lib/types.ts",
     "frontend/src/lib/controller-events-contract.ts"
-  ]), scanRoots = ["shared", "controller/contracts", "controller/src", "frontend/src"], findings2 = [], exportedDeclarations = new Map;
+  ]), scanRoots = ["shared", "contracts", "frontend/src"], findings2 = [], exportedDeclarations = new Map;
   for (let scanRoot of scanRoots)
     walk(join4(root3, scanRoot));
   if (findings2.length > 0) {
-    console.error("Shared contract check failed. Move these declarations to controller/contracts:");
+    console.error("Shared contract check failed. Move these declarations to contracts:");
     for (let finding of findings2)
       console.error(`- ${finding}`);
     process.exit(1);
@@ -1309,10 +1182,9 @@ var init_validate_package_json = __esm(() => {
   packageRepository = resolve6(import.meta.dirname, "../.."), packageRequirements = [
     ["package.json", ["doctor", "setup", "dev", "dev:controller", "build", "start", "start:controller", "check"]],
     ["frontend/package.json", ["dev", "build", "start", "desktop:dist", "check:quality"]],
-    ["controller/package.json", ["dev", "start", "typecheck", "lint", "check"]],
     ["shared/package.json", []],
-    ["controller/contracts/package.json", []]
-  ], packageLocks = ["frontend/package-lock.json", "controller/bun.lock", "shared/bun.lock"], packageMissing = [];
+    ["contracts/package.json", []]
+  ], packageLocks = ["frontend/package-lock.json", "contracts/bun.lock", "controller/bridges/cursor/bun.lock", "shared/bun.lock"], packageMissing = [];
   for (let [manifest, scripts] of packageRequirements) {
     let packageJson = packageAuditRead(manifest);
     if (packageJson.private !== true)
@@ -1325,7 +1197,7 @@ var init_validate_package_json = __esm(() => {
     if (!existsSync(resolve6(packageRepository, lockfile)))
       packageMissing.push(lockfile);
   releaseVersion = packageAuditRead("package.json").version;
-  for (let manifest of ["frontend/package.json", "controller/package.json", "controller/contracts/package.json"])
+  for (let manifest of ["frontend/package.json", "contracts/package.json"])
     if (packageAuditRead(manifest).version !== releaseVersion)
       packageMissing.push(`${manifest}:version`);
   if (packageMissing.length > 0)
@@ -1590,7 +1462,6 @@ var project_entry_default = afterPack, root5 = path11.resolve(path11.dirname(fil
   ["browser-perf", () => init_browser_perf_audit().then(() => exports_browser_perf_audit)],
   ["check-commits", () => Promise.resolve().then(() => (init_check_conventional_commits(), exports_check_conventional_commits))],
   ["complete-standalone", () => Promise.resolve().then(() => (init_complete_standalone_build(), exports_complete_standalone_build))],
-  ["controller-standards", () => Promise.resolve().then(() => (init_controller_standards_audit(), exports_controller_standards_audit))],
   ["doctor", async () => doctor()],
   ["perf", () => init_perf_audit().then(() => exports_perf_audit)],
   ["prepare-next", () => Promise.resolve().then(() => (init_prepare_next_build(), exports_prepare_next_build))],
@@ -1637,7 +1508,7 @@ function doctor() {
 }
 function setupRepository() {
   doctor();
-  for (let directory of ["controller", "shared"])
+  for (let directory of ["contracts", "controller/bridges/cursor", "shared"])
     run3("bun", ["install", "--frozen-lockfile"], path11.join(root5, directory));
   run3("npm", ["ci", "--legacy-peer-deps"], path11.join(root5, "frontend"));
   console.log("Repository setup complete");
@@ -1688,7 +1559,7 @@ function preCommit() {
   if (activeFiles.some((file2) => /^(frontend|shared)\//.test(file2)))
     run3("npm", ["run", "precommit"], path11.join(root5, "frontend"));
   if (activeFiles.some((file2) => file2.startsWith("controller/")))
-    run3("bun", ["run", "typecheck"], path11.join(root5, "controller"));
+    run3(process.execPath, [path11.join(root5, "controller/toolchain.mjs"), "build"]);
 }
 function prePush() {
   let remote = process.argv[2], url = process.argv[3], updates = readFileSync17(0, "utf8").trim();

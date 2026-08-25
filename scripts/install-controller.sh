@@ -56,7 +56,7 @@ command -v patch >/dev/null 2>&1 || { log "patch is required — install it and 
 if [ -d "$DIR/.git" ]; then
   log "updating existing checkout at $DIR"
   git -C "$DIR" pull --ff-only || log "pull failed (local changes?) — keeping current checkout"
-elif [ -d "$DIR/controller-zig" ]; then
+elif [ -d "$DIR/controller" ]; then
   log "using existing non-git install at $DIR (left untouched)"
 else
   log "cloning into $DIR"
@@ -103,8 +103,8 @@ if [ ! -x "$SECRETSPEC_BIN" ]; then
 fi
 
 FX_ARCHIVE="$ZIG_CACHE/$FX_COMMIT.tar.gz"
-FX_ROOT="$DIR/controller-zig/.managed/fx"
-FX_PATCH_SHA256="$(sha256_file "$DIR/controller-zig/fx-patches/local-studio.patch")"
+FX_ROOT="$DIR/controller/.managed/fx"
+FX_PATCH_SHA256="$(sha256_file "$DIR/controller/fx-patches/local-studio.patch")"
 FX_MARKER=".local-studio-$FX_SHA256-$FX_PATCH_SHA256"
 if [ ! -f "$FX_ROOT/$FX_MARKER" ]; then
   log "materializing embedded FX runtime"
@@ -114,13 +114,13 @@ if [ ! -f "$FX_ROOT/$FX_MARKER" ]; then
   rm -rf "$FX_ROOT.tmp" "$FX_ROOT"
   mkdir -p "$FX_ROOT.tmp"
   tar -xzf "$FX_ARCHIVE" -C "$FX_ROOT.tmp" --strip-components=1
-  patch --batch -d "$FX_ROOT.tmp" -p1 -i "$DIR/controller-zig/fx-patches/local-studio.patch"
+  patch --batch -d "$FX_ROOT.tmp" -p1 -i "$DIR/controller/fx-patches/local-studio.patch"
   touch "$FX_ROOT.tmp/$FX_MARKER"
   mv "$FX_ROOT.tmp" "$FX_ROOT"
 fi
 
 log "building Zig controller"
-(cd "$DIR/controller-zig" && "$ZIG" build -Doptimize=ReleaseSafe)
+(cd "$DIR/controller" && "$ZIG" build -Doptimize=ReleaseSafe)
 
 # --- config ------------------------------------------------------------------
 ENV_FILE="$DIR/.env"
@@ -175,7 +175,7 @@ mkdir -p "$DATA_DIR" "$MODELS_DIR"
 chmod 600 "$ENV_FILE"
 INSTALL_BIN="$DATA_DIR/bin/local-studio-controller"
 mkdir -p "$(dirname "$INSTALL_BIN")"
-cp "$DIR/controller-zig/zig-out/bin/local-studio-controller" "$INSTALL_BIN.tmp"
+cp "$DIR/controller/zig-out/bin/local-studio-controller" "$INSTALL_BIN.tmp"
 chmod 755 "$INSTALL_BIN.tmp"
 mv "$INSTALL_BIN.tmp" "$INSTALL_BIN"
 INSTALL_SECRETSPEC="$DATA_DIR/bin/secretspec"

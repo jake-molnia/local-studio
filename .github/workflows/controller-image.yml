@@ -7,8 +7,8 @@ on:
     paths:
       - .github/workflows/controller-image.yml
       - .github/workflows/nightly.yml
-      - controller-zig/**
-      - controller/contracts/**
+      - controller/**
+      - contracts/**
   push:
     tags:
       - v*.*.*
@@ -54,7 +54,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
-          file: ./controller-zig/Dockerfile
+          file: ./controller/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
