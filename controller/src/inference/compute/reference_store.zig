@@ -1,5 +1,5 @@
 const std = @import("std");
-const instances = @import("instances.zig");
+const instances = @import("../runtime/instance_store.zig");
 
 const max_field_bytes = 16 * 1024;
 

@@ -1,6 +1,6 @@
 const std = @import("std");
-const compute_instances = @import("../repository/compute_instances.zig");
-const compute_references = @import("../repository/compute_references.zig");
+const compute_instances = @import("instance_store.zig");
+const compute_references = @import("reference_store.zig");
 
 const Io = std.Io;
 const inspect_format = "{{.Id}}\n{{index .Config.Labels \"local-studio.nonce\"}}\n{{index .Config.Labels \"local-studio.instance\"}}\n{{.State.Running}}";

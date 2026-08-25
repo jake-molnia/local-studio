@@ -1,9 +1,9 @@
 const std = @import("std");
-const model_service = @import("models.zig");
-const recipe_service = @import("recipes.zig");
-const peak_metrics = @import("../repository/peak_metrics.zig");
-const recipes = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const model_service = @import("../models/service.zig");
+const recipe_service = @import("../recipes/service.zig");
+const peak_metrics = @import("../../system/metrics/store.zig");
+const recipes = @import("../recipes/store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 const max_response_bytes = 16 * 1024 * 1024;
 

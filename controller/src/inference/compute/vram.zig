@@ -1,7 +1,7 @@
 const std = @import("std");
-const storage = @import("storage.zig");
-const system_info = @import("../platform/system_info.zig");
-const telemetry = @import("telemetry.zig");
+const storage = @import("../../system/storage.zig");
+const system_info = @import("../../system/platform/system_info.zig");
+const telemetry = @import("../../system/telemetry.zig");
 
 const max_config_bytes = 1024 * 1024;
 

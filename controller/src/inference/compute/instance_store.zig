@@ -1,6 +1,6 @@
 const std = @import("std");
-const instances = @import("instances.zig");
-const references = @import("compute_references.zig");
+const instances = @import("../runtime/instance_store.zig");
+const references = @import("reference_store.zig");
 
 const max_document_bytes = 1024 * 1024;
 const max_instances = 1024;
