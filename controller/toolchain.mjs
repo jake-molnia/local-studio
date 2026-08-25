@@ -49,8 +49,8 @@ const fxSha256 = "477a81378ca3d486c0ca87f0a72c48e36f68d8e92a3ba135767a9558faedc0
 const fxUrl = `https://github.com/vercel-labs/fx/archive/${fxCommit}.tar.gz`;
 const fxCacheRoot = join(cacheRoot, "fx", fxCommit);
 const fxArchive = join(fxCacheRoot, `${fxCommit}.tar.gz`);
-const fxSourceRoot = join(projectRoot, "controller-zig", ".managed", "fx");
-const fxPatch = join(projectRoot, "controller-zig", "fx-patches", "local-studio.patch");
+const fxSourceRoot = join(projectRoot, "controller", ".managed", "fx");
+const fxPatch = join(projectRoot, "controller", "fx-patches", "local-studio.patch");
 const fxMaterializerVersion = "2";
 const secretspecVersion = "0.19.1";
 const secretspecArtifacts = {
@@ -238,13 +238,13 @@ if (building) {
   resolvedSecretSpec = await ensureSecretSpec();
 }
 const result = spawnSync(executable, arguments_, {
-  cwd: join(projectRoot, "controller-zig"),
+  cwd: join(projectRoot, "controller"),
   stdio: "inherit",
   env: process.env,
 });
 if (result.error) throw result.error;
 if (result.status === 0 && building && resolvedSecretSpec) {
-  const destination = join(projectRoot, "controller-zig", "zig-out", "bin", "secretspec");
+  const destination = join(projectRoot, "controller", "zig-out", "bin", "secretspec");
   await copyFile(resolvedSecretSpec, destination);
   await chmod(destination, 0o755);
 }

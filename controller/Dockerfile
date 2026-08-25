@@ -1,23 +1,25 @@
-FROM oven/bun:1.3.14-debian AS bun
+FROM node:22-bookworm AS build
 
-FROM python:3.12-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends patch xz-utils && rm -rf /var/lib/apt/lists/*
 
-COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
-
-RUN groupadd --gid 1000 bun && useradd --uid 1000 --gid bun --create-home bun
-
-WORKDIR /app/controller
-
-COPY package.json bun.lock tsconfig.json ./
-RUN bun install --frozen-lockfile --production
-
+WORKDIR /source
+COPY controller ./controller
 COPY contracts ./contracts
-COPY src ./src
+RUN node controller/toolchain.mjs build -Doptimize=ReleaseSafe
 
-ENV NODE_ENV=production
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client && rm -rf /var/lib/apt/lists/* && useradd --uid 1000 --create-home studio
+
+COPY --from=build /source/controller/zig-out/bin/local-studio-controller /usr/local/bin/local-studio-controller
+
+ENV LOCAL_STUDIO_CONTROLLER_MODE=standalone
+ENV LOCAL_STUDIO_DATA_DIR=/data
+ENV LOCAL_STUDIO_MODELS_DIR=/models
 
 EXPOSE 8080
 
-USER bun
+USER studio
+WORKDIR /home/studio
 
-CMD ["bun", "src/main.ts"]
+ENTRYPOINT ["local-studio-controller"]
