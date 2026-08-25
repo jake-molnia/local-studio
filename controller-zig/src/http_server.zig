@@ -2945,7 +2945,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Head");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
         const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
         persistInferenceUsage(io, database, model_id, "openai-codex", sample, requested_stream);
         return false;
@@ -2959,7 +2959,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         const rewritten = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
         defer allocator.free(rewritten);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
         const sample = provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, public_protocol, .chat_completions, rewritten, requested_stream, request) catch return false;
         persistInferenceUsage(io, database, model_id, "openrouter", sample, requested_stream);
         return false;
@@ -2970,7 +2970,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
         if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Head");
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
         const sample = cursor_gateway.serve(allocator, io, configuration, public_protocol, upstream_model, inference_body, requested_stream, request) catch return false;
         persistInferenceUsage(io, database, model_id, "cursor", sample, requested_stream);
         return false;
@@ -2982,7 +2982,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         const rewritten = try provider_routing.rewriteModel(allocator, &parsed, provider_route.model_id);
         defer allocator.free(rewritten);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
+        const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
         const requires_translation = switch (provider_route.provider.protocol) {
             .auto => false,
             .chat_completions => public_protocol != .chat_completions,

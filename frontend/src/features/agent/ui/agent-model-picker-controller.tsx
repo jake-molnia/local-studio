@@ -525,17 +525,13 @@ function buildPickerRows(
   const rows: PickerRow[] = [{ view: "models", label: "Model", value: modelLabel }];
   if (effortLabel) rows.push({ view: "reasoning", label: "Effort", value: effortLabel });
   if (choice && activeRoute) {
-    if (routeValues(choice, "key").length > 1) {
-      rows.push({ view: "provider", label: "Provider", value: activeRoute.label });
-    }
+    rows.push({ view: "provider", label: "Provider", value: activeRoute.label });
     if (harnessLabel) rows.push({ view: "harness", label: "Harness", value: harnessLabel });
-    if (routeValues(choice, "contextWindow").length > 1) {
-      rows.push({
-        view: "context",
-        label: "Context",
-        value: formatContextWindow(activeRoute.contextWindow),
-      });
-    }
+    rows.push({
+      view: "context",
+      label: "Context",
+      value: formatContextWindow(activeRoute.contextWindow),
+    });
     if (routeValues(choice, "speed").length > 1) {
       rows.push({
         view: "speed",

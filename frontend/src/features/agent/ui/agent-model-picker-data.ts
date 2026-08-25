@@ -72,11 +72,26 @@ export function routeForChoice(
     choice.routes[0];
   if (!fallback) return null;
   const target = { ...(selectedRoute ?? fallback), ...override };
+  const matchingRoutes = choice.routes.filter((route) => routeMatchesOverride(route, override));
+  const candidates = matchingRoutes.length > 0 ? matchingRoutes : choice.routes;
   return (
-    choice.routes.toSorted(
+    candidates.toSorted(
       (left, right) =>
         routeScore(right, target, defaultModel) - routeScore(left, target, defaultModel),
     )[0] ?? null
+  );
+}
+
+function routeMatchesOverride(
+  route: ModelRoute,
+  override: Partial<Pick<ModelRoute, RouteField>>,
+): boolean {
+  return (
+    (override.key === undefined || route.key === override.key) &&
+    (override.speed === undefined || route.speed === override.speed) &&
+    (override.mode === undefined || route.mode === override.mode) &&
+    (override.thinking === undefined || route.thinking === override.thinking) &&
+    (override.contextWindow === undefined || route.contextWindow === override.contextWindow)
   );
 }
 
