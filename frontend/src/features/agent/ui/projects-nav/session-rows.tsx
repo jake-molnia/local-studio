@@ -248,9 +248,7 @@ export function ProjectSessions({
 
   return (
     <SidebarRail>
-      {loading && !sessions ? (
-        <div className="pl-2 pr-2 py-0.5 text-[length:var(--fs-sm)] text-(--dim)">Loading...</div>
-      ) : orderedRows.length === 0 ? (
+      {loading && !sessions ? null : orderedRows.length === 0 ? (
         <div className="px-2 py-1 text-center text-[length:var(--fs-xs)] text-(--dim)/55">
           No chats
         </div>

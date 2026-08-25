@@ -544,35 +544,7 @@ function execCommand(block: ToolBlock): string | null {
 }
 
 function BrowserPreview({ block }: { block: ToolBlock }) {
-  const args = browserToolArgs(block);
-  const display =
-    compactBrowserResult(block.resultText) ||
-    (block.text && block.text !== block.argsText ? compactBrowserResult(block.text) : null);
-  return (
-    <ToolSummary block={block}>
-      {args ? (
-        <div className="mb-1.5 rounded-md border border-(--border) bg-(--color-input) px-3 py-1.5 font-mono text-[length:var(--fs-sm)] leading-[1.6] text-(--fg)/75">
-          {args}
-        </div>
-      ) : null}
-      {display ? <ToolOutput>{display}</ToolOutput> : null}
-    </ToolSummary>
-  );
-}
-
-function browserToolArgs(block: ToolBlock): string | null {
-  if (!block.args || Object.keys(block.args).length === 0) return null;
-  const pairs = Object.entries(block.args).flatMap(([key, value]) => {
-    if (value === undefined || value === null || value === "") return [];
-    const text = typeof value === "string" || typeof value === "number" ? String(value) : "";
-    return text ? [`${key}: ${text}`] : [];
-  });
-  return pairs.length ? pairs.join("  ") : null;
-}
-
-function compactBrowserResult(result: string | null | undefined): string | null {
-  if (!result) return null;
-  return compactToolText(result, 1200);
+  return <ToolSummary block={block} />;
 }
 
 function ToolPreviewHeightProvider({ kind, children }: { kind: ToolKind; children: ReactNode }) {

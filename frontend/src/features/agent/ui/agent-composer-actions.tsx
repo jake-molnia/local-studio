@@ -37,7 +37,7 @@ export function AgentComposerActions({
   const stopping = status === "stopping";
 
   return (
-    <div className="agent-composer-actions-row flex min-h-8 items-center gap-0.5 bg-transparent px-3 pb-2 pt-0 text-xs">
+    <div className="agent-composer-actions-row flex min-h-8 items-center gap-0.5 bg-transparent px-3 pb-1.5 pt-0 text-xs">
       <input
         ref={fileInputRef}
         type="file"
@@ -52,13 +52,13 @@ export function AgentComposerActions({
         disabled={readingAttachments}
         data-composer-context-trigger
         aria-expanded={contextOpen}
-        className={`inline-flex !h-5 !min-h-5 !w-5 !min-w-5 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) active:scale-95 active:bg-(--active) disabled:opacity-30 ${
+        className={`inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) active:scale-95 active:bg-(--active) disabled:opacity-30 ${
           contextOpen ? "bg-(--active) text-(--fg)" : "text-(--hl2)"
         }`}
         aria-label="Add context"
         title="Add context"
       >
-        <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+        <Plus className="h-4 w-4" strokeWidth={1.75} />
       </button>
       <div className="ml-auto flex min-w-0 shrink items-center gap-0.5">
         {modelSelector}
@@ -75,18 +75,18 @@ export function AgentComposerActions({
             ) : inputHasText ? (
               <button
                 type="submit"
-                className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70"
+                className="inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70"
                 aria-label="Steer current task now"
                 title="Steer current task now (Alt+Enter) · Enter queues it instead"
               >
-                <ArrowUp className="h-3.5 w-3.5 stroke-[2.25]" />
+                <ArrowUp className="h-4 w-4 stroke-[2.25]" />
               </button>
             ) : null}
             <button
               type="button"
               onClick={onAbortTurn}
               disabled={starting || stopping}
-              className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:opacity-30"
+              className="inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:opacity-30"
               aria-label="Stop"
               title="Stop (Esc)"
             >
@@ -97,11 +97,11 @@ export function AgentComposerActions({
           <button
             type="submit"
             disabled={(!inputHasText && attachmentsCount === 0) || readingAttachments}
-            className="inline-flex !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[background-color,color,opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:bg-(--fg)/12 disabled:text-(--dim)/65 disabled:opacity-100"
+            className="inline-flex !h-7 !min-h-7 !w-7 !min-w-7 shrink-0 items-center justify-center rounded-full bg-(--fg) text-(--bg) transition-[background-color,color,opacity,transform] duration-[var(--motion-fast)] hover:opacity-85 active:scale-95 active:opacity-70 disabled:bg-(--fg)/12 disabled:text-(--dim)/65 disabled:opacity-100"
             aria-label="Send"
             title="Send (Enter)"
           >
-            {starting ? <Spinner size="sm" /> : <ArrowUp className="h-3.5 w-3.5 stroke-[2.25]" />}
+            {starting ? <Spinner size="sm" /> : <ArrowUp className="h-4 w-4 stroke-[2.25]" />}
           </button>
         )}
       </div>

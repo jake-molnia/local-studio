@@ -55,9 +55,7 @@ export function routeOwnsMobileHeader(pathname: string): boolean {
 }
 
 export function ProjectsNavPlaceholder() {
-  return (
-    <div className="px-2 py-1 text-[length:var(--fs-md)] text-(--dim)">Loading projects...</div>
-  );
+  return null;
 }
 
 export function NavItemMobile({

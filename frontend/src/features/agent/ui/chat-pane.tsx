@@ -660,19 +660,6 @@ export function ChatPane({
         terminalSnapshot={terminalSnapshot}
         header={{
           title: displayedSessionTitle,
-          pinned: sessionPinned,
-          rightPanelOpen,
-          canFork: Boolean(onForkSession),
-          canClose: Boolean(onClose),
-          canExport,
-          onTogglePinned: togglePinnedSession,
-          onRename: renameActiveSession,
-          onFork: onForkSession,
-          onOpenTerminal: openTerminalAction,
-          terminalOpen: terminalView && !chatWorkspace,
-          onExport: exportSession,
-          onClose,
-          onToggleRightPanel,
         }}
       />
       <ChatTranscript

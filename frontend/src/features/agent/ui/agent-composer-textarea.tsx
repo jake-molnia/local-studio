@@ -46,7 +46,7 @@ export function AgentComposerTextArea({
       onChange={onChange}
       onKeyDown={onKeyDown}
       placeholder={placeholder}
-      className="block min-h-[32px] max-h-[36vh] w-full flex-1 resize-none overflow-y-auto bg-transparent px-3 pb-1 pt-2 text-[13px] leading-[18px] tracking-normal text-(--fg)/82 outline-none placeholder:text-(--composer-placeholder)"
+      className="block min-h-[27px] max-h-[36vh] w-full shrink-0 resize-none overflow-y-auto bg-transparent px-3 pb-0.5 pt-1.5 text-[13px] leading-[18px] tracking-normal text-(--fg)/82 outline-none placeholder:text-(--composer-placeholder)"
     />
   );
 }
