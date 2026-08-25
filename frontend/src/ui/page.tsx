@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { RefreshCw } from "@/ui/icon-registry";
 import { cx } from "./utils";
 import { Tabs, type TabItem } from "./tabs";
 
@@ -178,28 +177,5 @@ export function TabbedPage<T extends string = string>({
         <div className="mt-4">{children}</div>
       </PageContainer>
     </AppPage>
-  );
-}
-
-export function RefreshIconButton({
-  onClick,
-  loading,
-  label,
-}: {
-  onClick: () => void;
-  loading?: boolean;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-(--ui-muted) transition-[color,background-color] hover:bg-(--ui-hover) hover:text-(--ui-fg) focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 disabled:opacity-50"
-      aria-label={label}
-      title={label}
-    >
-      <RefreshCw className={cx("h-3.5 w-3.5", loading ? "animate-spin" : "")} />
-    </button>
   );
 }

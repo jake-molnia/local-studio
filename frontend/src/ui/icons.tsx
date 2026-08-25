@@ -118,14 +118,6 @@ export function GitBranchIcon(props: IconProps) {
   );
 }
 
-export function MoreIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M3 6.5h2v3H3v-3zm4 0h2v3H7v-3zm4 0h2v3h-2v-3z" />
-    </Svg>
-  );
-}
-
 export function PinIcon(props: IconProps) {
   // A solid bookmark-style flag - reads far cleaner than a thumbtack at row size.
   return (

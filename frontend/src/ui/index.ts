@@ -45,7 +45,6 @@ export {
   PageContainer,
   PageHeader,
   SectionNav,
-  RefreshIconButton,
   TabbedPage,
 } from "./page";
 export type { SectionNavItem, PageWidth } from "./page";
