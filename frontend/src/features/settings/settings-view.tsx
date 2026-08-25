@@ -1,7 +1,8 @@
 "use client";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
+  Brain,
   ChevronDown,
   Cpu,
   FileIcon,
@@ -30,6 +31,8 @@ import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { ProfileSettings } from "./profile-settings";
+import { ModelProvidersSection } from "@/features/integrations/model-providers-section";
+import { RecipesContent } from "@/features/recipes/recipes-content/recipes-content";
 import { useConfigure } from "@/features/configure/use-configure";
 import { MachinesSection } from "@/features/configure/machines-section";
 import UsagePage from "@/features/usage/usage-page";
@@ -110,6 +113,10 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
       terms: ["tokens", "requests", "activity", "models", "controller", "errors"],
     },
   ],
+  models: [
+    { label: "Model providers", terms: ["cursor", "codex", "openrouter", "oauth", "api key"] },
+    { label: "Studio models", terms: ["download", "serve", "recipe", "runtime", "weights"] },
+  ],
 };
 const SECTIONS: SettingsSectionDef[] = [
   [
@@ -153,6 +160,13 @@ const SECTIONS: SettingsSectionDef[] = [
     "Inference and session usage across the active controller.",
     UsageIcon,
     "usage tokens requests activity models controller errors",
+  ],
+  [
+    "models",
+    "Models",
+    "Providers, local weights, recipes, and serving.",
+    Brain,
+    "models providers cursor codex openrouter local weights recipes serving runtimes",
   ],
 ].map(([id, label, description, Icon, searchTerms]) => ({
   id: id as SettingsSectionId,
@@ -330,7 +344,7 @@ export function SettingsView({
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
-      if (["connectors", "plugins", "accounts", "access", "models", "skills"].includes(hash)) {
+      if (["connectors", "plugins", "accounts", "access", "skills"].includes(hash)) {
         window.location.replace(`/customize#${hash}`);
         return;
       }
@@ -378,6 +392,7 @@ export function SettingsView({
       {activeSection === "connection" ? <AppVersionSection /> : null}
       {activeSection === "profile" ? <ProfileSettings /> : null}
       <SettingsUsage active={activeSection === "usage"} />
+      <SettingsModels active={activeSection === "models"} />
       {activeSection === "appearance" ? <AppearanceSettings /> : null}
       {activeSection === "terminal" ? <ShortcutsSettings /> : null}
       {activeSection === "archive" ? <ArchivedChatsSettings /> : null}
@@ -423,6 +438,7 @@ export function SettingsView({
             node={activeMachineNode}
             worker={activeMachineWorker}
             headConnected={configure.headConnected}
+            target={activeMachineTargets?.logs}
           />
         )
       ) : null}
@@ -430,7 +446,7 @@ export function SettingsView({
         activeMachineNode.id === configure.localNodeId ? (
           <LocalMachineSystemTelemetry />
         ) : (
-          <MachineSystemSettings node={activeMachineNode} />
+          <MachineSystemSettings node={activeMachineNode} target={activeMachineTargets?.logs} />
         )
       ) : null}
       {activeMachineView === "logs" && activeMachineTargets?.logs ? (
@@ -485,13 +501,13 @@ function SettingsMachineRail({
       type="button"
       aria-current={activeSection === id ? "page" : undefined}
       onClick={() => onSelectSection(id)}
-      className={`group flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] transition-[color,background-color] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 max-lg:w-auto max-lg:shrink-0 ${
+      className={`group flex h-[var(--sidebar-row-height)] w-full items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-[length:var(--fs-md)] transition-[color,background-color] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-accent)/35 max-lg:w-auto max-lg:shrink-0 ${
         activeSection === id
           ? "bg-(--ui-active) text-(--ui-fg)"
           : "text-(--ui-muted) hover:bg-(--ui-hover)/70 hover:text-(--ui-fg)"
-      } ${nested ? "pl-5" : ""}`}
+      } ${nested ? "pl-7" : ""}`}
     >
-      <span className="flex h-3 w-3 shrink-0 items-center justify-center opacity-75">{icon}</span>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center opacity-75">{icon}</span>
       <span className="min-w-0 truncate">{label}</span>
     </button>
   );
@@ -526,7 +542,7 @@ function SettingsMachineRail({
             machinesInteracted.current = true;
             setMachinesOpen((current) => !current);
           }}
-          className="flex h-6 w-full items-center gap-1 rounded-[4px] px-1.5 text-left text-[length:var(--fs-2xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60 max-lg:w-auto max-lg:shrink-0"
+          className="flex h-[var(--sidebar-row-height)] w-full items-center gap-1.5 rounded-[var(--sidebar-row-radius)] px-2 text-left text-[length:var(--fs-xs)] font-medium uppercase tracking-[0.08em] text-(--ui-muted) hover:bg-(--ui-hover)/60 max-lg:w-auto max-lg:shrink-0"
         >
           <ChevronDown
             className={cx(
@@ -553,7 +569,7 @@ function SettingsMachineRail({
                         setOpenNodes((current) => ({ ...current, [node.id]: !current[node.id] }))
                       }
                       className={cx(
-                        "flex h-6 w-full items-center gap-1.5 rounded-[4px] px-1.5 text-left text-[length:var(--fs-xs)] hover:bg-(--ui-hover)/70 hover:text-(--ui-fg) max-lg:w-auto max-lg:shrink-0",
+                        "flex h-[var(--sidebar-row-height)] w-full items-center gap-2 rounded-[var(--sidebar-row-radius)] px-2 text-left text-[length:var(--fs-md)] hover:bg-(--ui-hover)/70 hover:text-(--ui-fg) max-lg:w-auto max-lg:shrink-0",
                         nodeActive ? "bg-(--ui-active) text-(--ui-fg)" : "text-(--ui-muted)",
                       )}
                     >
@@ -636,4 +652,20 @@ function SettingsLogs({ target }: { target: LogsTarget }) {
 
 function SettingsUsage({ active }: { active: boolean }) {
   return active ? <UsagePage embedded /> : null;
+}
+
+function SettingsModels({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div className="space-y-8">
+      <ModelProvidersSection searchQuery="" />
+      <Suspense
+        fallback={
+          <div className="text-[length:var(--fs-sm)] text-(--ui-muted)">Loading models…</div>
+        }
+      >
+        <RecipesContent embedded />
+      </Suspense>
+    </div>
+  );
 }

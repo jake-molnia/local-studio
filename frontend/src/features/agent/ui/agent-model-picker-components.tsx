@@ -99,7 +99,7 @@ export function ModelPickerPanel({
             <div className="px-2 py-3 text-[length:var(--fs-xs)] text-(--dim)">
               <p>{query ? `No models match “${query}”.` : "No models are available."}</p>
               <Link
-                href="/models"
+                href="/settings#models"
                 onClick={onClose}
                 className="mt-2 inline-flex h-7 items-center rounded-md bg-(--active) px-2 text-(--fg) hover:bg-(--hover)"
               >

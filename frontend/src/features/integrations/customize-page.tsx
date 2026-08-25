@@ -3,12 +3,11 @@
 import { useState } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { AppPage, SearchInput } from "@/ui";
-import { Brain, GraduationCap, KeyRound, Plug, Puzzle } from "@/ui/icon-registry";
+import { GraduationCap, KeyRound, Plug, Puzzle } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
 import { GoogleAccountsSection } from "./google-accounts-section";
 import { integrationSectionFromHash, type IntegrationSectionId } from "./integration-navigation";
-import { ModelProvidersSection } from "./model-providers-section";
 import { PluginsSection } from "./plugins-section";
 import { SkillsSection } from "./skills-section";
 
@@ -17,7 +16,6 @@ const CATEGORIES = [
   { id: "connectors", label: "MCPs", icon: Plug, description: "Servers and tools" },
   { id: "skills", label: "Skills", icon: GraduationCap, description: "Session instructions" },
   { id: "accounts", label: "Accounts", icon: KeyRound, description: "Connected accounts" },
-  { id: "models", label: "Models", icon: Brain, description: "Provider sign-in" },
 ] satisfies Array<{
   id: IntegrationSectionId;
   label: string;
@@ -29,7 +27,6 @@ function CustomizeSection({ section, query }: { section: IntegrationSectionId; q
   if (section === "connectors") return <ConnectorsSection searchQuery={query} />;
   if (section === "plugins") return <PluginsSection searchQuery={query} />;
   if (section === "accounts") return <GoogleAccountsSection searchQuery={query} />;
-  if (section === "models") return <ModelProvidersSection searchQuery={query} />;
   return <SkillsSection searchQuery={query} />;
 }
 
@@ -40,7 +37,13 @@ export function CustomizePage() {
   const [query, setQuery] = useState("");
 
   useMountSubscription(() => {
-    const syncSection = () => setSection(integrationSectionFromHash(window.location.hash));
+    const syncSection = () => {
+      if (window.location.hash === "#models") {
+        window.location.replace("/settings#models");
+        return;
+      }
+      setSection(integrationSectionFromHash(window.location.hash));
+    };
     syncSection();
     window.addEventListener("hashchange", syncSection);
     return () => window.removeEventListener("hashchange", syncSection);

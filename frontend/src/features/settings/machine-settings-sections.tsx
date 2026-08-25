@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Effect } from "effect";
-import { RIG_HARDWARE_TYPE_LABELS, RIG_NODE_ROLE_LABELS } from "@local-studio/contracts/rigs";
+import { RIG_NODE_ROLE_LABELS } from "@local-studio/contracts/rigs";
 import { GpuSection } from "@/features/dashboard/control-panel/gpu-section";
 import { DashboardLayout } from "@/features/dashboard/layout/dashboard-layout";
 import { useDashboardData } from "@/features/dashboard/use-dashboard-data";
 import { useRealtimeStatusStore } from "@/hooks/realtime-status-store";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import api from "@/lib/api/client";
+import { createHeadApiClient, createHeadWorkerApiClient } from "@/lib/api/head-controller";
 import { effectInterval } from "@/lib/effect-timers";
 import { StatusPill, type UiTone } from "@/ui";
 import type {
@@ -24,6 +25,7 @@ import { EnginesSection } from "./engines-section";
 import { CompatibilitySettings, ServicesSettings } from "./system-settings-section";
 import type { ApiConnectionSettings } from "./types";
 import { SettingsFactRows, SettingsGroup, type SettingsFactRow } from "./settings-ui";
+import type { LogsTarget } from "@/features/logs/use-logs";
 
 type MachineState = {
   label: string;
@@ -50,67 +52,70 @@ const machineState = (
 
 const endpoint = (node: RigNode): string => node.address ?? node.hostname ?? "Not reported";
 
-const capabilityRows = (node: RigNode): SettingsFactRow[] => {
-  const capabilities = node.capabilities;
-  const readiness = (
-    label: string,
-    ready: boolean | undefined,
-    description: string,
-  ): SettingsFactRow => ({
-    label,
-    description,
-    value: ready === undefined ? "Not reported" : ready ? "Installed" : "Not installed",
-    status: {
-      label: ready === undefined ? "unknown" : ready ? "installed" : "missing",
-      tone: ready === undefined ? "default" : ready ? "good" : "danger",
-    },
-  });
-  return [
-    readiness("Compute runtime", capabilities?.compute, "Runs local inference workloads."),
-    readiness("Terminal", capabilities?.terminal, "Provides task-scoped terminal sessions."),
-    readiness("Browser", capabilities?.browser, "Provides browser automation to agent tasks."),
-    readiness("MCP", capabilities?.mcp, "Exposes configured Model Context Protocol services."),
-    {
-      label: "Agent harness",
-      description: "External agent runtimes available on this machine.",
-      value: capabilities?.harnesses.length ? capabilities.harnesses.join(", ") : "Not installed",
-      status: {
-        label: capabilities?.harnesses.length ? "installed" : "missing",
-        tone: capabilities?.harnesses.length ? "good" : "danger",
-      },
-    },
-  ];
-};
-
 const formatBytes = (bytes: number | null | undefined): string => {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "Not reported";
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 };
 
-function useLocalDiagnostics() {
+type NetworkRates = { receive: number | null; transmit: number | null };
+
+function useMachineDiagnostics(target?: LogsTarget) {
   const [diagnostics, setDiagnostics] = useState<StudioDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [networkRates, setNetworkRates] = useState<NetworkRates>({ receive: null, transmit: null });
+  const previous = useRef<{
+    sampledAt: number;
+    receive: number;
+    transmit: number;
+  } | null>(null);
   const refresh = useCallback(() => {
     const request = Effect.tryPromise({
-      try: () => api.getStudioDiagnostics(),
+      try: () => {
+        if (!target || target.kind === "local") return api.getStudioDiagnostics();
+        const client =
+          target.kind === "head"
+            ? createHeadApiClient(target.connection)
+            : createHeadWorkerApiClient(target.workerId, target.connection);
+        return client.getStudioDiagnostics();
+      },
       catch: (cause) => (cause instanceof Error ? cause.message : "Diagnostics unavailable"),
     }).pipe(
       Effect.match({
         onFailure: (message) => setError(message),
         onSuccess: (next) => {
+          const sampledAt = Date.parse(next.timestamp);
+          const receive = next.network_receive_bytes;
+          const transmit = next.network_transmit_bytes;
+          const prior = previous.current;
+          if (
+            prior &&
+            receive !== null &&
+            transmit !== null &&
+            Number.isFinite(sampledAt) &&
+            sampledAt > prior.sampledAt
+          ) {
+            const seconds = (sampledAt - prior.sampledAt) / 1000;
+            setNetworkRates({
+              receive: Math.max(0, receive - prior.receive) / seconds,
+              transmit: Math.max(0, transmit - prior.transmit) / seconds,
+            });
+          }
+          if (receive !== null && transmit !== null && Number.isFinite(sampledAt)) {
+            previous.current = { sampledAt, receive, transmit };
+          }
           setDiagnostics(next);
           setError(null);
         },
       }),
     );
     void Effect.runPromise(request);
-  }, []);
+  }, [target]);
   useMountSubscription(() => {
     refresh();
     const timer = effectInterval(refresh, 5_000);
     return () => timer.cancel();
   }, [refresh]);
-  return { diagnostics, error };
+  return { diagnostics, error, networkRates };
 }
 
 function localControllerRows(
@@ -175,14 +180,29 @@ function resolveGpuTelemetry(gpus: GPU[]) {
   return { memory, utilization };
 }
 
-function localSystemRows(diagnostics: StudioDiagnostics | null, gpus: GPU[]): SettingsFactRow[] {
+const formatRate = (bytesPerSecond: number | null): string => {
+  if (bytesPerSecond === null) return "Sampling…";
+  if (bytesPerSecond >= 1024 ** 2) return `${(bytesPerSecond / 1024 ** 2).toFixed(1)} MB/s`;
+  if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  return `${Math.round(bytesPerSecond)} B/s`;
+};
+
+function localSystemRows(
+  diagnostics: StudioDiagnostics | null,
+  gpus: GPU[],
+  networkRates: NetworkRates,
+): SettingsFactRow[] {
   const memory = resolveMemory(diagnostics);
   const gpu = resolveGpuTelemetry(gpus);
   return [
     {
       label: "CPU",
       description: diagnostics?.cpu_model ?? "Processor inventory is loading.",
-      value: diagnostics ? `${diagnostics.cpu_cores} cores` : "Checking…",
+      value: diagnostics
+        ? diagnostics.cpu_usage_percent === null
+          ? `${diagnostics.cpu_cores} cores`
+          : `${diagnostics.cpu_usage_percent.toFixed(1)}% · ${diagnostics.cpu_cores} cores`
+        : "Checking…",
     },
     {
       label: "RAM",
@@ -213,9 +233,16 @@ function localSystemRows(diagnostics: StudioDiagnostics | null, gpus: GPU[]): Se
     {
       label: "GPU memory",
       description: "Memory in use across every visible accelerator.",
-      value: gpu.memory.capacity
-        ? `${(gpu.memory.used / 1024).toFixed(1)} / ${(gpu.memory.capacity / 1024).toFixed(1)} GB`
-        : "Not reported",
+      value:
+        gpus.some((device) => device.memory_usage_available !== false) && gpu.memory.capacity
+          ? `${(gpu.memory.used / 1024).toFixed(1)} / ${(gpu.memory.capacity / 1024).toFixed(1)} GB`
+          : gpus.some((device) => device.memory_shared)
+            ? "Shared system memory"
+            : "Not reported",
+    },
+    {
+      label: "Network",
+      value: `↓ ${formatRate(networkRates.receive)} · ↑ ${formatRate(networkRates.transmit)}`,
     },
     {
       label: "Sample",
@@ -291,7 +318,7 @@ export function LocalMachineControllerSettings({
   error: string | null;
 }) {
   const realtime = useRealtimeStatusStore();
-  const local = useLocalDiagnostics();
+  const local = useMachineDiagnostics();
   return (
     <div className="space-y-5">
       <SettingsGroup
@@ -325,10 +352,12 @@ export function MachineControllerSettings({
   node,
   worker,
   headConnected,
+  target,
 }: {
   node: RigNode;
   worker?: WorkerStatus;
   headConnected: boolean;
+  target?: LogsTarget;
 }) {
   const state = machineState(node, worker, headConnected);
   return (
@@ -347,19 +376,18 @@ export function MachineControllerSettings({
           ]}
         />
       </SettingsGroup>
-      <SettingsGroup
+      <SetupChecksSettings
         title="Software & dependencies"
-        description="Detected software and harness capabilities reported to the Head."
-      >
-        <SettingsFactRows rows={capabilityRows(node)} />
-      </SettingsGroup>
+        description="Detected runtimes, tools, browsers, and harnesses reported by this controller."
+        target={target}
+      />
     </div>
   );
 }
 
 export function LocalMachineSystemTelemetry() {
   const realtime = useRealtimeStatusStore();
-  const local = useLocalDiagnostics();
+  const local = useMachineDiagnostics();
   const diagnostics = local.diagnostics;
   const gpus = realtime.gpus.length ? realtime.gpus : (diagnostics?.gpus ?? []);
   return (
@@ -372,7 +400,7 @@ export function LocalMachineSystemTelemetry() {
         </StatusPill>
       }
     >
-      <SettingsFactRows rows={localSystemRows(diagnostics, gpus)} />
+      <SettingsFactRows rows={localSystemRows(diagnostics, gpus, local.networkRates)} />
       <GpuSection
         metrics={realtime.metrics}
         gpus={gpus}
@@ -383,38 +411,23 @@ export function LocalMachineSystemTelemetry() {
   );
 }
 
-export function MachineSystemSettings({ node }: { node: RigNode }) {
-  const acceleratorMemory = node.accelerators.reduce(
-    (sum, accelerator) => sum + (accelerator.memory_gb ?? 0) * accelerator.count,
-    0,
-  );
+export function MachineSystemSettings({ node, target }: { node: RigNode; target?: LogsTarget }) {
+  const remote = useMachineDiagnostics(target);
+  const diagnostics = remote.diagnostics;
+  const gpus = diagnostics?.gpus ?? [];
   return (
     <SettingsGroup
-      title="System telemetry"
+      title="Live system telemetry"
       description="Latest hardware telemetry reported by this machine."
-      actions={<StatusPill tone="info">last reported</StatusPill>}
+      actions={
+        <StatusPill tone={remote.error ? "danger" : diagnostics ? "good" : "info"}>
+          {remote.error ? "unavailable" : diagnostics ? "streaming" : "connecting"}
+        </StatusPill>
+      }
     >
       <SettingsFactRows
         rows={[
-          {
-            label: "CPU",
-            description: node.cpu_model ?? "Processor model not reported",
-            value: node.cpu_cores ? `${node.cpu_cores} cores` : "Not reported",
-          },
-          { label: "RAM", value: node.memory_gb ? `${node.memory_gb} GB total` : "Not reported" },
-          {
-            label: "GPU",
-            description: node.accelerators.length
-              ? node.accelerators.map((accelerator) => accelerator.name).join(", ")
-              : RIG_HARDWARE_TYPE_LABELS[node.hardware_type],
-            value:
-              node.accelerators.reduce((sum, accelerator) => sum + accelerator.count, 0) ||
-              "None reported",
-          },
-          {
-            label: "GPU memory",
-            value: acceleratorMemory ? `${acceleratorMemory} GB total` : "Not reported",
-          },
+          ...localSystemRows(diagnostics, gpus, remote.networkRates),
           { label: "Operating system", value: node.os ?? "Not reported" },
           { label: "Hostname", value: node.hostname ?? "Not reported", mono: true },
         ]}

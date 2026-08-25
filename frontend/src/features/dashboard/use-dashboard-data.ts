@@ -47,7 +47,7 @@ export function useDashboardData() {
     lifecycleError: lifecycle.error,
     onLaunch: lifecycle.start,
     onBenchmark: actions.onBenchmark,
-    onNewRecipe: navigate("/models?new=1&tab=serves"),
-    onViewAll: navigate("/models"),
+    onNewRecipe: navigate("/settings?new=1&tab=serves#models"),
+    onViewAll: navigate("/settings#models"),
   };
 }

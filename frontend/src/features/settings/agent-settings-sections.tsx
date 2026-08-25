@@ -13,7 +13,13 @@ import { SESSIONS_CHANGED_EVENT } from "@/lib/workspace-events";
 import { useSidebarStatus } from "@/features/settings/use-sidebar-status";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import api from "@/lib/api/client";
+import {
+  createHeadApiClient,
+  createHeadWorkerApiClient,
+  headProxyHeaders,
+} from "@/lib/api/head-controller";
 import type { RuntimeTarget } from "@/lib/types";
+import type { LogsTarget } from "@/features/logs/use-logs";
 
 export function ArchivedChatsSettings() {
   type Session = {
@@ -131,9 +137,11 @@ export function ArchivedChatsSettings() {
 export function SetupChecksSettings({
   title = "Dependencies & apps",
   description = "Local services and applications required for agent and inference workloads.",
+  target,
 }: {
   title?: string;
   description?: string;
+  target?: LogsTarget;
 }) {
   type Check = {
     id: string;
@@ -149,26 +157,46 @@ export function SetupChecksSettings({
   const controllerStatus = useSidebarStatus();
 
   useMountSubscription(() => {
-    void fetch("/api/agent/setup-checks", { cache: "no-store" })
+    const remote = target && target.kind !== "local" ? target : null;
+    const headers = remote
+      ? {
+          ...headProxyHeaders(remote.connection),
+          ...(remote.kind === "worker" ? { "X-Local-Studio-Worker-Id": remote.workerId } : {}),
+        }
+      : undefined;
+    const prefix = remote ? "/api/proxy/api" : "/api";
+    const runtimeClient = remote
+      ? remote.kind === "head"
+        ? createHeadApiClient(remote.connection)
+        : createHeadWorkerApiClient(remote.workerId, remote.connection)
+      : api;
+    void fetch(`${prefix}/agent/setup-checks`, { cache: "no-store", headers })
       .then((res) => res.json() as Promise<{ checks?: Check[] }>)
       .then((payload) => setChecks(payload.checks ?? []))
       .catch(() => setChecks([]));
-    void fetch("/api/agent/harnesses", { cache: "no-store" })
+    void fetch(`${prefix}/agent/harnesses`, { cache: "no-store", headers })
       .then((res) => res.json() as Promise<unknown>)
       .then((payload) =>
         setHarnesses([...Schema.decodeUnknownSync(HarnessCatalogSchema)(payload).harnesses]),
       )
       .catch(() => setHarnesses([]));
-    void api
+    void runtimeClient
       .getRuntimeTargets()
       .then((payload) => setRuntimeTargets(payload.targets))
       .catch(() => setRuntimeTargets([]));
-  }, []);
+  }, [target]);
   const controllerCheck: Check = {
     id: "controller",
     label: "Controller connection",
-    ok: controllerStatus.online,
-    value: controllerStatus.online ? controllerStatus.activityLine : "offline",
+    ok: target && target.kind !== "local" ? true : controllerStatus.online,
+    value:
+      target && target.kind !== "local"
+        ? target.kind === "head"
+          ? "Head controller"
+          : "Worker controller"
+        : controllerStatus.online
+          ? controllerStatus.activityLine
+          : "offline",
     guidance: "Set a reachable controller URL in Settings → Machines before using Agents.",
   };
   const harnessChecks: Check[] = harnesses.map((harness) => ({
