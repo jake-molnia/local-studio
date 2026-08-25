@@ -2,7 +2,7 @@
 
 import { Effect, Schema } from "effect";
 import { useMemo, useState } from "react";
-import { ModelCatalogResponseSchema, type ModelOffer } from "@local-studio/contracts/model-catalog";
+import { ModelCatalogResponseSchema } from "@local-studio/contracts/model-catalog";
 import type { HarnessCatalogEntry } from "@shared/agent/harness-catalog";
 import { Select, SegmentedControl } from "@/ui";
 import { ArrowUp, ChevronDown } from "@/ui/icon-registry";
@@ -20,16 +20,13 @@ import {
   setThinkingLevelDefault,
 } from "@/features/agent/messages/thinking-level-pref";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
+import { agentModelsFromCatalog, type CatalogAgentModel } from "@/features/agent/models";
+import { AgentModelPicker } from "@/features/agent/ui/agent-model-picker";
+import {
+  recommendedThreadTitleRoute,
+  threadTitleRouteChoices,
+} from "@/features/agent/runtime/thread-title-model";
 import { SettingsGroup, SettingsRow } from "./settings-ui";
-
-type ModelRouteChoice = {
-  key: string;
-  modelId: string;
-  routeId: string;
-  providerId: string;
-  label: string;
-  model: ModelOffer;
-};
 
 const THINKING_OPTIONS: Array<{ value: AgentThinkingLevel; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -41,44 +38,6 @@ const THINKING_OPTIONS: Array<{ value: AgentThinkingLevel; label: string }> = [
   { value: "max", label: "Max" },
   { value: "off", label: "Off" },
 ];
-
-const routeKey = (modelId: string, routeId: string) =>
-  `${encodeURIComponent(modelId)}::${encodeURIComponent(routeId)}`;
-
-function routeChoices(models: readonly ModelOffer[]): ModelRouteChoice[] {
-  return models
-    .flatMap((model) =>
-      model.routes
-        .filter((route) => route.status === "ready")
-        .map((route) => ({
-          key: routeKey(model.id, route.id),
-          modelId: model.id,
-          routeId: route.id,
-          providerId: route.providerId,
-          label: `${model.name} · ${route.label}`,
-          model,
-        })),
-    )
-    .toSorted((left, right) => left.label.localeCompare(right.label));
-}
-
-export function recommendedTitleRoute(
-  choices: readonly ModelRouteChoice[],
-): ModelRouteChoice | null {
-  const compact = choices.filter((choice) =>
-    /(?:mini|nano|small|flash|haiku|lite)/i.test(
-      `${choice.model.name} ${choice.model.family} ${choice.model.id}`,
-    ),
-  );
-  return (
-    (compact.length ? compact : [...choices]).toSorted(
-      (left, right) =>
-        left.model.maxOutputTokens - right.model.maxOutputTokens ||
-        left.model.contextWindow - right.model.contextWindow ||
-        left.label.localeCompare(right.label),
-    )[0] ?? null
-  );
-}
 
 function normalizedOrder(ids: readonly string[], preferred: readonly string[]): string[] {
   const known = new Set(ids);
@@ -137,14 +96,14 @@ function PriorityOrder({
   );
 }
 
-function loadModels(): Effect.Effect<ModelOffer[], unknown> {
+function loadModels(): Effect.Effect<CatalogAgentModel[], unknown> {
   return Effect.gen(function* () {
     const response = yield* Effect.tryPromise(() =>
       fetch("/api/agent/models", { cache: "no-store" }),
     );
     const payload = yield* Effect.tryPromise(() => response.json());
     if (!response.ok) return yield* Effect.fail(new Error("Failed to load models"));
-    return [...Schema.decodeUnknownSync(ModelCatalogResponseSchema)(payload).models];
+    return agentModelsFromCatalog(Schema.decodeUnknownSync(ModelCatalogResponseSchema)(payload));
   });
 }
 
@@ -156,7 +115,7 @@ function availableHarnesses(harnesses: readonly HarnessCatalogEntry[]): HarnessC
 
 export function AgentDefaultsSection() {
   const harnessCatalog = useHarnessCatalog();
-  const [models, setModels] = useState<ModelOffer[]>([]);
+  const [models, setModels] = useState<CatalogAgentModel[]>([]);
   const [defaults, setDefaults] = useState<AgentDefaults>(() =>
     typeof window === "undefined"
       ? readAgentDefaults({ getItem: () => null })
@@ -175,19 +134,22 @@ export function AgentDefaultsSection() {
       window.removeEventListener(AGENT_DEFAULTS_CHANGED_EVENT, sync);
     };
   }, []);
-  const choices = useMemo(() => routeChoices(models), [models]);
+  const choices = useMemo(() => threadTitleRouteChoices(models), [models]);
   const harnesses = useMemo(() => availableHarnesses(harnessCatalog), [harnessCatalog]);
   const providerIds = useMemo(
     () => [...new Set(choices.map((choice) => choice.providerId))],
     [choices],
   );
-  const providers = providerIds.map((id) => ({ id, label: id }));
+  const providers = providerIds.map((id) => ({
+    id,
+    label: choices.find((choice) => choice.providerId === id)?.providerLabel ?? id,
+  }));
   const providerOrder = normalizedOrder(providerIds, defaults.providerOrder);
   const harnessOrder = normalizedOrder(
     harnesses.map((harness) => harness.id),
     defaults.harnessOrder,
   );
-  const recommendedTitle = recommendedTitleRoute(choices);
+  const recommendedTitle = recommendedThreadTitleRoute(choices);
   const defaultChoice =
     choices.find(
       (choice) => choice.modelId === defaults.modelId && choice.routeId === defaults.routeId,
@@ -209,13 +171,16 @@ export function AgentDefaultsSection() {
         label="Default model"
         description="The model and route selected for a new task."
         control={
-          <Select
-            compact
-            aria-label="Default model"
-            value={defaultChoice?.key ?? ""}
-            options={choices.map((choice) => ({ value: choice.key, label: choice.label }))}
-            onChange={(event) => {
-              const choice = choices.find((candidate) => candidate.key === event.target.value);
+          <AgentModelPicker
+            models={models}
+            selectedModel={defaultChoice?.modelId ?? ""}
+            selectedRoute={defaultChoice?.routeId}
+            defaultModel={defaultChoice?.modelId}
+            loading={models.length === 0}
+            onSelect={(modelId, routeId) => {
+              const choice = choices.find(
+                (candidate) => candidate.modelId === modelId && candidate.routeId === routeId,
+              );
               if (choice) {
                 update({
                   modelId: choice.modelId,
@@ -328,13 +293,16 @@ export function AgentDefaultsSection() {
         label="Thread naming model"
         description="A smaller route run through the embedded Chat runtime for summaries and titles."
         control={
-          <Select
-            compact
-            aria-label="Thread naming model"
-            value={titleChoice?.key ?? ""}
-            options={choices.map((choice) => ({ value: choice.key, label: choice.label }))}
-            onChange={(event) => {
-              const choice = choices.find((candidate) => candidate.key === event.target.value);
+          <AgentModelPicker
+            models={models}
+            selectedModel={titleChoice?.modelId ?? ""}
+            selectedRoute={titleChoice?.routeId}
+            defaultModel={recommendedTitle?.modelId}
+            loading={models.length === 0}
+            onSelect={(modelId, routeId) => {
+              const choice = choices.find(
+                (candidate) => candidate.modelId === modelId && candidate.routeId === routeId,
+              );
               if (choice) update({ titleModelId: choice.modelId, titleRouteId: choice.routeId });
             }}
           />

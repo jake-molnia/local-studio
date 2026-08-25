@@ -1,7 +1,16 @@
 import { useCallback, useMemo } from "react";
-import { cleanSessionTitle, type SessionTab } from "@/features/agent/messages";
+import {
+  cleanSessionTitle,
+  messageTextFromBlocks,
+  type SessionTab,
+} from "@/features/agent/messages";
 import { patchCanonicalSessionPref } from "@/features/agent/messages/prefs";
 import { useProjectsNavSessionPrefs } from "@/features/agent/ui/projects-nav/use-projects-nav-effects";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
+import { generateThreadTitle } from "@/features/agent/runtime/thread-title-generator";
+
+const titleGenerationSessions = new Set<string>();
 
 export function useChatPaneSessionTitle({
   activeTab,
@@ -85,6 +94,28 @@ export function useChatPaneSessionTitle({
     },
     [activeTab, displayedSessionTitle, onRenameSession, patchActiveSessionPrefs],
   );
+  useMountSubscription(() => {
+    if (!activeTab || running || sessionPrefTitle || activeTab.status !== "idle") return;
+    if (!readAgentDefaults(window.localStorage).autoTitle) return;
+    const users = activeTab.messages.filter((message) => message.role === "user");
+    const assistant = activeTab.messages.findLast((message) => message.role === "assistant");
+    if (users.length !== 1 || !assistant || titleGenerationSessions.has(activeTab.id)) return;
+    const assistantText = assistant.text || messageTextFromBlocks(assistant.blocks ?? []);
+    const userText = users[0]?.text.trim() ?? "";
+    if (!userText || !assistantText.trim() || !activeTab.modelId) return;
+    titleGenerationSessions.add(activeTab.id);
+    void generateThreadTitle({
+      userText,
+      assistantText,
+      currentModelId: activeTab.modelId,
+      currentRouteId: activeTab.modelRouteId ?? "",
+    }).then((title) => {
+      if (!title) return;
+      onRenameSession(activeTab.id, title);
+      const primary = activeTab.piSessionId ?? localPrefKey ?? activeTab.id;
+      patchCanonicalSessionPref(primary, sessionPrefKeys, { title });
+    });
+  }, [activeTab, localPrefKey, onRenameSession, running, sessionPrefKeys, sessionPrefTitle]);
 
   return {
     displayedSessionTitle,
