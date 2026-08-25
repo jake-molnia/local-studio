@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useMemo,
@@ -268,6 +268,8 @@ export function ChatPane({
   composerOnly = false,
 }: Props) {
   const router = useRouter();
+  const routeProjectId = useSearchParams().get("project");
+  const effectiveProjectId = projectId ?? routeProjectId;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -344,7 +346,7 @@ export function ChatPane({
   } = useChatPaneSessionTitle({
     activeTab,
     activeTabId,
-    projectId,
+    projectId: effectiveProjectId,
     paneId,
     running: Boolean(running),
     onPiSessionIdChange,
@@ -400,7 +402,9 @@ export function ChatPane({
     },
   });
 
-  const activePiSessionId = activeTab?.piSessionId ?? null;
+  const activePiSessionId = activeTab?.piSessionId?.startsWith("tab-")
+    ? null
+    : (activeTab?.piSessionId ?? null);
   const { goalRevision, goalAction, flushPendingGoal } = useGoalCommand(
     activePiSessionId,
     activeTabId,
@@ -426,7 +430,7 @@ export function ChatPane({
     cwd,
     browserToolEnabled,
     browserBackend,
-    forcedHarness: projectId === "chats" ? "chat" : undefined,
+    forcedHarness: effectiveProjectId === "chats" ? "chat" : undefined,
     onPiSessionIdChange: handlePiSessionIdAssigned,
     updateSession: updateTab,
     selectionFor: tools.selectionFor,

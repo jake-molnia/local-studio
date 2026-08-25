@@ -115,13 +115,17 @@ export function sessionRows(
 ): SessionIndexRow[] {
   const historyById = new Map(historySessions.map((session) => [session.id, session]));
   const openThreadIds = new Set<string>();
+  const rowKeys = new Set<string>();
   const rows: SessionIndexRow[] = [];
   for (const session of uniqueOpenSessions(openSessions)) {
     const history = session.threadId ? historyById.get(session.threadId) : undefined;
     if (session.threadId) openThreadIds.add(session.threadId);
+    const key = session.threadId ?? session.id;
+    if (rowKeys.has(key)) continue;
+    rowKeys.add(key);
     rows.push({
       kind: "open",
-      key: session.threadId ?? session.id,
+      key,
       threadId: session.threadId,
       sortAt: timestamp(history?.startedAt ?? session.startedAt ?? session.updatedAt),
       session,
@@ -133,8 +137,9 @@ export function sessionRows(
       ),
     });
   }
-  for (const session of historySessions) {
-    if (openThreadIds.has(session.id)) continue;
+  for (const session of historyById.values()) {
+    if (openThreadIds.has(session.id) || rowKeys.has(session.id)) continue;
+    rowKeys.add(session.id);
     rows.push({
       kind: "history",
       key: session.id,

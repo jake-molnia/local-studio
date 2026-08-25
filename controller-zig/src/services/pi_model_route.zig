@@ -101,9 +101,10 @@ pub const Config = struct {
         try environment.put("LOCAL_STUDIO_HEAD_API_KEY", api_key);
         try environment.put("LOCAL_STUDIO_FX_API_KEY", api_key);
         try environment.put("LOCAL_STUDIO_FX_MODEL", model_id);
-        const fx_gateway_url = try std.fmt.allocPrint(configuration.allocator, "{s}/chat/completions", .{base_url});
+        const fx_gateway_url = try std.fmt.allocPrint(configuration.allocator, "{s}/responses", .{base_url});
         defer configuration.allocator.free(fx_gateway_url);
         try environment.put("LOCAL_STUDIO_FX_GATEWAY_URL", fx_gateway_url);
+        try environment.put("FX_GATEWAY_CHAT_URL", fx_gateway_url);
         return .{
             .allocator = configuration.allocator,
             .model_name = try std.fmt.allocPrint(configuration.allocator, "local-studio/{s}", .{model_id}),

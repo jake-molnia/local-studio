@@ -183,6 +183,7 @@ function startPromptCommand(
       result.piSessionId || (result.harness === "fx" ? result.runtimeSessionId : null);
     deps.updateSession(context.sessionId, (session) => ({
       ...session,
+      headTracked: true,
       piSessionId: canonicalSessionId || session.piSessionId,
       contextUsage: api.runtimeContextUsage(result.status, session.contextUsage),
       status: "running",
@@ -205,6 +206,7 @@ function startPromptCommand(
         if (runtimeCanHydrateCanonicalSession(status, currentPiSessionId)) {
           deps.updateSession(context.sessionId, (session) => ({
             ...session,
+            headTracked: true,
             piSessionId: status?.piSessionId || session.piSessionId,
             contextUsage: api.runtimeContextUsage(status, session.contextUsage),
             status: "running",

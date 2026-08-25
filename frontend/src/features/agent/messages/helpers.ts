@@ -179,7 +179,7 @@ export function makeFreshTab(): Session {
     // server (ids are opaque server-side). Sessions persisted under a legacy
     // rt-* runtime key reattach via the controller's connection-key seed.
     id: newId("tab"),
-    headTracked: true,
+    headTracked: false,
     piSessionId: null,
     title: "New session",
     messages: [],

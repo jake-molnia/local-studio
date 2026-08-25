@@ -159,6 +159,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           });
           updateSession(sessionId, (session) => ({
             ...session,
+            headTracked: true,
             piSessionId: result.piSessionId || session.piSessionId,
             contextUsage: api.runtimeContextUsage(result.status, session.contextUsage),
             status: "running",

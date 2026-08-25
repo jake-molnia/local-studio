@@ -74,12 +74,18 @@ pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
     errdefer output.deinit();
     try output.writer.writeAll("{\"sessions\":[");
     var count: usize = 0;
+    var emitted = std.StringHashMap(void).init(allocator);
+    defer emitted.deinit();
     for (sessions.records) |session| {
         const archived = std.mem.eql(u8, session.status, "archived");
         if (archived_only != archived and (archived_only or !include_archived)) continue;
         if (project_path) |expected| if (session.project_path == null or !std.mem.eql(u8, session.project_path.?, expected)) continue;
         if (project_id) |expected| if (session.project_id == null or !std.mem.eql(u8, session.project_id.?, expected)) continue;
+        const history_id = if (std.mem.eql(u8, session.harness, "fx")) session.id else session.native_session_id orelse session.id;
+        if (std.mem.startsWith(u8, history_id, "tab-")) continue;
+        if (emitted.contains(history_id)) continue;
         if (limit) |maximum| if (count >= maximum) break;
+        try emitted.put(history_id, {});
         if (count > 0) try output.writer.writeByte(',');
         const first_message = try firstUserMessage(allocator, database, session.id);
         defer if (first_message) |value| allocator.free(value);

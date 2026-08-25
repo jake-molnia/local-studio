@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     fx_build_options.addOption([]const u8, "update_channel", "stable");
     fx_build_options.addOption(bool, "local_studio_mcp_only", true);
     const fx_module = b.createModule(.{
-        .root_source_file = b.path(".managed/fx/src/local_studio.zig"),
+        .root_source_file = b.path("fx_local_studio.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
