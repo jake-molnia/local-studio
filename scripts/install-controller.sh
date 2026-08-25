@@ -40,8 +40,6 @@ ZIG_VERSION="0.16.0"
 ZIG_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/local-studio/zig/$ZIG_VERSION"
 ZIG_ROOT="$ZIG_CACHE/toolchain"
 ZIG="$ZIG_ROOT/zig"
-FX_COMMIT="669ef8a7f0bf6b13a1722bfd434fb9fc61d01511"
-FX_SHA256="477a81378ca3d486c0ca87f0a72c48e36f68d8e92a3ba135767a9558faedc06b"
 SECRETSPEC_VERSION="0.19.1"
 
 log() { printf '[local-studio] %s\n' "$*"; }
@@ -50,7 +48,6 @@ log() { printf '[local-studio] %s\n' "$*"; }
 command -v git >/dev/null 2>&1 || { log "git is required — install it and rerun"; exit 1; }
 command -v curl >/dev/null 2>&1 || { log "curl is required — install it and rerun"; exit 1; }
 command -v tar >/dev/null 2>&1 || { log "tar is required — install it and rerun"; exit 1; }
-command -v patch >/dev/null 2>&1 || { log "patch is required — install it and rerun"; exit 1; }
 
 # --- source ------------------------------------------------------------------
 if [ -d "$DIR/.git" ]; then
@@ -100,23 +97,6 @@ if [ ! -x "$SECRETSPEC_BIN" ]; then
   mv "$SECRETSPEC_ARCHIVE.tmp" "$SECRETSPEC_ARCHIVE"
   tar -xf "$SECRETSPEC_ARCHIVE" -C "$SECRETSPEC_CACHE"
   chmod 755 "$SECRETSPEC_BIN"
-fi
-
-FX_ARCHIVE="$ZIG_CACHE/$FX_COMMIT.tar.gz"
-FX_ROOT="$DIR/controller/.managed/fx"
-FX_PATCH_SHA256="$(sha256_file "$DIR/controller/fx-patches/local-studio.patch")"
-FX_MARKER=".local-studio-$FX_SHA256-$FX_PATCH_SHA256"
-if [ ! -f "$FX_ROOT/$FX_MARKER" ]; then
-  log "materializing embedded FX runtime"
-  curl -fL "https://github.com/vercel-labs/fx/archive/$FX_COMMIT.tar.gz" -o "$FX_ARCHIVE.tmp"
-  [ "$(sha256_file "$FX_ARCHIVE.tmp")" = "$FX_SHA256" ] || { rm -f "$FX_ARCHIVE.tmp"; log "FX checksum mismatch"; exit 1; }
-  mv "$FX_ARCHIVE.tmp" "$FX_ARCHIVE"
-  rm -rf "$FX_ROOT.tmp" "$FX_ROOT"
-  mkdir -p "$FX_ROOT.tmp"
-  tar -xzf "$FX_ARCHIVE" -C "$FX_ROOT.tmp" --strip-components=1
-  patch --batch -d "$FX_ROOT.tmp" -p1 -i "$DIR/controller/fx-patches/local-studio.patch"
-  touch "$FX_ROOT.tmp/$FX_MARKER"
-  mv "$FX_ROOT.tmp" "$FX_ROOT"
 fi
 
 log "building Zig controller"

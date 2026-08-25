@@ -1,9 +1,10 @@
 const std = @import("std");
-const io_mod = @import(".managed/fx/src/core/shared/io.zig");
-const stream_provider = @import(".managed/fx/src/core/agent/stream_provider.zig");
-const types = @import(".managed/fx/src/core/shared/types.zig");
-const openai_codex = @import(".managed/fx/src/gateway/openai_codex.zig");
-const responses_protocol = @import(".managed/fx/src/gateway/responses_protocol.zig");
+const io_mod = @import("core/shared/io.zig");
+const stream_provider = @import("core/agent/stream_provider.zig");
+const types = @import("core/shared/types.zig");
+const openai_codex = @import("gateway/openai_codex.zig");
+const responses_protocol = @import("gateway/responses_protocol.zig");
+const tool_policy = @import("tool_policy.zig");
 const mcp_bridge = @import("mcp_bridge");
 
 const system_prompt =
@@ -339,11 +340,7 @@ fn gatewayOrigin(url: []const u8) []const u8 {
 }
 
 fn chatToolAllowed(name: []const u8, browser_enabled: bool) bool {
-    if (std.mem.startsWith(u8, name, "browser_")) return browser_enabled;
-    for ([_][]const u8{ "computer__", "mcp-filesystem__", "mcp-git__", "filesystem__", "file__", "git__", "shell__", "terminal__", "ssh__" }) |prefix| {
-        if (std.mem.startsWith(u8, name, prefix)) return false;
-    }
-    return true;
+    return tool_policy.allows(name, browser_enabled);
 }
 
 fn duplicateToolCalls(allocator: std.mem.Allocator, calls: []const types.ToolCall) ![]types.ToolCall {

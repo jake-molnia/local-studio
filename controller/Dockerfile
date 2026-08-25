@@ -1,9 +1,10 @@
 FROM node:22-bookworm AS build
 
-RUN apt-get update && apt-get install -y --no-install-recommends patch xz-utils && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /source
 COPY controller ./controller
+COPY chat ./chat
 COPY contracts ./contracts
 RUN node controller/toolchain.mjs build -Doptimize=ReleaseSafe
 
