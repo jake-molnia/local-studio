@@ -1,10 +1,11 @@
 const std = @import("std");
 const oauth_credentials = @import("../repository/oauth_credentials.zig");
 const openai_protocol = @import("openai_protocol.zig");
+const inference_usage = @import("../repository/inference_usage.zig");
 
 const max_response_bytes = 64 * 1024 * 1024;
 
-pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, credential: *const oauth_credentials.Credential, model_id: []const u8, public_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !void {
+pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, credential: *const oauth_credentials.Credential, model_id: []const u8, public_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !?inference_usage.Sample {
     const responses_payload = try openai_protocol.request(allocator, public_protocol, .responses, payload);
     defer allocator.free(responses_payload);
     const upstream_payload = try prepareRequest(allocator, responses_payload, model_id);
@@ -38,19 +39,20 @@ pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, credential:
             .keep_alive = false,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return null;
     }
     const completed = try completedResponse(allocator, upstream_body.buffered());
     defer allocator.free(completed);
     const converted = try openai_protocol.response(allocator, .responses, public_protocol, completed);
     defer allocator.free(converted);
+    const sample = inference_usage.parseSample(allocator, converted);
     if (!requested_stream) {
         try request.respond(converted, .{
             .status = response.status,
             .keep_alive = false,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return sample;
     }
     var write_buffer: [16 * 1024]u8 = undefined;
     var downstream = try request.respondStreaming(&write_buffer, .{
@@ -73,6 +75,7 @@ pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, credential:
         },
     }
     try downstream.end();
+    return sample;
 }
 
 fn prepareRequest(allocator: std.mem.Allocator, document: []const u8, model_id: []const u8) ![]u8 {

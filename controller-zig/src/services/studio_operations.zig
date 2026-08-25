@@ -50,8 +50,11 @@ pub fn diagnosticsPayload(allocator: std.mem.Allocator, io: Io, configuration: *
         release: []const u8,
         cpu_model: ?[]const u8,
         cpu_cores: usize,
+        cpu_usage_percent: ?f64,
         memory_total: u64,
         memory_free: u64,
+        network_receive_bytes: ?u64,
+        network_transmit_bytes: ?u64,
         gpus: std.json.Value,
         runtime: Runtime,
         disks: []const storage.Disk,
@@ -62,6 +65,7 @@ pub fn diagnosticsPayload(allocator: std.mem.Allocator, io: Io, configuration: *
         storage.inspectDisk(allocator, configuration.data_dir),
         storage.inspectDisk(allocator, models_dir),
     };
+    const network = telemetry.networkCounters(allocator, io);
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try std.json.Stringify.value(Payload{
@@ -72,8 +76,11 @@ pub fn diagnosticsPayload(allocator: std.mem.Allocator, io: Io, configuration: *
         .release = system.release,
         .cpu_model = system.cpu_model,
         .cpu_cores = system.cpu_cores,
+        .cpu_usage_percent = telemetry.cpuUsagePercent(allocator, io, system.cpu_cores),
         .memory_total = system.memory_total_bytes,
         .memory_free = telemetry.availableMemoryBytes(allocator, io, system.memory_total_bytes),
+        .network_receive_bytes = if (network) |sample| sample.receive_bytes else null,
+        .network_transmit_bytes = if (network) |sample| sample.transmit_bytes else null,
         .gpus = gpus.value,
         .runtime = .{
             .vllm_installed = vllm_installed,

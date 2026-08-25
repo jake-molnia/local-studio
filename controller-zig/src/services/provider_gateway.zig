@@ -1,10 +1,11 @@
 const std = @import("std");
 const openai_protocol = @import("openai_protocol.zig");
 const provider_settings = @import("../repository/provider_settings.zig");
+const inference_usage = @import("../repository/inference_usage.zig");
 
 const max_response_bytes = 64 * 1024 * 1024;
 
-pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, provider: *const provider_settings.Provider, public_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !void {
+pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, provider: *const provider_settings.Provider, public_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !?inference_usage.Sample {
     const upstream_protocol: openai_protocol.Protocol = switch (provider.protocol) {
         .auto => public_protocol,
         .chat_completions => .chat_completions,
@@ -13,7 +14,7 @@ pub fn serveTranslated(allocator: std.mem.Allocator, client: *std.http.Client, p
     return serve(allocator, client, provider.base_url, provider.api_key, public_protocol, upstream_protocol, payload, requested_stream, request);
 }
 
-pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, base_url: []const u8, api_key: []const u8, public_protocol: openai_protocol.Protocol, upstream_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !void {
+pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, base_url: []const u8, api_key: []const u8, public_protocol: openai_protocol.Protocol, upstream_protocol: openai_protocol.Protocol, payload: []const u8, requested_stream: bool, request: *std.http.Server.Request) !?inference_usage.Sample {
     const translated = if (upstream_protocol == public_protocol) try allocator.dupe(u8, payload) else try openai_protocol.request(allocator, public_protocol, upstream_protocol, payload);
     defer allocator.free(translated);
     const upstream_payload = try forceNonStreaming(allocator, translated);
@@ -50,17 +51,18 @@ pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, base_url: [
             .keep_alive = false,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return null;
     }
     const converted = if (upstream_protocol == public_protocol) try allocator.dupe(u8, body.buffered()) else try openai_protocol.response(allocator, upstream_protocol, public_protocol, body.buffered());
     defer allocator.free(converted);
+    const sample = inference_usage.parseSample(allocator, converted);
     if (!requested_stream) {
         try request.respond(converted, .{
             .status = response.status,
             .keep_alive = false,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
-        return;
+        return sample;
     }
     var write_buffer: [16 * 1024]u8 = undefined;
     var downstream = try request.respondStreaming(&write_buffer, .{
@@ -83,6 +85,7 @@ pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, base_url: [
         .responses => try downstream.writer.print("event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{s}}}\n\n", .{converted}),
     }
     try downstream.end();
+    return sample;
 }
 
 fn forceNonStreaming(allocator: std.mem.Allocator, document: []const u8) ![]u8 {

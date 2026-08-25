@@ -81,6 +81,106 @@ pub fn availableMemoryBytes(allocator: std.mem.Allocator, io: Io, fallback: u64)
     return availableMemory(allocator, io, fallback);
 }
 
+pub fn cpuUsagePercent(allocator: std.mem.Allocator, io: Io, cpu_cores: usize) ?f64 {
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "ps", "-A", "-o", "%cpu=" },
+        .stdout_limit = .limited(2 * 1024 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = Io.Duration.fromSeconds(2) } },
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!processSucceeded(result.term)) return null;
+    var total: f64 = 0;
+    var values = std.mem.tokenizeAny(u8, result.stdout, " \t\r\n");
+    while (values.next()) |value| total += std.fmt.parseFloat(f64, value) catch 0;
+    const cores: f64 = @floatFromInt(@max(cpu_cores, 1));
+    return @min(@max(total / cores, 0), 100);
+}
+
+pub const NetworkCounters = struct {
+    receive_bytes: u64,
+    transmit_bytes: u64,
+};
+
+pub fn networkCounters(allocator: std.mem.Allocator, io: Io) ?NetworkCounters {
+    return switch (builtin.os.tag) {
+        .linux => linuxNetworkCounters(allocator, io),
+        .macos => macosNetworkCounters(allocator, io),
+        else => null,
+    };
+}
+
+fn linuxNetworkCounters(allocator: std.mem.Allocator, io: Io) ?NetworkCounters {
+    const document = Io.Dir.cwd().readFileAlloc(io, "/proc/net/dev", allocator, .limited(1024 * 1024)) catch return null;
+    defer allocator.free(document);
+    var counters = NetworkCounters{ .receive_bytes = 0, .transmit_bytes = 0 };
+    var lines = std.mem.splitScalar(u8, document, '\n');
+    while (lines.next()) |line| {
+        const separator = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const name = std.mem.trim(u8, line[0..separator], " \t");
+        if (std.mem.eql(u8, name, "lo")) continue;
+        var fields = std.mem.tokenizeAny(u8, line[separator + 1 ..], " \t");
+        var index: usize = 0;
+        while (fields.next()) |field| : (index += 1) {
+            if (index == 0) counters.receive_bytes +|= std.fmt.parseInt(u64, field, 10) catch 0;
+            if (index == 8) counters.transmit_bytes +|= std.fmt.parseInt(u64, field, 10) catch 0;
+        }
+    }
+    return counters;
+}
+
+fn macosNetworkCounters(allocator: std.mem.Allocator, io: Io) ?NetworkCounters {
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "netstat", "-ibn" },
+        .stdout_limit = .limited(4 * 1024 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = Io.Duration.fromSeconds(2) } },
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!processSucceeded(result.term)) return null;
+    var totals = std.StringHashMap(NetworkCounters).init(allocator);
+    defer totals.deinit();
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (lines.next()) |line| {
+        var fields = std.mem.tokenizeAny(u8, line, " \t");
+        const name = fields.next() orelse continue;
+        if (std.mem.eql(u8, name, "Name") or std.mem.eql(u8, name, "lo0")) continue;
+        var values: [10][]const u8 = undefined;
+        var count: usize = 0;
+        values[count] = name;
+        count += 1;
+        while (fields.next()) |field| {
+            if (count >= values.len) break;
+            values[count] = field;
+            count += 1;
+        }
+        if (count < 10) continue;
+        const receive = std.fmt.parseInt(u64, values[count - 4], 10) catch continue;
+        const transmit = std.fmt.parseInt(u64, values[count - 1], 10) catch continue;
+        const entry = totals.getOrPut(name) catch return null;
+        if (!entry.found_existing) entry.value_ptr.* = .{ .receive_bytes = receive, .transmit_bytes = transmit } else {
+            entry.value_ptr.receive_bytes = @max(entry.value_ptr.receive_bytes, receive);
+            entry.value_ptr.transmit_bytes = @max(entry.value_ptr.transmit_bytes, transmit);
+        }
+    }
+    var counters = NetworkCounters{ .receive_bytes = 0, .transmit_bytes = 0 };
+    var iterator = totals.valueIterator();
+    while (iterator.next()) |value| {
+        counters.receive_bytes +|= value.receive_bytes;
+        counters.transmit_bytes +|= value.transmit_bytes;
+    }
+    return counters;
+}
+
+fn processSucceeded(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
 pub fn devicePayload(allocator: std.mem.Allocator, io: Io, system: *const system_info.Snapshot) ![]u8 {
     var collection = try collect(allocator, io, system);
     defer collection.deinit();

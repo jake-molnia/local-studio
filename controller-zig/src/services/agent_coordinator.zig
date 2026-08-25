@@ -48,12 +48,13 @@ pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
     }, 0..) |descriptor, index| {
         if (index > 0) try output.writer.writeByte(',');
         const node_count = try harness_nodes.count(allocator, io, database, descriptor.id);
+        const available = std.mem.eql(u8, descriptor.id, "chat") or node_count > 0;
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(descriptor.id, .{}, &output.writer);
         try output.writer.writeAll(",\"name\":");
         try std.json.Stringify.value(descriptor.name, .{}, &output.writer);
         try output.writer.writeAll(",\"status\":");
-        try std.json.Stringify.value(if (node_count > 0) "available" else "missing", .{}, &output.writer);
+        try std.json.Stringify.value(if (available) "available" else "missing", .{}, &output.writer);
         try output.writer.print(",\"selectable\":{}", .{descriptor.selectable});
         try output.writer.writeAll(",\"transport\":");
         try std.json.Stringify.value(descriptor.transport, .{}, &output.writer);

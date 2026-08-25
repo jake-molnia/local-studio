@@ -155,8 +155,11 @@ export interface StudioDiagnostics {
   release: string;
   cpu_model: string | null;
   cpu_cores: number;
+  cpu_usage_percent: number | null;
   memory_total: number;
   memory_free: number;
+  network_receive_bytes: number | null;
+  network_transmit_bytes: number | null;
   gpus: GPU[];
   runtime: {
     vllm_installed: boolean;

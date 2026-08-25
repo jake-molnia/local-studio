@@ -62,6 +62,7 @@ const compute_lifecycle = @import("services/compute_lifecycle.zig");
 const recipes = @import("repository/recipes.zig");
 const peak_metrics = @import("repository/peak_metrics.zig");
 const downloads = @import("repository/downloads.zig");
+const inference_usage = @import("repository/inference_usage.zig");
 const sqlite = @import("repository/sqlite.zig");
 const system_info = @import("platform/system_info.zig");
 const topology = @import("topology.zig");
@@ -1256,6 +1257,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const models_dir = try studio.modelsDirectory(allocator, io);
         defer allocator.free(models_dir);
         const response = try studio_operations.diagnosticsPayload(allocator, io, configuration, models_dir, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/usage") and request.head.method == .GET) {
+        const response = try inference_usage.payload(allocator, io, database);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -2930,7 +2937,8 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
+        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, model_id, "openai-codex", sample, requested_stream);
         return false;
     }
     const openrouter_prefix = "openrouter/";
@@ -2943,7 +2951,8 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         defer allocator.free(rewritten);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
-        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, public_protocol, .chat_completions, rewritten, requested_stream, request) catch return false;
+        const sample = provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, public_protocol, .chat_completions, rewritten, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, model_id, "openrouter", sample, requested_stream);
         return false;
     }
     const cursor_prefix = "cursor/";
@@ -2953,7 +2962,8 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Head");
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, request.head.target, "/v1/responses")) .responses else .chat_completions;
-        cursor_gateway.serve(allocator, io, configuration, public_protocol, upstream_model, inference_body, requested_stream, request) catch return false;
+        const sample = cursor_gateway.serve(allocator, io, configuration, public_protocol, upstream_model, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, model_id, "cursor", sample, requested_stream);
         return false;
     }
 
@@ -2970,7 +2980,8 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
             .responses => public_protocol != .responses,
         };
         if (requires_translation) {
-            provider_gateway.serveTranslated(allocator, client, provider_route.provider, public_protocol, rewritten, requested_stream, request) catch return false;
+            const sample = provider_gateway.serveTranslated(allocator, client, provider_route.provider, public_protocol, rewritten, requested_stream, request) catch return false;
+            persistInferenceUsage(io, database, model_id, provider_route.provider.id, sample, requested_stream);
         } else {
             reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten, &captured, request, if (requested_stream) "text/event-stream" else "application/json", false) catch return false;
         }
@@ -3073,7 +3084,8 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, inference_body, requested_stream, request) catch return false;
+        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, .chat_completions, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_provider_model, "openai-codex", sample, requested_stream);
         return false;
     }
     const openrouter_prefix = "openrouter/";
@@ -3085,7 +3097,8 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         const rewritten = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
         defer allocator.free(rewritten);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .chat_completions, .chat_completions, rewritten, requested_stream, request) catch return false;
+        const sample = provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .chat_completions, .chat_completions, rewritten, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_provider_model, "openrouter", sample, requested_stream);
         return false;
     }
     const cursor_prefix = "cursor/";
@@ -3094,7 +3107,8 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_provider_model);
         if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Standalone node");
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        cursor_gateway.serve(allocator, io, configuration, .chat_completions, upstream_model, inference_body, requested_stream, request) catch return false;
+        const sample = cursor_gateway.serve(allocator, io, configuration, .chat_completions, upstream_model, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_provider_model, "cursor", sample, requested_stream);
         return false;
     }
     var snapshot = try provider_service.loadSnapshot(allocator, io, studio, configuration.data_dir);
@@ -3104,7 +3118,8 @@ fn serveLocalChat(allocator: std.mem.Allocator, io: Io, configuration: *const Co
         defer allocator.free(rewritten_provider);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         if (provider_route.provider.protocol == .responses) {
-            provider_gateway.serveTranslated(allocator, client, provider_route.provider, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+            const sample = provider_gateway.serveTranslated(allocator, client, provider_route.provider, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+            persistInferenceUsage(io, database, requested_provider_model, provider_route.provider.id, sample, requested_stream);
         } else {
             reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, if (requested_stream) "text/event-stream" else "application/json", false) catch return false;
         }
@@ -3192,7 +3207,8 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch return false;
+        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_model, "openai-codex", sample, requested_stream);
         return false;
     }
     const openrouter_prefix = "openrouter/";
@@ -3204,7 +3220,8 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         const rewritten_provider = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
         defer allocator.free(rewritten_provider);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .responses, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+        const sample = provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, .responses, .chat_completions, rewritten_provider, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_model, "openrouter", sample, requested_stream);
         return false;
     }
     const cursor_prefix = "cursor/";
@@ -3213,7 +3230,8 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, requested_model);
         if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Standalone node");
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        cursor_gateway.serve(allocator, io, configuration, .responses, upstream_model, inference_body, requested_stream, request) catch return false;
+        const sample = cursor_gateway.serve(allocator, io, configuration, .responses, upstream_model, inference_body, requested_stream, request) catch return false;
+        persistInferenceUsage(io, database, requested_model, "cursor", sample, requested_stream);
         return false;
     }
 
@@ -3224,7 +3242,8 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         defer allocator.free(rewritten_provider);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         if (protocol == .responses and provider_route.provider.protocol == .chat_completions) {
-            provider_gateway.serveTranslated(allocator, client, provider_route.provider, .responses, rewritten_provider, requested_stream, request) catch return false;
+            const sample = provider_gateway.serveTranslated(allocator, client, provider_route.provider, .responses, rewritten_provider, requested_stream, request) catch return false;
+            persistInferenceUsage(io, database, requested_model, provider_route.provider.id, sample, requested_stream);
         } else {
             reverse_proxy.serveProviderBuffered(allocator, client, provider_route.provider.base_url, provider_route.provider.api_key, rewritten_provider, &captured, request, if (requested_stream) "text/event-stream" else "application/json", protocol == .messages) catch return false;
         }
@@ -3264,6 +3283,13 @@ fn respondInvalidProtocolBody(request: *http.Server.Request, protocol: LocalProt
         .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
     });
     return request.head.keep_alive;
+}
+
+fn persistInferenceUsage(io: Io, database: *sqlite.Database, model: []const u8, provider: []const u8, sample: ?inference_usage.Sample, streamed: bool) void {
+    const value = sample orelse return;
+    inference_usage.record(database, io, model, "provider", provider, null, value, null, 200, streamed) catch |failure| {
+        std.log.err("inference usage record failed: {t}", .{failure});
+    };
 }
 
 const TokenizationProtocol = enum {
