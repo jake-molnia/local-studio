@@ -131,11 +131,6 @@ fn skillRoots(allocator: std.mem.Allocator, configuration: *const config.Config)
     var roots: std.ArrayList(Root) = .empty;
     errdefer deinitRoots(allocator, &roots);
     const home = configuration.environment.get("HOME") orelse return error.HomeDirectoryUnavailable;
-    if (configuration.environment.get("LOCAL_STUDIO_RESOURCES_PATH")) |resources| {
-        try appendRoot(allocator, &roots, "Local Studio", &.{ resources, "desktop", "resources", "plugins" });
-    } else if (configuration.environment.get("PWD")) |cwd| {
-        try appendRoot(allocator, &roots, "Local Studio", &.{ cwd, "frontend", "desktop", "resources", "plugins" });
-    }
     const entries = [_]struct { source: []const u8, parts: []const []const u8 }{
         .{ .source = "~/.claude", .parts = &.{ home, ".claude", "skills" } },
         .{ .source = "~/.claude", .parts = &.{ home, ".claude", "plugins", "cache" } },
