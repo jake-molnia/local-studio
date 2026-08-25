@@ -1,7 +1,7 @@
 const std = @import("std");
-const recipe_repository = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const storage = @import("storage.zig");
+const recipe_repository = @import("../recipes/store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const storage = @import("../../system/storage.zig");
 
 const Recipe = struct {
     id: []u8,

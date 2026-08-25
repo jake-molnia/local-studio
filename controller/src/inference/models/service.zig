@@ -1,8 +1,8 @@
 const std = @import("std");
-const instances = @import("../repository/instances.zig");
-const recipes = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const processes = @import("processes.zig");
+const instances = @import("../runtime/instance_store.zig");
+const recipes = @import("../recipes/store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const processes = @import("../runtime/processes.zig");
 
 const vision_patterns = [_][]const u8{
     "mimo-v2.5", "mimo-v2-5", "step-3.7", "step-3_7", "step-3-7", "nex-n2", "gemma-4", "gemma4", "llava", "internvl", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "qwen-omni", "pixtral", "minicpm-v", "molmo", "phi-3.5-v", "phi-3-vision", "phi-4-mm", "phi-4-multimodal", "llama-3.2-vision", "llama-4", "deepseek-vl", "idefics", "ovis", "moondream", "fuyu", "kosmos", "-vl-", "-vlm", "vision", "multimodal", "-mm-",

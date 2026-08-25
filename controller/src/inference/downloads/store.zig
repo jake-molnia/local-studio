@@ -1,5 +1,5 @@
 const std = @import("std");
-const sqlite = @import("sqlite.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 const max_record_bytes = 8 * 1024 * 1024;
 const max_files = 100_000;

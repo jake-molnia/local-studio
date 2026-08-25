@@ -1,8 +1,8 @@
 const std = @import("std");
-const model_service = @import("models.zig");
-const repository = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const serializer = @import("recipe_serializer.zig");
+const model_service = @import("../models/service.zig");
+const repository = @import("store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const serializer = @import("serializer.zig");
 
 pub fn listPayload(allocator: std.mem.Allocator, io: std.Io, database: *sqlite.Database, column: repository.PayloadColumn, llm_instance_path: []const u8, default_trust_remote_code: bool) ![]u8 {
     const active_id = try model_service.activeRecipeId(allocator, io, database, column, llm_instance_path);

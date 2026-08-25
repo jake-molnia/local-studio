@@ -1,10 +1,10 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const downloads = @import("../repository/downloads.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const huggingface = @import("huggingface_downloads.zig");
-const records = @import("download_records.zig");
-const download_targets = @import("download_targets.zig");
+const config_module = @import("../../app/config.zig");
+const downloads = @import("store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const huggingface = @import("huggingface.zig");
+const records = @import("records.zig");
+const download_targets = @import("targets.zig");
 
 const Io = std.Io;
 const max_active_downloads = 8;

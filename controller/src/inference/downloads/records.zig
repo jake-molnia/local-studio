@@ -1,7 +1,7 @@
 const std = @import("std");
-const downloads = @import("../repository/downloads.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const huggingface = @import("huggingface_downloads.zig");
+const downloads = @import("store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const huggingface = @import("huggingface.zig");
 
 const Io = std.Io;
 
