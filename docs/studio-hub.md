@@ -137,13 +137,13 @@ Run each controller with its own data and model directories. The Head must bind 
 LOCAL_STUDIO_CONTROLLER_MODE=worker \
 LOCAL_STUDIO_PORT=8081 \
 LOCAL_STUDIO_DATA_DIR="$PWD/.local-studio-worker" \
-bun --cwd controller run start
+./controller/zig-out/bin/local-studio-controller
 
 LOCAL_STUDIO_CONTROLLER_MODE=head \
 LOCAL_STUDIO_HOST=0.0.0.0 \
 LOCAL_STUDIO_PORT=8080 \
 LOCAL_STUDIO_DATA_DIR="$PWD/.local-studio-head" \
-bun --cwd controller run start
+./controller/zig-out/bin/local-studio-controller
 ```
 
 Connect the desktop to the Head URL. In Configure → Machines, add each Worker using its controller address and optional API key. Select a Worker in the Configure header before using model lifecycle, downloads, settings, metrics, events, or logs. The chat model picker remains Worker-free and the Head returns `model_not_running` until a selected Worker has explicitly launched a recipe for that model.

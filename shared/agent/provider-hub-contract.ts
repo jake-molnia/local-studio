@@ -8,4 +8,4 @@ export type {
   ProviderLoginStartResponse,
   ProviderView,
   ProvidersResponse,
-} from "../../controller/contracts/provider-auth";
+} from "../../contracts/provider-auth";
