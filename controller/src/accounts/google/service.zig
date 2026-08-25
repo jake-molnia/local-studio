@@ -1,9 +1,9 @@
 const std = @import("std");
-const repository = @import("../repository/google_accounts.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const agent_connectors = @import("agent_connectors.zig");
-const harness_nodes = @import("harness_nodes.zig");
-const node_transport = @import("node_transport.zig");
+const repository = @import("store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const agent_connectors = @import("../../agent/connectors/service.zig");
+const harness_nodes = @import("../../agent/harness/nodes.zig");
+const node_transport = @import("../../topology/node_transport.zig");
 
 const Io = std.Io;
 const http = std.http;

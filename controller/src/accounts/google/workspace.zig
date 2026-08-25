@@ -1,6 +1,6 @@
 const std = @import("std");
-const repository = @import("../repository/google_accounts.zig");
-const mcp_client = @import("mcp_client.zig");
+const repository = @import("store.zig");
+const mcp_client = @import("../../agent/mcp/client.zig");
 
 const Io = std.Io;
 const http = std.http;
