@@ -92,6 +92,10 @@ export function AgentBrowserPanel({
 }: AgentBrowserPanelProps) {
   const tools = useTools();
   const { closeComputerTab, registerComputerTabCloseHandler } = tools;
+  const workspaceToolsEnabled =
+    activeProject?.id !== "chats" &&
+    focusedSession?.projectId !== "chats" &&
+    focusedSession?.harness !== "chat";
   const sideChatScope =
     focusedSession?.piSessionId ??
     focusedSession?.id ??
@@ -110,8 +114,8 @@ export function AgentBrowserPanel({
   const sideChatSession =
     sessions.find((session) => session.id === sideChatSeed.id) ?? sideChatSeed;
   const terminalOwner = useMemo(
-    () => terminalOwnerFor(activeProject, focusedSession),
-    [activeProject, focusedSession],
+    () => (workspaceToolsEnabled ? terminalOwnerFor(activeProject, focusedSession) : null),
+    [activeProject, focusedSession, workspaceToolsEnabled],
   );
   const terminalState = usePersistentTerminalOwners(
     tools.computer.open && tools.computer.tab === "terminal",
@@ -230,7 +234,7 @@ export function AgentBrowserPanel({
       tabIndex={-1}
       onKeyDown={handleComputerKeyDown}
     >
-      {tools.computer.tab === "terminal" ? (
+      {workspaceToolsEnabled && tools.computer.tab === "terminal" ? (
         <TerminalOwnerBar
           terminalState={visibleTerminalState}
           onOpenCurrentTerminal={openTerminalForFocusedSession}
@@ -257,10 +261,11 @@ export function AgentBrowserPanel({
         sessions={sessions}
         sideChatSession={sideChatSession}
         tools={tools}
+        workspaceToolsEnabled={workspaceToolsEnabled}
       />
 
       <PersistentTerminals
-        active={tools.computer.open && tools.computer.tab === "terminal"}
+        active={workspaceToolsEnabled && tools.computer.open && tools.computer.tab === "terminal"}
         activeOwnerKey={visibleTerminalState.activeOwnerKey}
         terminals={terminalState.owners}
       />

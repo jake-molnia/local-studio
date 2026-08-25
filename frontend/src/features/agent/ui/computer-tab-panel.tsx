@@ -67,11 +67,15 @@ type ComputerTabPanelProps = {
   sessions: Session[];
   sideChatSession: Session;
   tools: ToolsContextValue;
+  workspaceToolsEnabled: boolean;
 };
 
 export function ComputerTabPanel(props: ComputerTabPanelProps) {
   const focusedCwd = props.focusedSession?.cwd ?? props.activeProject?.path ?? null;
-  const activeTab = props.tools.computer.tab;
+  const activeTab =
+    !props.workspaceToolsEnabled && ["files", "diff", "terminal"].includes(props.tools.computer.tab)
+      ? "tools"
+      : props.tools.computer.tab;
   if (activeTab !== "terminal") visitedComputerTabs.add(activeTab);
   const panels: Record<ComputerTab, ReactNode> = {
     status: <StatusTab {...props} />,
@@ -249,6 +253,7 @@ function ComputerLauncherPanel({
   onOpenSideChat,
   onOpenTerminal,
   tools,
+  workspaceToolsEnabled,
 }: ComputerTabPanelProps & { activeTab: ComputerTab }) {
   const cards = [
     {
@@ -287,10 +292,13 @@ function ComputerLauncherPanel({
       onClick: onOpenTerminal,
     },
   ] as const;
+  const visibleCards = workspaceToolsEnabled
+    ? cards
+    : cards.filter((card) => !["files", "diff", "terminal"].includes(card.key));
   return (
     <section className="min-h-0 flex-1 overflow-y-auto bg-(--color-panel) px-4 py-4">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-0.5">
-        {cards.map((card) => {
+        {visibleCards.map((card) => {
           const Icon = "icon" in card ? card.icon : null;
           const selected = card.key !== "side-chat" && activeTab === card.key;
           return (

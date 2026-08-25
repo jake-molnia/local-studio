@@ -252,8 +252,8 @@ const WorkspacePane = memo(function WorkspacePane({
         onRenameSession={(tabId, title) => handles.renameTab(view.paneId, tabId, title)}
         onClose={view.canClose ? () => handles.closePane(view.paneId) : undefined}
         onForkSession={() => handles.splitTabIntoNewPane(view.paneId, view.pane.sessionId)}
-        terminalOwner={terminalOwnerFor(view.project, view.session)}
-        onOpenTerminal={() => tools.setComputerTab("terminal")}
+        terminalOwner={chatWorkspace ? null : terminalOwnerFor(view.project, view.session)}
+        onOpenTerminal={chatWorkspace ? undefined : () => tools.setComputerTab("terminal")}
         rightPanelOpen={tools.computer.open}
         onToggleRightPanel={tools.toggleComputerOpen}
         onRegisterHandle={(handle) => handles.registerPaneHandle(view.paneId, handle)}

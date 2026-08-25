@@ -270,6 +270,8 @@ export function ChatPane({
   const router = useRouter();
   const routeProjectId = useSearchParams().get("project");
   const effectiveProjectId = projectId ?? routeProjectId;
+  const chatWorkspace = effectiveProjectId === "chats";
+  const workspaceCwd = chatWorkspace ? "" : cwd;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -287,8 +289,8 @@ export function ChatPane({
   } = useChatPaneDerivedState({ activeTabId, contextWindow, tabs });
   const [terminalView, setTerminalView] = useState(false);
   const terminalSnapshot = usePersistentTerminalOwners(
-    terminalView,
-    terminalView ? terminalOwner : null,
+    terminalView && !chatWorkspace,
+    terminalView && !chatWorkspace ? terminalOwner : null,
   );
   const toggleTerminalView = useCallback(() => {
     setTerminalView((open) => {
@@ -298,7 +300,7 @@ export function ChatPane({
     });
   }, [terminalOwner]);
   useMountSubscription(() => {
-    if (!isFocused) return;
+    if (!isFocused || chatWorkspace) return;
     const onOpenTerminalEvent = (event: Event) => {
       const detail = (event as CustomEvent<OpenTerminalEventDetail>).detail;
       if (!detail?.mountKey) return;
@@ -307,7 +309,7 @@ export function ChatPane({
     };
     window.addEventListener(OPEN_TERMINAL_EVENT, onOpenTerminalEvent);
     return () => window.removeEventListener(OPEN_TERMINAL_EVENT, onOpenTerminalEvent);
-  }, [isFocused]);
+  }, [chatWorkspace, isFocused]);
   const updateTab = onUpdateSession;
   const {
     attachments,
@@ -463,7 +465,11 @@ export function ChatPane({
   const canExport = Boolean(
     activeTab?.messages.some((message) => message.role !== "system" && message.text.trim()),
   );
-  const openTerminalAction = terminalOwner ? toggleTerminalView : onOpenTerminal;
+  const openTerminalAction = chatWorkspace
+    ? undefined
+    : terminalOwner
+      ? toggleTerminalView
+      : onOpenTerminal;
   const applyTemplate = useCallback(
     (row: ComposerPromptTemplateRef) =>
       activeTab ? applyContextRow(activeTab.id, "promptTemplate", row, tools) : Promise.resolve(),
@@ -566,7 +572,7 @@ export function ChatPane({
       attachments,
       browserToolEnabled,
       clearAttachments,
-      cwd,
+      cwd: workspaceCwd,
       engine,
       modelId,
       modelSupportsVision,
@@ -655,7 +661,7 @@ export function ChatPane({
         extensionUiRequest={activeTab?.extensionUiRequest}
         onExtensionUiRespond={handleExtensionUiResponse}
         showHeader={showHeader}
-        terminalView={terminalView}
+        terminalView={terminalView && !chatWorkspace}
         terminalSnapshot={terminalSnapshot}
         header={{
           title: displayedSessionTitle,
@@ -668,7 +674,7 @@ export function ChatPane({
           onRename: renameActiveSession,
           onFork: onForkSession,
           onOpenTerminal: openTerminalAction,
-          terminalOpen: terminalView,
+          terminalOpen: terminalView && !chatWorkspace,
           onExport: exportSession,
           onClose,
           onToggleRightPanel,
@@ -676,20 +682,20 @@ export function ChatPane({
       />
       <ChatTranscript
         composerOnly={composerOnly}
-        terminalView={terminalView}
+        terminalView={terminalView && !chatWorkspace}
         showEmptyPrompt={showEmptyPrompt}
         activeTab={activeTab}
         stickToBottom={stickToBottom}
         setStickToBottom={setStickToBottom}
         running={Boolean(running)}
-        cwd={cwd}
+        cwd={workspaceCwd}
         onForkSession={onForkSession}
         loadEarlierHistory={loadEarlierHistory}
       />
-      <div className={terminalView ? "hidden" : "contents"}>
-        {diffDrawerOpen ? (
+      <div className={terminalView && !chatWorkspace ? "hidden" : "contents"}>
+        {diffDrawerOpen && !chatWorkspace ? (
           <GitDiffDrawer
-            cwd={cwd || null}
+            cwd={workspaceCwd || null}
             gitBranch={gitBranch}
             gitSummary={gitSummary}
             onClose={closeDiffDrawer}
@@ -699,7 +705,7 @@ export function ChatPane({
           <AutomationDrawer
             modelId={modelId}
             modelRouteId={modelRouteId}
-            cwd={cwd}
+            cwd={workspaceCwd}
             prompt={lastUserPrompt}
             onClose={() => setAutomationDrawerOpen(false)}
           />
@@ -711,10 +717,10 @@ export function ChatPane({
           composerDragActive={composerDragActive}
           contextWindow={effectiveContextWindow}
           currentContextTokens={currentContextTokens}
-          cwd={cwd}
+          cwd={workspaceCwd}
           fileInputRef={fileInputRef}
-          gitBranch={gitBranch}
-          gitSummary={gitSummary}
+          gitBranch={chatWorkspace ? null : gitBranch}
+          gitSummary={chatWorkspace ? null : gitSummary}
           input={composerInput}
           mention={mention}
           mentionIndex={mentionIndex}
@@ -737,9 +743,9 @@ export function ChatPane({
             handleComposerKeyDown(event);
           }}
           onComposerPaste={handleComposerPaste}
-          onInitGit={onInitGit}
+          onInitGit={chatWorkspace ? undefined : onInitGit}
           onOpenStatus={openComputerStatus}
-          onOpenDiff={openDiffDrawer}
+          onOpenDiff={chatWorkspace ? () => undefined : openDiffDrawer}
           onRemoveAttachment={removeAttachment}
           onRemoveLoadedContext={removeLoadedContext}
           onSelectMention={(entry) => void handleSelectMention(entry)}
@@ -750,11 +756,11 @@ export function ChatPane({
               tabId={activeTabId}
               piSessionId={activePiSessionId}
               revision={goalRevision}
-              projectName={projectName}
-              cwd={cwd}
-              gitBranch={gitBranch}
-              gitSummary={gitSummary}
-              onInitGit={onInitGit}
+              projectName={chatWorkspace ? null : projectName}
+              cwd={workspaceCwd}
+              gitBranch={chatWorkspace ? null : gitBranch}
+              gitSummary={chatWorkspace ? null : gitSummary}
+              onInitGit={chatWorkspace ? undefined : onInitGit}
               onOpenDiff={openDiffDrawer}
               showProjectRow={composerVisual.showProjectRow}
               open={contextOpen}
@@ -771,6 +777,7 @@ export function ChatPane({
               onToggleBrowserBackend={onToggleBrowserBackend}
               onToggleBrowserTool={onToggleBrowserTool}
               running={Boolean(running)}
+              workspaceToolsEnabled={!chatWorkspace}
               onProjectPicked={handleProjectPicked}
               queueItems={visibleQueueItems}
               onEditQueued={editQueued}

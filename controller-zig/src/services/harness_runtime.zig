@@ -802,13 +802,13 @@ pub const Manager = struct {
             if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
             return session;
         }
-        const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
-        defer if (resolved_cwd) |value| manager.allocator.free(value);
-        const cwd = cwd_value orelse resolved_cwd.?;
-        if (!std.fs.path.isAbsolute(cwd)) return error.CwdMustBeAbsolute;
         const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", harness_kind.name() });
         errdefer manager.allocator.free(session_dir);
         _ = try Io.Dir.cwd().createDirPathStatus(manager.io, session_dir, @enumFromInt(0o700));
+        const resolved_cwd = if (harness_kind != .chat and cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
+        defer if (resolved_cwd) |value| manager.allocator.free(value);
+        const cwd = if (harness_kind == .chat) session_dir else cwd_value orelse resolved_cwd.?;
+        if (!std.fs.path.isAbsolute(cwd)) return error.CwdMustBeAbsolute;
         const log_directory = try std.fs.path.join(manager.allocator, &.{ session_dir, "logs" });
         defer manager.allocator.free(log_directory);
         _ = try Io.Dir.cwd().createDirPathStatus(manager.io, log_directory, @enumFromInt(0o700));

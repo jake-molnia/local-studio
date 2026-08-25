@@ -111,7 +111,7 @@ in
   processes.head-node = {
     exec = ''
       ${portPreflight [ controllerPort ]}
-      node controller-zig/toolchain.mjs build
+      node controller-zig/toolchain.mjs build -Doptimize=ReleaseSafe
       exec ${zigController} --mode head --host 127.0.0.1 --port ${toString controllerPort}
     '';
     env = {

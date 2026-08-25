@@ -38,6 +38,7 @@ const cursor_gateway = @import("services/cursor_gateway.zig");
 const harness_runtime = @import("services/harness_runtime.zig");
 const agent_coordinator = @import("services/agent_coordinator.zig");
 const agent_sessions = @import("services/agent_sessions.zig");
+const session_change = @import("services/session_change.zig");
 const automations = @import("services/automations.zig");
 const head_connection = @import("services/head_connection.zig");
 const agent_enrollments = @import("services/agent_enrollments.zig");
@@ -3772,27 +3773,38 @@ fn serveSessionListChanged(allocator: std.mem.Allocator, io: Io, database: *sqli
         },
     });
     var current = try agent_sessions.fingerprint(allocator, io, database);
+    var current_generation = session_change.current();
     var version: u64 = 0;
     var heartbeat: usize = 0;
     try body.writer.writeAll(": connected v0\n\n");
     try body.writer.flush();
     try body.flush();
     while (true) {
-        try io.sleep(.fromSeconds(1), .awake);
+        try io.sleep(.fromMilliseconds(25), .awake);
         heartbeat += 1;
-        const next = try agent_sessions.fingerprint(allocator, io, database);
-        if (next != current) {
-            current = next;
+        const next_generation = session_change.current();
+        if (next_generation != current_generation) {
+            current_generation = next_generation;
+            current = try agent_sessions.fingerprint(allocator, io, database);
             version += 1;
             heartbeat = 0;
             try body.writer.print("data: {{\"type\":\"session_list_changed\",\"version\":{d}}}\n\n", .{version});
             try body.writer.flush();
             try body.flush();
-        } else if (heartbeat >= 45) {
+        } else if (heartbeat >= 200) {
             heartbeat = 0;
-            try body.writer.writeAll(": keep-alive\n\n");
-            try body.writer.flush();
-            try body.flush();
+            const next = try agent_sessions.fingerprint(allocator, io, database);
+            if (next != current) {
+                current = next;
+                version += 1;
+                try body.writer.print("data: {{\"type\":\"session_list_changed\",\"version\":{d}}}\n\n", .{version});
+                try body.writer.flush();
+                try body.flush();
+            } else {
+                try body.writer.writeAll(": keep-alive\n\n");
+                try body.writer.flush();
+                try body.flush();
+            }
         }
     }
 }

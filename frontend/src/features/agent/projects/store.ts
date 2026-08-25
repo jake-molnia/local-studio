@@ -1,6 +1,11 @@
 import { SESSIONS_CHANGED_EVENT } from "@/lib/workspace-events";
 import * as defaultApi from "@/features/agent/projects/api";
-import type { GitSummary, Project, ProjectId } from "@/features/agent/projects/types";
+import {
+  CHATS_PROJECT_ID,
+  type GitSummary,
+  type Project,
+  type ProjectId,
+} from "@/features/agent/projects/types";
 
 export type ProjectsSnapshot = {
   projects: Project[];
@@ -138,7 +143,7 @@ export function createProjectsStore(dependencies: ProjectsStoreDependencies = {}
     refresh,
     selectProject: (project) => {
       setSelectedId(project?.id ?? null);
-      loadGitSummaryOnce(project?.path ?? "");
+      loadGitSummaryOnce(project?.id === CHATS_PROJECT_ID ? "" : (project?.path ?? ""));
     },
     upsertProject: (project) => {
       replaceProjects([project, ...snapshot.projects.filter((entry) => entry.id !== project.id)]);
@@ -187,6 +192,7 @@ function resolveSelectedProjectId(
 }
 
 function projectPathById(projects: readonly Project[], projectId: ProjectId | null): string {
+  if (projectId === CHATS_PROJECT_ID) return "";
   return projects.find((project) => project.id === projectId)?.path ?? "";
 }
 

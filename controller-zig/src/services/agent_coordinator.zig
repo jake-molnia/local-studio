@@ -9,6 +9,7 @@ const harness_runtime = @import("harness_runtime.zig");
 const harness_session_id = @import("harness_session_id.zig");
 const node_transport = @import("node_transport.zig");
 const agent_goal_driver = @import("agent_goal_driver.zig");
+const session_change = @import("session_change.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -495,6 +496,7 @@ fn lockedSave(_: std.mem.Allocator, io: Io, database: *sqlite.Database, input: r
     try database.lock(io);
     defer database.unlock(io);
     try records.save(database, input);
+    session_change.notify();
 }
 
 fn lockedEnqueue(io: Io, database: *sqlite.Database, command_id: []const u8, session_id: []const u8, kind: []const u8, document: []const u8) !void {
@@ -507,6 +509,7 @@ fn lockedTranscript(io: Io, database: *sqlite.Database, session_id: []const u8, 
     try database.lock(io);
     defer database.unlock(io);
     try records.appendTranscript(database, session_id, source_key, document);
+    session_change.notify();
 }
 
 fn lockedHasTranscript(io: Io, database: *sqlite.Database, session_id: []const u8) !bool {

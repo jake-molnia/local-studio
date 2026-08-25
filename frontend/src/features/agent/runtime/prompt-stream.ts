@@ -258,7 +258,7 @@ function promptTurnRequest(
     message: args.prompt,
     images: args.images,
     cwd:
-      context.selected.harness === "fx"
+      context.selected.harness === "chat" || context.selected.harness === "fx"
         ? undefined
         : (context.selected.cwd || deps.cwd).trim() || undefined,
     piSessionId:

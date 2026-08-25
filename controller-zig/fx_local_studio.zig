@@ -57,9 +57,16 @@ const agent_stream_provider = stream_provider.Provider{
     .stream_fn = streamCompletion,
 };
 
+var gateway_client: ?std.http.Client = null;
+
 pub fn run(init: std.process.Init) !void {
     io_mod.setIo(init.io);
     io_mod.setEnvironMap(init.environ_map);
+    gateway_client = .{ .allocator = init.gpa, .io = init.io };
+    defer {
+        gateway_client.?.deinit();
+        gateway_client = null;
+    }
     const api_key = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_API_KEY", "AI_GATEWAY_API_KEY" }) orelse return error.FxCredentialRequired;
     const model = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_MODEL", "FX_MODEL" }) orelse builtin_gateway.default_model;
     const gateway_url = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_GATEWAY_URL", builtin_gateway.chat_url_env }) orelse return error.FxGatewayRequired;
@@ -112,8 +119,7 @@ fn streamCompletion(_: ?*anyopaque, allocator: std.mem.Allocator, request: strea
     const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{request.credential.secret});
     defer allocator.free(authorization);
     const uri = try std.Uri.parse(endpoint);
-    var client: std.http.Client = .{ .allocator = allocator, .io = io_mod.getIo() };
-    defer client.deinit();
+    const client = if (gateway_client) |*value| value else return error.FxGatewayUnavailable;
     try request.admission.admit();
     var http_request = try client.request(.POST, uri, .{
         .headers = .{
@@ -122,7 +128,7 @@ fn streamCompletion(_: ?*anyopaque, allocator: std.mem.Allocator, request: strea
             .accept_encoding = .omit,
         },
         .extra_headers = &.{.{ .name = "Accept", .value = "text/event-stream" }},
-        .keep_alive = false,
+        .keep_alive = true,
         .redirect_behavior = .unhandled,
     });
     defer http_request.deinit();

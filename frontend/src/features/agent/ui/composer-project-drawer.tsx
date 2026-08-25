@@ -79,6 +79,7 @@ export function ComposerProjectDrawer({
   onToggleBrowserBackend,
   onToggleBrowserTool,
   contextTriggerRef,
+  workspaceToolsEnabled = true,
 }: {
   piSessionId: string | null;
   revision: number;
@@ -103,6 +104,7 @@ export function ComposerProjectDrawer({
   onToggleBrowserBackend: () => void;
   onToggleBrowserTool: () => void;
   contextTriggerRef: RefObject<HTMLButtonElement | null>;
+  workspaceToolsEnabled?: boolean;
 }) {
   const projects = useProjects();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -398,6 +400,7 @@ export function ComposerProjectDrawer({
                     }}
                     onToggleBrowserBackend={onToggleBrowserBackend}
                     onToggleBrowserTool={onToggleBrowserTool}
+                    workspaceToolsEnabled={workspaceToolsEnabled}
                   />
                 ) : null}
                 {view === "goal" ? (
@@ -486,6 +489,7 @@ function ContextMenuRoot({
   onInitGit,
   onToggleBrowserBackend,
   onToggleBrowserTool,
+  workspaceToolsEnabled,
 }: {
   query: string;
   projectLabel: string;
@@ -503,6 +507,7 @@ function ContextMenuRoot({
   onInitGit: () => void;
   onToggleBrowserBackend: () => void;
   onToggleBrowserTool: () => void;
+  workspaceToolsEnabled: boolean;
 }) {
   const actions = [
     ...(canAttach
@@ -553,17 +558,21 @@ function ContextMenuRoot({
           },
         ]
       : []),
-    {
-      key: "project",
-      label: "Project",
-      detail: projectLabel,
-      icon: <FolderOpen className="h-3.5 w-3.5" />,
-      onClick: onProjects,
-      disabled: !canPickProject,
-      drillIn: true,
-      group: "workspace",
-    },
-    ...(gitSummary
+    ...(workspaceToolsEnabled
+      ? [
+          {
+            key: "project",
+            label: "Project",
+            detail: projectLabel,
+            icon: <FolderOpen className="h-3.5 w-3.5" />,
+            onClick: onProjects,
+            disabled: !canPickProject,
+            drillIn: true,
+            group: "workspace",
+          },
+        ]
+      : []),
+    ...(workspaceToolsEnabled && gitSummary
       ? [
           gitSummary.isRepo
             ? {
@@ -588,7 +597,7 @@ function ContextMenuRoot({
               },
         ]
       : []),
-    ...(gitSummary?.isRepo
+    ...(workspaceToolsEnabled && gitSummary?.isRepo
       ? [
           {
             key: "changes",

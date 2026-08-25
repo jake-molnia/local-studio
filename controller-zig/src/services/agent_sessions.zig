@@ -1,6 +1,7 @@
 const std = @import("std");
 const records = @import("../repository/agent_control.zig");
 const sqlite = @import("../repository/sqlite.zig");
+const session_change = @import("session_change.zig");
 
 const Io = std.Io;
 
@@ -56,6 +57,7 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
         .sharing_policy = sharing,
         .automation_id = optionalString(object, "automation_id"),
     });
+    session_change.notify();
     var saved = (try records.get(allocator, database, session_id)) orelse return error.SessionNotFound;
     defer saved.deinit();
     var output: Io.Writer.Allocating = .init(allocator);
@@ -133,6 +135,7 @@ pub fn archivePayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
         .sharing_policy = session.sharing_policy,
         .automation_id = session.automation_id,
     });
+    session_change.notify();
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"session\":{\"id\":");
@@ -154,7 +157,9 @@ pub fn transcriptResponse(allocator: std.mem.Allocator, session: *const records.
     try output.writer.writeAll("{\"events\":");
     try std.json.Stringify.value(entries, .{}, &output.writer);
     try output.writer.writeAll(",\"cursor\":null,\"meta\":{\"cwd\":");
-    if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    if (!std.mem.eql(u8, session.harness, "chat")) {
+        if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    } else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"modelRouteId\":");
@@ -171,10 +176,11 @@ pub fn transcriptResponse(allocator: std.mem.Allocator, session: *const records.
 
 fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session, first_message: ?[]const u8) !void {
     const archived = std.mem.eql(u8, session.status, "archived");
+    const project_path = if (std.mem.eql(u8, session.harness, "chat")) "" else session.project_path orelse "";
     try writer.writeAll("{\"id\":");
     try std.json.Stringify.value(if (std.mem.eql(u8, session.harness, "fx")) session.id else session.native_session_id orelse session.id, .{}, writer);
     try writer.writeAll(",\"filename\":\"\",\"cwd\":");
-    try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
+    try std.json.Stringify.value(project_path, .{}, writer);
     try writer.writeAll(",\"startedAt\":");
     try std.json.Stringify.value(session.created_at, .{}, writer);
     try writer.writeAll(",\"updatedAt\":");
@@ -194,7 +200,7 @@ fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session, firs
     try writer.writeAll(",\"projectName\":");
     try std.json.Stringify.value(session.project_id orelse "", .{}, writer);
     try writer.writeAll(",\"projectPath\":");
-    try std.json.Stringify.value(session.project_path orelse "", .{}, writer);
+    try std.json.Stringify.value(project_path, .{}, writer);
     try writer.writeByte('}');
 }
 
@@ -234,7 +240,9 @@ fn writeMetadata(writer: *Io.Writer, session: *const records.Session) !void {
     try writer.writeAll(",\"project_id\":");
     if (session.project_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll(",\"project_name\":null,\"project_path\":");
-    if (session.project_path) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    if (!std.mem.eql(u8, session.harness, "chat")) {
+        if (session.project_path) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    } else try writer.writeAll("null");
     try writer.writeAll(",\"title\":");
     try std.json.Stringify.value(session.id, .{}, writer);
     try writer.writeAll(",\"last_message_preview\":null,\"status\":");
