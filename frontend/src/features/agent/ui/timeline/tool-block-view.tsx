@@ -193,10 +193,7 @@ function ShellBlock({
         failed ? "border-(--err)/35" : "border-(--border)"
       }`}
     >
-      <PreviewScroll
-        height={height}
-        className="px-3 py-2.5 font-mono text-[length:var(--fs-sm)] leading-[1.6]"
-      >
+      <div className="px-3 py-2.5 font-mono text-[length:var(--fs-sm)] leading-[1.6]">
         <div className="flex items-start gap-2">
           <span
             className={`select-none ${failed ? "text-(--err)" : "text-(--color-terminal-green)"}`}
@@ -207,10 +204,14 @@ function ShellBlock({
             {command}
           </span>
         </div>
-        {trimmedOutput ? (
-          <pre className="mt-2 whitespace-pre-wrap break-words text-(--fg)/55">{trimmedOutput}</pre>
-        ) : null}
-      </PreviewScroll>
+      </div>
+      {trimmedOutput ? (
+        <PreviewScroll height={height} className="border-t border-(--separator) bg-(--surface)/45">
+          <pre className="whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[length:var(--fs-sm)] leading-[1.6] text-(--fg)/55">
+            {trimmedOutput}
+          </pre>
+        </PreviewScroll>
+      ) : null}
     </div>
   );
 }
@@ -591,9 +592,7 @@ export function ToolBlockView({ block }: { block: ToolBlock }) {
     if (command) {
       return (
         <ToolPreviewHeightProvider kind={kind}>
-          <ToolSummary block={block}>
-            <ShellBlock command={command} output={block.resultText || null} status={block.status} />
-          </ToolSummary>
+          <ShellBlock command={command} output={block.resultText || null} status={block.status} />
         </ToolPreviewHeightProvider>
       );
     }
