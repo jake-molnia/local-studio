@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config = @import("../config.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const agent_projects = @import("agent_projects.zig");
-const harness_nodes = @import("harness_nodes.zig");
-const node_transport = @import("node_transport.zig");
+const config = @import("../../app/config.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const agent_projects = @import("../projects/service.zig");
+const harness_nodes = @import("../harness/nodes.zig");
+const node_transport = @import("../../topology/node_transport.zig");
 
 const Io = std.Io;
 const max_sessions = 64;

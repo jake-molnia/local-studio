@@ -1,6 +1,6 @@
 const std = @import("std");
-const repository = @import("../repository/agent_goals.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const repository = @import("store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 const Io = std.Io;
 
