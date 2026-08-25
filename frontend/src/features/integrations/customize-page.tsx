@@ -3,26 +3,17 @@
 import { useState } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { AppContentColumn, AppPage, SearchInput } from "@/ui";
-import { Boxes, GitBranch, GraduationCap, KeyRound, Plug } from "@/ui/icon-registry";
+import { GraduationCap, KeyRound, Plug } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
 import { AccountsSection } from "./accounts-section";
 import { integrationSectionFromHash, type IntegrationSectionId } from "./integration-navigation";
 import { SkillsSection } from "./skills-section";
-import { CodeStorageAccountsSection } from "./code-storage-accounts-section";
-import { SandboxesSection } from "./sandboxes-section";
 
 const CATEGORIES = [
   { id: "connectors", label: "MCPs", icon: Plug, description: "Servers and tools" },
   { id: "skills", label: "Skills", icon: GraduationCap, description: "Session instructions" },
   { id: "accounts", label: "Accounts", icon: KeyRound, description: "Connected accounts" },
-  {
-    id: "repositories",
-    label: "Repositories",
-    icon: GitBranch,
-    description: "Repository providers",
-  },
-  { id: "sandboxes", label: "Sandboxes", icon: Boxes, description: "Sandbox providers" },
 ] satisfies Array<{
   id: IntegrationSectionId;
   label: string;
@@ -33,8 +24,6 @@ const CATEGORIES = [
 function CustomizeSection({ section, query }: { section: IntegrationSectionId; query: string }) {
   if (section === "connectors") return <ConnectorsSection searchQuery={query} />;
   if (section === "accounts") return <AccountsSection searchQuery={query} />;
-  if (section === "repositories") return <CodeStorageAccountsSection searchQuery={query} />;
-  if (section === "sandboxes") return <SandboxesSection searchQuery={query} />;
   return <SkillsSection searchQuery={query} />;
 }
 
@@ -71,7 +60,7 @@ export function CustomizePage() {
           <SearchInput
             value={query}
             onChange={setQuery}
-            placeholder="Search accounts, repositories, sandboxes, skills, and MCPs..."
+            placeholder="Search accounts, skills, and MCPs..."
             aria-label="Search customize"
             className="w-full [&_input]:h-7 [&_input]:rounded-[5px] [&_input]:bg-(--ui-surface) [&_input]:text-[length:var(--fs-xs)]"
           />

@@ -40,10 +40,12 @@ const decodeAccounts = Schema.decodeUnknownSync(CodeStorageAccountsResponseSchem
 const ACCOUNT_COLUMNS = ["Account", "Organization", "State"] as const;
 const ACCOUNT_MIN_WIDTH = "min-w-[34rem]";
 
-function CodeStorageAccountModal({
+export function CodeStorageAccountModal({
+  accounts = [],
   onClose,
   onChanged,
 }: {
+  accounts?: readonly CodeStorageAccountEntry[];
   onClose: () => void;
   onChanged: (accounts: readonly CodeStorageAccountEntry[]) => void;
 }) {
@@ -53,6 +55,23 @@ function CodeStorageAccountModal({
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const disconnect = async (accountId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requestJson(
+        `${ACCOUNT_URL}?accountId=${encodeURIComponent(accountId)}`,
+        decodeAccounts,
+        { method: "DELETE" },
+      );
+      onChanged(result.accounts);
+    } catch (disconnectError) {
+      setError(disconnectError instanceof Error ? disconnectError.message : "Disconnect failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const connect = async () => {
     setBusy(true);
@@ -98,6 +117,33 @@ function CodeStorageAccountModal({
           receive short-lived, repository-scoped credentials and never receive the private key.
         </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
+        {accounts.length ? (
+          <div className="rounded-md border border-(--ui-separator)">
+            {accounts.map((account) => (
+              <div
+                key={account.id}
+                className="flex items-center gap-3 border-b border-(--ui-separator) px-3 py-2 last:border-b-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[length:var(--fs-sm)] text-(--ui-fg)">
+                    {account.label}
+                  </div>
+                  <div className="truncate font-mono text-[length:var(--fs-xs)] text-(--ui-muted)">
+                    {account.organization}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void disconnect(account.id)}
+                >
+                  Disconnect
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <FormField
           label="Organization"
           description="The lowercase organization from your-org.code.storage."
@@ -218,8 +264,8 @@ export function CodeStorageAccountsSection({ searchQuery = "" }: { searchQuery?:
         </div>
       ) : null}
       <TableSection
-        title="Code.Storage"
-        description="Authenticated repository accounts agents can clone, fetch, list, and push through scoped credentials."
+        title="Repositories"
+        description="Repository accounts agents can clone, fetch, list, and push. Code.Storage is the first available provider."
         actions={
           <div className="flex items-center gap-2">
             <StatusText tone={error ? "warn" : loaded ? "ok" : "dim"}>
@@ -237,11 +283,13 @@ export function CodeStorageAccountsSection({ searchQuery = "" }: { searchQuery?:
           <TableSkeleton columns={ACCOUNT_COLUMNS} rows={1} minWidthClass={ACCOUNT_MIN_WIDTH} />
         ) : visibleAccounts.length === 0 ? (
           <TableNotice
-            title={accounts.length ? "No account matches this search" : "No account connected"}
+            title={
+              accounts.length ? "No account matches this search" : "No repository account connected"
+            }
             body={
               accounts.length
                 ? "Search by account label or organization."
-                : "Connect an organization private key to give agents scoped repository access."
+                : "Connect Code.Storage to give agents scoped repository access."
             }
           />
         ) : (
@@ -318,6 +366,7 @@ export function CodeStorageAccountsSection({ searchQuery = "" }: { searchQuery?:
       </TableSection>
       {open ? (
         <CodeStorageAccountModal
+          accounts={accounts}
           onClose={() => setOpen(false)}
           onChanged={(nextAccounts) => {
             setAccounts(nextAccounts);

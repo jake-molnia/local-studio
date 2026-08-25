@@ -44,14 +44,18 @@ const PROVIDERS: Array<{ id: SandboxProvider; label: string; company: string }> 
 ];
 const COLUMNS = ["Account", "Endpoint", "State"] as const;
 
-function SandboxAccountModal({
+export function SandboxAccountModal({
+  initialProvider,
+  accounts = [],
   onClose,
   onChanged,
 }: {
+  initialProvider?: SandboxProvider;
+  accounts?: readonly SandboxAccountEntry[];
   onClose: () => void;
   onChanged: (accounts: readonly SandboxAccountEntry[]) => void;
 }) {
-  const [provider, setProvider] = useState<SandboxProvider>("modal");
+  const [provider, setProvider] = useState<SandboxProvider>(initialProvider ?? "modal");
   const [label, setLabel] = useState("");
   const [tokenId, setTokenId] = useState("");
   const [tokenSecret, setTokenSecret] = useState("");
@@ -60,6 +64,7 @@ function SandboxAccountModal({
   const [showSecrets, setShowSecrets] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const connected = accounts.filter((account) => account.provider === provider);
   const valid =
     provider === "modal"
       ? tokenId.trim().length > 0 && tokenSecret.trim().length > 0
@@ -91,6 +96,23 @@ function SandboxAccountModal({
     }
   };
 
+  const disconnect = async (accountId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requestJson(
+        `${ACCOUNT_URL}?accountId=${encodeURIComponent(accountId)}`,
+        decodeAccounts,
+        { method: "DELETE" },
+      );
+      onChanged(result.accounts);
+    } catch (disconnectError) {
+      setError(disconnectError instanceof Error ? disconnectError.message : "Disconnect failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <UiModal isOpen onClose={busy ? () => undefined : onClose} maxWidth="max-w-lg">
       <UiModalHeader
@@ -105,9 +127,37 @@ function SandboxAccountModal({
           This stores the login only. Sandbox creation and execution are not enabled yet.
         </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
+        {connected.length ? (
+          <div className="rounded-md border border-(--ui-separator)">
+            {connected.map((account) => (
+              <div
+                key={account.id}
+                className="flex items-center gap-3 border-b border-(--ui-separator) px-3 py-2 last:border-b-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[length:var(--fs-sm)] text-(--ui-fg)">
+                    {account.label}
+                  </div>
+                  <div className="truncate font-mono text-[length:var(--fs-xs)] text-(--ui-muted)">
+                    {account.endpoint}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void disconnect(account.id)}
+                >
+                  Disconnect
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <FormField label="Provider">
           <Select
             value={provider}
+            disabled={Boolean(initialProvider)}
             onChange={(event) => setProvider(event.target.value as SandboxProvider)}
             options={PROVIDERS.map((entry) => ({ value: entry.id, label: entry.label }))}
           />
@@ -249,7 +299,7 @@ export function SandboxesSection({ searchQuery = "" }: { searchQuery?: string } 
     <>
       {error ? <Alert variant="error">{error}</Alert> : null}
       <TableSection
-        title="Sandbox providers"
+        title="Sandboxes"
         description="Stored logins for Modal and Daytona. Runtime abilities will be added separately."
         actions={
           <div className="flex items-center gap-2">
@@ -322,6 +372,7 @@ export function SandboxesSection({ searchQuery = "" }: { searchQuery?: string } 
       </TableSection>
       {open ? (
         <SandboxAccountModal
+          accounts={accounts}
           onClose={() => setOpen(false)}
           onChanged={(next) => {
             setAccounts(next);
