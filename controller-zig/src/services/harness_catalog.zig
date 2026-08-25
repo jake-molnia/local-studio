@@ -107,7 +107,7 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const I
 
 pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
-    if (std.mem.eql(u8, harness, "chat")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"filesystem-free\"]");
+    if (std.mem.eql(u8, harness, "chat")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
     try writer.writeAll("[]");

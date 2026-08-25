@@ -234,7 +234,7 @@ const WorkspacePane = memo(function WorkspacePane({
           />
         )}
         browserToolEnabled={tools.browser.enabled}
-        browserBackend={tools.browser.backend}
+        browserBackend={chatWorkspace ? "embedded" : tools.browser.backend}
         onToggleBrowserBackend={tools.toggleBrowserBackend}
         onToggleBrowserTool={() => {
           if (tools.browser.enabled) {

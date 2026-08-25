@@ -81,7 +81,7 @@ pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
     var emitted = std.StringHashMap(void).init(allocator);
     defer emitted.deinit();
     for (sessions.records) |session| {
-        if (session.project_id) |project_id| if (std.mem.eql(u8, project_id, thread_title_project_id)) continue;
+        if (session.project_id) |session_project_id| if (std.mem.eql(u8, session_project_id, thread_title_project_id)) continue;
         const identity = session.native_session_id orelse session.id;
         if (emitted.contains(identity)) continue;
         var canonical = if (session.native_session_id) |native_session_id| try records.getByNative(allocator, database, native_session_id) else null;

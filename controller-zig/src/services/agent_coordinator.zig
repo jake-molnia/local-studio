@@ -626,7 +626,7 @@ fn validEntryId(value: []const u8) bool {
 
 fn harnessCapabilities(harness: []const u8) []const u8 {
     if (std.mem.eql(u8, harness, "pi")) return "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]";
-    if (std.mem.eql(u8, harness, "chat")) return "[\"persistent-session\",\"cancel\",\"filesystem-free\"]";
+    if (std.mem.eql(u8, harness, "chat")) return "[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]";
     if (std.mem.eql(u8, harness, "fx")) return "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]";
     if (std.mem.eql(u8, harness, "codex")) return "[\"persistent-session\",\"resume\",\"cancel\"]";
     return "[]";

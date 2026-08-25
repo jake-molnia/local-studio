@@ -387,6 +387,7 @@ pub const Manager = struct {
         if (object.get("queueAction") != null) return error.QueueMutationNotSupported;
         const cwd = optionalString(object, "cwd");
         const thinking = optionalString(object, "thinkingLevel");
+        const browser_tool_enabled = optionalBool(object, "browserToolEnabled") orelse false;
         const tool_access = optionalString(object, "toolAccess") orelse "read_only";
         const requested_native_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId") orelse native_session_id;
         const session = if (std.mem.eql(u8, mode, "prompt"))
@@ -405,7 +406,7 @@ pub const Manager = struct {
         const was_active = session.active;
         if (harness_kind == .chat or harness_kind == .fx) {
             if (harness_kind == .chat)
-                try manager.sendChatPrompt(session, message, thinking)
+                try manager.sendChatPrompt(session, message, thinking, browser_tool_enabled)
             else
                 try manager.sendAcpPrompt(session, message);
             session.active = true;
@@ -914,6 +915,10 @@ pub const Manager = struct {
         defer model_route.deinit();
         try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
         try model_route.environment.put("LOCAL_STUDIO_CHAT_SESSION_ID", native_id);
+        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_URL", manager.controller_origin);
+        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_MODEL", model_id);
+        try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_SESSION", session_id);
+        if (manager.controller_api_key) |value| try model_route.environment.put("LOCAL_STUDIO_MCP_BRIDGE_KEY", value);
         var child = try std.process.spawn(manager.io, .{
             .argv = &.{ controller_executable, "chat-runtime" },
             .environ_map = &model_route.environment,
@@ -952,7 +957,7 @@ pub const Manager = struct {
         return session;
     }
 
-    fn sendChatPrompt(manager: *Manager, session: *Session, message: []const u8, thinking: ?[]const u8) !void {
+    fn sendChatPrompt(manager: *Manager, session: *Session, message: []const u8, thinking: ?[]const u8, browser_tool_enabled: bool) !void {
         var document: Io.Writer.Allocating = .init(manager.allocator);
         defer document.deinit();
         try document.writer.writeAll("{\"message\":");
@@ -961,6 +966,7 @@ pub const Manager = struct {
             try document.writer.writeAll(",\"thinkingLevel\":");
             try std.json.Stringify.value(value, .{}, &document.writer);
         }
+        try document.writer.print(",\"browserToolEnabled\":{}", .{browser_tool_enabled});
         try document.writer.writeByte('}');
         try manager.send(session, document.writer.buffered());
     }
@@ -1324,6 +1330,11 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     if (value != .string) return null;
     const trimmed = std.mem.trim(u8, value.string, " \t\r\n");
     return if (trimmed.len > 0) trimmed else null;
+}
+
+fn optionalBool(object: std.json.ObjectMap, name: []const u8) ?bool {
+    const value = object.get(name) orelse return null;
+    return if (value == .bool) value.bool else null;
 }
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

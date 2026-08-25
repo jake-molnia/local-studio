@@ -2,7 +2,7 @@ const std = @import("std");
 const app_module = @import("app.zig");
 const config = @import("config.zig");
 const mcp_ssh = @import("mcp_ssh.zig");
-const mcp_bridge = @import("mcp_bridge.zig");
+const mcp_bridge = @import("mcp_bridge");
 const mcp_code_storage = @import("mcp_code_storage.zig");
 const fx = @import("fx");
 

@@ -564,6 +564,7 @@ export function ChatPane({
     useChatPaneSendFlow({
       activeTab,
       attachments,
+      browserBackend,
       browserToolEnabled,
       clearAttachments,
       cwd: workspaceCwd,

@@ -28,7 +28,7 @@ pub fn run(init: std.process.Init) !void {
     }
 }
 
-fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, session_id: []const u8, document: []const u8) ![]u8 {
+pub fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, session_id: []const u8, document: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpRequest;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidMcpRequest;
@@ -81,7 +81,7 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
     errdefer output.deinit();
     try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try std.json.Stringify.value(id, .{}, &output.writer);
-    try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser__navigate\",\"description\":\"Open a public or localhost HTTP URL in the Local Studio browser and return its title and resolved URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser__get_text\",\"description\":\"Read the visible text from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser__get_html\",\"description\":\"Read HTML from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser__get_url\",\"description\":\"Return the URL currently associated with this Local Studio chat browser session\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
+    try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser_navigate\",\"description\":\"Open a public or localhost HTTP URL in the Local Studio browser and return its title and resolved URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser_get_text\",\"description\":\"Read the visible text from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_html\",\"description\":\"Read HTML from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_url\",\"description\":\"Return the URL currently associated with this Local Studio chat browser session\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
     var wrote = true;
     for (connectors.array.items) |connector| {
         if (connector != .object) continue;
@@ -114,10 +114,12 @@ fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, 
     const params = params_value orelse return error.McpParamsRequired;
     if (params != .object) return error.McpParamsRequired;
     const namespaced = stringField(params.object, "name") orelse return error.McpToolRequired;
-    const separator = std.mem.indexOf(u8, namespaced, "__") orelse return error.InvalidMcpToolName;
-    if (separator == 0 or separator + 2 >= namespaced.len) return error.InvalidMcpToolName;
-    const connector_id = namespaced[0..separator];
-    const tool_name = namespaced[separator + 2 ..];
+    const separator = std.mem.indexOf(u8, namespaced, "__");
+    const browser_tool = std.mem.startsWith(u8, namespaced, "browser_");
+    if (!browser_tool and (separator == null or separator.? == 0 or separator.? + 2 >= namespaced.len)) return error.InvalidMcpToolName;
+    const connector_id = if (browser_tool) "browser" else namespaced[0..separator.?];
+    const tool_name = if (browser_tool) namespaced["browser_".len..] else namespaced[separator.? + 2 ..];
+    if (connector_id.len == 0 or tool_name.len == 0) return error.InvalidMcpToolName;
     const arguments: std.json.Value = params.object.get("arguments") orelse .{ .object = .empty };
     if (arguments != .object) return error.InvalidMcpArguments;
     if (std.mem.eql(u8, connector_id, "browser")) return browserCallResponse(allocator, io, client, base_url, api_key, session_id, id, tool_name, arguments.object);

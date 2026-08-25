@@ -549,10 +549,14 @@ function ContextMenuRoot({
           {
             key: "browser-access",
             label: "Browser access",
-            detail: browserBackend === "chrome" ? "Personal browser" : "Sandbox only",
+            detail: workspaceToolsEnabled
+              ? browserBackend === "chrome"
+                ? "Personal browser"
+                : "Sandbox only"
+              : "Built-in sandbox",
             icon: <Monitor className="h-3.5 w-3.5" />,
-            onClick: onToggleBrowserBackend,
-            disabled: false,
+            onClick: workspaceToolsEnabled ? onToggleBrowserBackend : () => undefined,
+            disabled: !workspaceToolsEnabled,
             drillIn: false,
             group: "tools",
           },
