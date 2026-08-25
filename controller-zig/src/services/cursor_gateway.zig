@@ -220,7 +220,7 @@ fn respond(allocator: std.mem.Allocator, protocol: openai_protocol.Protocol, con
             defer allocator.free(chunk);
             try downstream.writer.print("data: {s}\n\ndata: [DONE]\n\n", .{chunk});
         },
-        .responses => try downstream.writer.print("event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{s}}}\n\n", .{converted}),
+        .responses => try openai_protocol.writeResponsesStream(allocator, &downstream.writer, converted),
     }
     try downstream.end();
 }

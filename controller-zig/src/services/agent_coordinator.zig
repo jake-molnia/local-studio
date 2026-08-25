@@ -143,11 +143,10 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
     if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "codex")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
-    var target = if (mode == .head) try harness_nodes.select(allocator, io, database, requested_harness, preferred_node) else null;
+    var target = if (mode == .head) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
-    if (mode == .head and target == null) return if (preferred_node != null) error.AssignedHarnessUnavailable else error.HarnessNodeRequired;
+    if (mode == .head and target == null) return error.HarnessNodeRequired;
     const node_id = if (mode == .standalone) "local" else target.?.id;
-    if (existing) |session| if (!std.mem.eql(u8, session.node_id, node_id)) return error.SessionNodeMismatch;
 
     try lockedSave(allocator, io, database, .{
         .id = session_id,
@@ -169,6 +168,13 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     });
     const command_id = commandId(io);
     try lockedEnqueue(io, database, command_id[0..], session_id, command_kind, routed_document);
+    if (std.mem.eql(u8, command_kind, "prompt")) {
+        const transcript = try userTranscriptDocument(allocator, message);
+        defer allocator.free(transcript);
+        const source_key = try std.fmt.allocPrint(allocator, "command:{s}", .{command_id[0..]});
+        defer allocator.free(source_key);
+        try lockedTranscript(io, database, session_id, source_key, transcript);
+    }
 
     const payload = if (mode == .standalone)
         harness.turnPayloadAt(routed_document, if (existing) |session| session.event_cursor else 0, if (existing) |session| session.native_session_id else null)
@@ -181,13 +187,6 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     };
     errdefer allocator.free(response);
     try lockedFinish(io, database, command_id[0..], "accepted", null);
-    if (std.mem.eql(u8, command_kind, "prompt")) {
-        const transcript = try userTranscriptDocument(allocator, message);
-        defer allocator.free(transcript);
-        const source_key = try std.fmt.allocPrint(allocator, "command:{s}", .{command_id[0..]});
-        defer allocator.free(source_key);
-        try lockedTranscript(io, database, session_id, source_key, transcript);
-    }
     try ingestRuntimeDocument(allocator, io, database, session_id, response);
     return response;
 }
@@ -198,7 +197,7 @@ pub fn statusPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, cl
     const payload = if (mode == .standalone)
         try harness.statusPayload(session_id, after)
     else remote: {
-        var target = (try harness_nodes.select(allocator, io, database, session.harness, session.node_id)) orelse {
+        var target = (try selectHarnessNode(allocator, io, database, session.harness, session.node_id)) orelse {
             try lockedRuntime(io, database, session_id, "unavailable", null, null);
             try replaceSessionStatus(&session, "unavailable");
             return storedStatus(allocator, io, database, &session, after);
@@ -222,11 +221,11 @@ pub fn transcriptPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode
     if (since) |entry_id| if (!validEntryId(entry_id)) return error.InvalidTranscriptCursor;
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
     defer session.deinit();
-    if (std.mem.eql(u8, session.harness, "chat") or std.mem.eql(u8, session.harness, "fx")) return storedTranscriptPayload(allocator, io, database, &session);
+    if (std.mem.eql(u8, session.harness, "chat") or std.mem.eql(u8, session.harness, "fx") or try lockedHasTranscript(io, database, session.id)) return storedTranscriptPayload(allocator, io, database, &session);
     if (mode == .standalone) return harness.transcriptPayload(session_id, session.native_session_id, since);
     const native_session_id = session.native_session_id orelse return error.NativeSessionIdRequired;
     if (!harness_session_id.validNative(native_session_id)) return error.InvalidNativeSessionId;
-    var target = (try harness_nodes.select(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
+    var target = (try selectHarnessNode(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
     defer target.deinit();
     const path = if (since) |entry_id|
         try std.fmt.allocPrint(allocator, "/internal/harness/v1/transcript?sessionId={s}&nativeSessionId={s}&since={s}", .{ session_id, native_session_id, entry_id })
@@ -248,7 +247,7 @@ pub fn controlPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, c
         if (std.mem.eql(u8, operation, "extension-ui")) return harness.extensionUiPayload(document);
         return error.InvalidHarnessOperation;
     }
-    var target = (try harness_nodes.select(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
+    var target = (try selectHarnessNode(allocator, io, database, session.harness, session.node_id)) orelse return error.AssignedHarnessUnavailable;
     defer target.deinit();
     const path = try std.fmt.allocPrint(allocator, "/internal/harness/v1/{s}", .{operation});
     defer allocator.free(path);
@@ -510,6 +509,12 @@ fn lockedTranscript(io: Io, database: *sqlite.Database, session_id: []const u8, 
     try records.appendTranscript(database, session_id, source_key, document);
 }
 
+fn lockedHasTranscript(io: Io, database: *sqlite.Database, session_id: []const u8) !bool {
+    try database.lock(io);
+    defer database.unlock(io);
+    return records.hasTranscript(database, session_id);
+}
+
 fn storedTranscriptPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, session: *const records.Session) ![]u8 {
     try database.lock(io);
     defer database.unlock(io);
@@ -551,6 +556,11 @@ fn lockedRuntime(io: Io, database: *sqlite.Database, session_id: []const u8, sta
     try database.lock(io);
     defer database.unlock(io);
     try records.updateRuntime(database, session_id, status, native_session_id, cursor);
+}
+
+fn selectHarnessNode(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, harness: []const u8, preferred_node: ?[]const u8) !?harness_nodes.Target {
+    if (preferred_node != null) if (try harness_nodes.select(allocator, io, database, harness, preferred_node)) |target| return target;
+    return harness_nodes.select(allocator, io, database, harness, null);
 }
 
 fn sessionIdFromDocument(allocator: std.mem.Allocator, document: []const u8) ![]u8 {

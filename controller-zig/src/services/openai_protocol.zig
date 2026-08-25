@@ -25,6 +25,79 @@ pub fn response(allocator: std.mem.Allocator, source: Protocol, target: Protocol
         responsesResponseToChat(allocator, parsed.value.object);
 }
 
+pub fn writeResponsesStream(allocator: std.mem.Allocator, writer: *std.Io.Writer, document: []const u8) !void {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidInferenceResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidInferenceResponse;
+    const output = parsed.value.object.get("output") orelse return error.InvalidInferenceResponse;
+    if (output != .array) return error.InvalidInferenceResponse;
+    for (output.array.items, 0..) |item, output_index| {
+        if (item != .object) continue;
+        const item_type = stringField(item.object, "type") orelse continue;
+        const item_id = stringField(item.object, "id") orelse "item";
+        try writer.print("event: response.output_item.added\ndata: {{\"type\":\"response.output_item.added\",\"output_index\":{d},\"item\":", .{output_index});
+        if (std.mem.eql(u8, item_type, "message")) {
+            try writer.writeAll("{\"id\":");
+            try std.json.Stringify.value(item_id, .{}, writer);
+            try writer.writeAll(",\"type\":\"message\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}");
+        } else if (std.mem.eql(u8, item_type, "function_call")) {
+            try writer.writeAll("{\"id\":");
+            try std.json.Stringify.value(item_id, .{}, writer);
+            try writer.writeAll(",\"type\":\"function_call\",\"call_id\":");
+            try std.json.Stringify.value(stringField(item.object, "call_id") orelse item_id, .{}, writer);
+            try writer.writeAll(",\"name\":");
+            try std.json.Stringify.value(stringField(item.object, "name") orelse "", .{}, writer);
+            try writer.writeAll(",\"arguments\":\"\"}");
+        } else {
+            try std.json.Stringify.value(item, .{}, writer);
+        }
+        try writer.writeAll("}\n\n");
+        if (std.mem.eql(u8, item_type, "message")) {
+            const content = item.object.get("content");
+            if (content) |parts| if (parts == .array) for (parts.array.items, 0..) |part, content_index| {
+                if (part != .object or !std.mem.eql(u8, stringField(part.object, "type") orelse "", "output_text")) continue;
+                const text = stringField(part.object, "text") orelse "";
+                try writer.print("event: response.content_part.added\ndata: {{\"type\":\"response.content_part.added\",\"item_id\":", .{});
+                try std.json.Stringify.value(item_id, .{}, writer);
+                try writer.print(",\"output_index\":{d},\"content_index\":{d},\"part\":{{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[]}}}}\n\n", .{ output_index, content_index });
+                try writer.writeAll("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":");
+                try std.json.Stringify.value(item_id, .{}, writer);
+                try writer.print(",\"output_index\":{d},\"content_index\":{d},\"delta\":", .{ output_index, content_index });
+                try std.json.Stringify.value(text, .{}, writer);
+                try writer.writeAll("}\n\n");
+                try writer.writeAll("event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"item_id\":");
+                try std.json.Stringify.value(item_id, .{}, writer);
+                try writer.print(",\"output_index\":{d},\"content_index\":{d},\"text\":", .{ output_index, content_index });
+                try std.json.Stringify.value(text, .{}, writer);
+                try writer.writeAll("}\n\n");
+                try writer.writeAll("event: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"item_id\":");
+                try std.json.Stringify.value(item_id, .{}, writer);
+                try writer.print(",\"output_index\":{d},\"content_index\":{d},\"part\":", .{ output_index, content_index });
+                try std.json.Stringify.value(part, .{}, writer);
+                try writer.writeAll("}\n\n");
+            };
+        } else if (std.mem.eql(u8, item_type, "function_call")) {
+            const arguments = stringField(item.object, "arguments") orelse "{}";
+            try writer.writeAll("event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":");
+            try std.json.Stringify.value(item_id, .{}, writer);
+            try writer.print(",\"output_index\":{d},\"delta\":", .{output_index});
+            try std.json.Stringify.value(arguments, .{}, writer);
+            try writer.writeAll("}\n\n");
+            try writer.writeAll("event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":");
+            try std.json.Stringify.value(item_id, .{}, writer);
+            try writer.print(",\"output_index\":{d},\"arguments\":", .{output_index});
+            try std.json.Stringify.value(arguments, .{}, writer);
+            try writer.writeAll("}\n\n");
+        }
+        try writer.print("event: response.output_item.done\ndata: {{\"type\":\"response.output_item.done\",\"output_index\":{d},\"item\":", .{output_index});
+        try std.json.Stringify.value(item, .{}, writer);
+        try writer.writeAll("}\n\n");
+    }
+    try writer.writeAll("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":");
+    try writer.writeAll(document);
+    try writer.writeAll("}\n\n");
+}
+
 fn chatRequestToResponses(parsed: *std.json.Parsed(std.json.Value)) !void {
     const object = &parsed.value.object;
     const storage = parsed.arena.allocator();

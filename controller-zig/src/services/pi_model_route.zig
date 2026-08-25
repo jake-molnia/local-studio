@@ -108,6 +108,7 @@ pub const Config = struct {
         return .{
             .allocator = configuration.allocator,
             .model_name = try std.fmt.allocPrint(configuration.allocator, "local-studio/{s}", .{model_id}),
+            .base_url = try configuration.allocator.dupe(u8, base_url),
             .environment = environment,
         };
     }
@@ -116,10 +117,12 @@ pub const Config = struct {
 pub const Route = struct {
     allocator: std.mem.Allocator,
     model_name: []u8,
+    base_url: []u8,
     environment: std.process.Environ.Map,
 
     pub fn deinit(route: *Route) void {
         route.allocator.free(route.model_name);
+        route.allocator.free(route.base_url);
         route.environment.deinit();
         route.* = undefined;
     }

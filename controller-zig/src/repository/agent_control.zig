@@ -163,7 +163,7 @@ pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id:
 
 pub fn getByNative(allocator: std.mem.Allocator, database: *sqlite.Database, native_session_id: []const u8) !?Session {
     var statement = try database.prepare(
-        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, model_route_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE native_session_id = ? ORDER BY updated_at DESC LIMIT 1",
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, model_route_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions AS session WHERE native_session_id = ? ORDER BY EXISTS (SELECT 1 FROM agent_transcript_entries AS entry WHERE entry.session_id = session.session_id) DESC, (harness_version IS NOT NULL) DESC, event_cursor DESC, updated_at DESC LIMIT 1",
     );
     defer statement.deinit();
     try statement.bindText(1, native_session_id);
@@ -351,6 +351,13 @@ pub fn transcript(allocator: std.mem.Allocator, database: *sqlite.Database, sess
         });
     }
     return .{ .allocator = allocator, .records = try records.toOwnedSlice(allocator) };
+}
+
+pub fn hasTranscript(database: *sqlite.Database, session_id: []const u8) !bool {
+    var statement = try database.prepare("SELECT 1 FROM agent_transcript_entries WHERE session_id = ? LIMIT 1");
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    return try statement.step() == .row;
 }
 
 pub fn eventsAfter(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8, after: u64) !EventList {

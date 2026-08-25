@@ -50,6 +50,7 @@ pub fn upsert(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, 
         .project_id = optionalString(object, "project_id"),
         .project_path = optionalString(object, "project_path"),
         .model_id = optionalString(object, "model_id"),
+        .model_route_id = optionalString(object, "model_route_id"),
         .status = status,
         .event_cursor = unsignedField(object, "event_cursor") orelse if (existing) |session| session.event_cursor else 0,
         .sharing_policy = sharing,
@@ -77,19 +78,21 @@ pub fn historyPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
     var emitted = std.StringHashMap(void).init(allocator);
     defer emitted.deinit();
     for (sessions.records) |session| {
-        const archived = std.mem.eql(u8, session.status, "archived");
+        const identity = session.native_session_id orelse session.id;
+        if (emitted.contains(identity)) continue;
+        var canonical = if (session.native_session_id) |native_session_id| try records.getByNative(allocator, database, native_session_id) else null;
+        defer if (canonical) |*value| value.deinit();
+        const selected = if (canonical) |*value| value else &session;
+        const archived = std.mem.eql(u8, selected.status, "archived");
         if (archived_only != archived and (archived_only or !include_archived)) continue;
-        if (project_path) |expected| if (session.project_path == null or !std.mem.eql(u8, session.project_path.?, expected)) continue;
-        if (project_id) |expected| if (session.project_id == null or !std.mem.eql(u8, session.project_id.?, expected)) continue;
-        const history_id = if (std.mem.eql(u8, session.harness, "fx")) session.id else session.native_session_id orelse session.id;
-        if (std.mem.startsWith(u8, history_id, "tab-")) continue;
-        if (emitted.contains(history_id)) continue;
+        if (project_path) |expected| if (selected.project_path == null or !std.mem.eql(u8, selected.project_path.?, expected)) continue;
+        if (project_id) |expected| if (selected.project_id == null or !std.mem.eql(u8, selected.project_id.?, expected)) continue;
         if (limit) |maximum| if (count >= maximum) break;
-        try emitted.put(history_id, {});
+        try emitted.put(identity, {});
         if (count > 0) try output.writer.writeByte(',');
-        const first_message = try firstUserMessage(allocator, database, session.id);
+        const first_message = try firstUserMessage(allocator, database, selected.id);
         defer if (first_message) |value| allocator.free(value);
-        try writeHistorySummary(&output.writer, &session, first_message);
+        try writeHistorySummary(&output.writer, selected, first_message);
         count += 1;
     }
     try output.writer.writeAll("]}");
@@ -124,6 +127,7 @@ pub fn archivePayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
         .project_id = session.project_id,
         .project_path = session.project_path,
         .model_id = session.model_id,
+        .model_route_id = session.model_route_id,
         .status = if (archived_value.bool) "archived" else "idle",
         .event_cursor = session.event_cursor,
         .sharing_policy = session.sharing_policy,
@@ -153,6 +157,10 @@ pub fn transcriptResponse(allocator: std.mem.Allocator, session: *const records.
     if (session.project_path) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
     try output.writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"modelRouteId\":");
+    if (session.model_route_id) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
+    try output.writer.writeAll(",\"harness\":");
+    try std.json.Stringify.value(session.harness, .{}, &output.writer);
     try output.writer.writeAll(",\"startedAt\":");
     try std.json.Stringify.value(session.created_at, .{}, &output.writer);
     try output.writer.writeAll(",\"piSessionId\":");
@@ -173,6 +181,10 @@ fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session, firs
     try std.json.Stringify.value(session.updated_at, .{}, writer);
     try writer.writeAll(",\"modelId\":");
     if (session.model_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"modelRouteId\":");
+    if (session.model_route_id) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    try writer.writeAll(",\"harness\":");
+    try std.json.Stringify.value(session.harness, .{}, writer);
     try writer.writeAll(",\"provider\":null,\"firstUserMessage\":");
     if (first_message) |value| try std.json.Stringify.value(value, .{}, writer) else try std.json.Stringify.value(session.id, .{}, writer);
     try writer.print(",\"archived\":{},\"archivedAt\":", .{archived});

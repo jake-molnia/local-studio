@@ -407,7 +407,6 @@ pub const Manager = struct {
         }
         if (harness_kind == .chat or harness_kind == .fx) return manager.turnResponse(session, was_active);
         if (harness_kind == .codex) {
-            try manager.waitCodexNativeId(session);
             return manager.turnResponse(session, false);
         }
         var command: Io.Writer.Allocating = .init(manager.allocator);
@@ -740,24 +739,25 @@ pub const Manager = struct {
         defer manager.allocator.free(log_path);
         var log_file = try Io.Dir.cwd().createFile(manager.io, log_path, .{ .permissions = @enumFromInt(0o600), .truncate = false });
         defer log_file.close(manager.io);
-        const model = codexModelId(model_id);
+        var model_route = try manager.model_route.prepare(model_id);
+        defer model_route.deinit();
         const sandbox = if (std.mem.eql(u8, tool_access, "full")) "workspace-write" else "read-only";
         var argv: std.ArrayList([]const u8) = .empty;
         defer argv.deinit(manager.allocator);
-        var environment = try manager.model_route.environment.clone(manager.allocator);
-        defer environment.deinit();
-        try manager.addMcpBridgeEnvironment(&environment, model_id, session_id);
+        try manager.addMcpBridgeEnvironment(&model_route.environment, model_id, session_id);
         const controller_executable = try std.process.executablePathAlloc(manager.io, manager.allocator);
         defer manager.allocator.free(controller_executable);
         const command_config = try configAssignment(manager.allocator, "mcp_servers.local-studio.command", controller_executable);
         defer manager.allocator.free(command_config);
+        const provider_url_config = try configAssignment(manager.allocator, "model_providers.local_studio.base_url", model_route.base_url);
+        defer manager.allocator.free(provider_url_config);
         const args_config = "mcp_servers.local-studio.args=[\"mcp-bridge\"]";
         const env_config = "mcp_servers.local-studio.env_vars=[\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"LOCAL_STUDIO_MCP_BRIDGE_KEY\"]";
         if (native_id.len == 0)
-            try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", sandbox, "-m", model })
+            try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", sandbox, "-m", model_id })
         else
-            try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "resume", "--json", "--skip-git-repo-check", "-m", model });
-        try argv.appendSlice(manager.allocator, &.{ "-c", command_config, "-c", args_config, "-c", env_config });
+            try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "resume", "--json", "--skip-git-repo-check", "-m", model_id });
+        try argv.appendSlice(manager.allocator, &.{ "-c", "model_provider=\"local_studio\"", "-c", "model_providers.local_studio.name=\"Local Studio\"", "-c", provider_url_config, "-c", "model_providers.local_studio.env_key=\"LOCAL_STUDIO_HEAD_API_KEY\"", "-c", "model_providers.local_studio.wire_api=\"responses\"", "-c", "model_providers.local_studio.requires_openai_auth=false", "-c", command_config, "-c", args_config, "-c", env_config });
         const effort = if (thinking) |value| if (!std.mem.eql(u8, value, "auto") and !std.mem.eql(u8, value, "off")) try std.fmt.allocPrint(manager.allocator, "model_reasoning_effort=\"{s}\"", .{value}) else null else null;
         defer if (effort) |value| manager.allocator.free(value);
         if (effort) |value| try argv.appendSlice(manager.allocator, &.{ "-c", value });
@@ -765,7 +765,7 @@ pub const Manager = struct {
         try argv.append(manager.allocator, message);
         return std.process.spawn(manager.io, .{
             .argv = argv.items,
-            .environ_map = &environment,
+            .environ_map = &model_route.environment,
             .cwd = .{ .path = cwd },
             .stdin = .ignore,
             .stdout = .pipe,
@@ -791,20 +791,6 @@ pub const Manager = struct {
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_MODEL", model_id);
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_SESSION", session_id);
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_KEY", manager.controller_api_key orelse "");
-    }
-
-    fn waitCodexNativeId(manager: *Manager, session: *Session) !void {
-        var attempts: usize = 0;
-        while (attempts < 300) : (attempts += 1) {
-            try manager.mutex.lock(manager.io);
-            const ready = session.native_id.len > 0;
-            const running = session.running;
-            manager.mutex.unlock(manager.io);
-            if (ready) return;
-            if (!running) return error.HarnessExited;
-            try manager.io.sleep(.fromMilliseconds(10), .awake);
-        }
-        return error.HarnessCommandTimeout;
     }
 
     fn ensureAcpSession(manager: *Manager, harness_kind: Harness, session_id: []const u8, native_session_id: ?[]const u8, model_id: []const u8, cwd_value: ?[]const u8, initial_event_seq: u64) !*Session {
@@ -850,32 +836,18 @@ pub const Manager = struct {
         errdefer child.kill(manager.io);
         const initialized = try directFxRequest(manager.allocator, manager.io, &child, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":\"initialize\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}");
         defer manager.allocator.free(initialized);
-        var session_request: Io.Writer.Allocating = .init(manager.allocator);
-        defer session_request.deinit();
-        try session_request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":\"session\",\"method\":");
-        try std.json.Stringify.value(if (native_session_id == null) "session/new" else "session/load", .{}, &session_request.writer);
-        try session_request.writer.writeAll(",\"params\":{");
-        if (native_session_id) |value| {
-            try session_request.writer.writeAll("\"sessionId\":");
-            try std.json.Stringify.value(value, .{}, &session_request.writer);
-            try session_request.writer.writeByte(',');
-        }
-        try session_request.writer.writeAll("\"mcpServers\":[{\"name\":\"local-studio\",\"command\":");
-        try std.json.Stringify.value(controller_executable, .{}, &session_request.writer);
-        try session_request.writer.writeAll(",\"args\":[\"mcp-bridge\"],\"env\":[{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"value\":");
-        try std.json.Stringify.value(manager.controller_origin, .{}, &session_request.writer);
-        try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
-        try std.json.Stringify.value(model_id, .{}, &session_request.writer);
-        try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"value\":");
-        try std.json.Stringify.value(session_id, .{}, &session_request.writer);
-        if (manager.controller_api_key) |key| {
-            try session_request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
-            try std.json.Stringify.value(key, .{}, &session_request.writer);
-        }
-        try session_request.writer.writeAll("}]}]}}");
-        const created = try directFxRequest(manager.allocator, manager.io, &child, "session", session_request.writer.buffered());
+        const session_request = try acpSessionRequest(manager, "session", controller_executable, model_id, session_id, native_session_id);
+        defer manager.allocator.free(session_request);
+        const created = try directFxRequest(manager.allocator, manager.io, &child, "session", session_request);
         defer manager.allocator.free(created);
-        const native_id = if (native_session_id) |value| try manager.allocator.dupe(u8, value) else try fxSessionId(manager.allocator, created);
+        const native_id = if (native_session_id) |value| resumed: {
+            if (fxResponseSucceeded(manager.allocator, created)) break :resumed try manager.allocator.dupe(u8, value);
+            const fallback_request = try acpSessionRequest(manager, "session-fallback", controller_executable, model_id, session_id, null);
+            defer manager.allocator.free(fallback_request);
+            const fallback = try directFxRequest(manager.allocator, manager.io, &child, "session-fallback", fallback_request);
+            defer manager.allocator.free(fallback);
+            break :resumed try fxSessionId(manager.allocator, fallback);
+        } else try fxSessionId(manager.allocator, created);
         errdefer manager.allocator.free(native_id);
         const session = try manager.allocator.create(Session);
         errdefer manager.allocator.destroy(session);
@@ -1095,6 +1067,41 @@ fn directFxRequest(allocator: std.mem.Allocator, io: Io, child: *std.process.Chi
     return error.HarnessResponseTooLarge;
 }
 
+fn acpSessionRequest(manager: *Manager, request_id: []const u8, controller_executable: []const u8, model_id: []const u8, session_id: []const u8, native_session_id: ?[]const u8) ![]u8 {
+    var request: Io.Writer.Allocating = .init(manager.allocator);
+    errdefer request.deinit();
+    try request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try std.json.Stringify.value(request_id, .{}, &request.writer);
+    try request.writer.writeAll(",\"method\":");
+    try std.json.Stringify.value(if (native_session_id == null) "session/new" else "session/load", .{}, &request.writer);
+    try request.writer.writeAll(",\"params\":{");
+    if (native_session_id) |value| {
+        try request.writer.writeAll("\"sessionId\":");
+        try std.json.Stringify.value(value, .{}, &request.writer);
+        try request.writer.writeByte(',');
+    }
+    try request.writer.writeAll("\"mcpServers\":[{\"name\":\"local-studio\",\"command\":");
+    try std.json.Stringify.value(controller_executable, .{}, &request.writer);
+    try request.writer.writeAll(",\"args\":[\"mcp-bridge\"],\"env\":[{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"value\":");
+    try std.json.Stringify.value(manager.controller_origin, .{}, &request.writer);
+    try request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"value\":");
+    try std.json.Stringify.value(model_id, .{}, &request.writer);
+    try request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"value\":");
+    try std.json.Stringify.value(session_id, .{}, &request.writer);
+    if (manager.controller_api_key) |key| {
+        try request.writer.writeAll("},{\"name\":\"LOCAL_STUDIO_MCP_BRIDGE_KEY\",\"value\":");
+        try std.json.Stringify.value(key, .{}, &request.writer);
+    }
+    try request.writer.writeAll("}]}]}}");
+    return request.toOwnedSlice();
+}
+
+fn fxResponseSucceeded(allocator: std.mem.Allocator, document: []const u8) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return false;
+    defer parsed.deinit();
+    return parsed.value == .object and parsed.value.object.get("error") == null and parsed.value.object.get("result") != null;
+}
+
 fn fxSessionId(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidHarnessResponse;
     defer parsed.deinit();
@@ -1233,11 +1240,6 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     return optionalString(object, name);
-}
-
-fn codexModelId(value: []const u8) []const u8 {
-    const delimiter = std.mem.indexOfScalar(u8, value, '/') orelse return value;
-    return value[delimiter + 1 ..];
 }
 
 fn configAssignment(allocator: std.mem.Allocator, key: []const u8, value: anytype) ![]u8 {

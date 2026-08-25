@@ -38,6 +38,7 @@ let
     sockets = []
     for port in ports:
         listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             listener.bind(("127.0.0.1", port))
         except OSError:
