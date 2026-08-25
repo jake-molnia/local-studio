@@ -1,7 +1,20 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
-import { Check, ChevronDown, Laptop, Moon, RotateCcw, Search, Sun, X } from "@/ui/icon-registry";
+import { useMemo, useState, useCallback, useDeferredValue, useRef } from "react";
+import { Schema } from "effect";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Download,
+  Laptop,
+  Moon,
+  RotateCcw,
+  Search,
+  Sun,
+  Upload,
+  X,
+} from "@/ui/icon-registry";
 import { useAppStore } from "@/store";
 import {
   FONT_FAMILY_BY_ID,
@@ -23,10 +36,26 @@ import {
 } from "@/features/agent/ui/timeline/tool-metadata";
 import { SettingsButton, SettingsGroup, SettingsRow } from "./settings-ui";
 import { WindowMaterialSettings } from "./window-material-settings";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 
 const CUSTOM_THEME_TOKEN_KEY = "local-studio.customThemeTokens";
 const LIGHT_THEME_ID = "zai-light";
 const DARK_THEME_ID = "zai-dark";
+const THEME_MODE_KEY = "local-studio:theme-mode";
+const LIGHT_THEME_KEY = "local-studio:light-theme";
+const DARK_THEME_KEY = "local-studio:dark-theme";
+const ThemeTokensSchema = Schema.Struct({
+  bg: Schema.String,
+  fg: Schema.String,
+  dim: Schema.String,
+  border: Schema.String,
+  surface: Schema.String,
+  accent: Schema.String,
+  hl1: Schema.String,
+  hl2: Schema.String,
+  hl3: Schema.String,
+  err: Schema.String,
+});
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -141,6 +170,7 @@ export function AppearanceSettings() {
   const setToolPreviewHeightOverride = useAppStore((s) => s.setToolPreviewHeightOverride);
 
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(["Reference", "Studio"]),
   );
@@ -184,20 +214,53 @@ export function AppearanceSettings() {
 
   const currentTheme = THEME_BY_ID.get(themeId) ?? THEMES[0];
 
-  const [mode, setMode] = useState<ThemeMode>(() =>
-    isLightTheme(currentTheme) ? "light" : "dark",
-  );
+  const [mode, setMode] = useState<ThemeMode>(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(THEME_MODE_KEY);
+      if (stored === "light" || stored === "dark" || stored === "system") return stored;
+    }
+    return isLightTheme(currentTheme) ? "light" : "dark";
+  });
+
+  const storedThemeForMode = (target: "light" | "dark") => {
+    if (typeof window === "undefined") return target === "light" ? LIGHT_THEME_ID : DARK_THEME_ID;
+    const stored = window.localStorage.getItem(
+      target === "light" ? LIGHT_THEME_KEY : DARK_THEME_KEY,
+    );
+    return stored && THEME_BY_ID.has(stored as never)
+      ? (stored as typeof themeId)
+      : target === "light"
+        ? LIGHT_THEME_ID
+        : DARK_THEME_ID;
+  };
+
+  const selectTheme = (theme: ThemeMeta) => {
+    setThemeId(theme.id);
+    const targetMode = isLightTheme(theme) ? "light" : "dark";
+    window.localStorage.setItem(
+      targetMode === "light" ? LIGHT_THEME_KEY : DARK_THEME_KEY,
+      theme.id,
+    );
+  };
+
+  useMountSubscription(() => {
+    if (mode !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setThemeId(storedThemeForMode(media.matches ? "dark" : "light"));
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, [mode, setThemeId]);
 
   const groups = useMemo(() => {
     const map = new Map<string, ThemeMeta[]>();
     for (const theme of THEMES) {
-      if (!matchesQuery(theme, query)) continue;
+      if (!matchesQuery(theme, deferredQuery)) continue;
       const list = map.get(theme.group) ?? [];
       list.push(theme);
       map.set(theme.group, list);
     }
     return Array.from(map.entries());
-  }, [query]);
+  }, [deferredQuery]);
 
   const toggleGroup = (group: string) => {
     setExpandedGroups((prev) => {
@@ -222,6 +285,8 @@ export function AppearanceSettings() {
     () => readCustomTokens() ?? baseTokens,
   );
   const [isCustomActive, setIsCustomActive] = useState(false);
+  const [themeFileError, setThemeFileError] = useState("");
+  const themeFileRef = useRef<HTMLInputElement | null>(null);
 
   const [prevThemeId, setPrevThemeId] = useState(themeId);
   if (themeId !== prevThemeId) {
@@ -247,16 +312,51 @@ export function AppearanceSettings() {
     setIsCustomActive(false);
   };
 
+  const activateCustomTokens = (tokens: ThemeTokens) => {
+    setCustomTokens(tokens);
+    writeCustomTokens(tokens);
+    applyTokensToDocument(tokens);
+    setIsCustomActive(true);
+    setThemeFileError("");
+  };
+
+  const exportTheme = () => {
+    const blob = new Blob(
+      [JSON.stringify({ name: `${currentTheme.name} custom`, tokens: customTokens }, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${currentTheme.id}-custom.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importTheme = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const source =
+        parsed && typeof parsed === "object" && "tokens" in parsed
+          ? (parsed as { tokens: unknown }).tokens
+          : parsed;
+      activateCustomTokens(Schema.decodeUnknownSync(ThemeTokensSchema)(source));
+    } catch {
+      setThemeFileError("This file does not contain a valid Local Studio theme.");
+    }
+  };
+
   const applyMode = (next: ThemeMode) => {
     setMode(next);
-    if (next === "light") setThemeId(LIGHT_THEME_ID);
-    else if (next === "dark") setThemeId(DARK_THEME_ID);
+    window.localStorage.setItem(THEME_MODE_KEY, next);
+    if (next === "light") setThemeId(storedThemeForMode("light"));
+    else if (next === "dark") setThemeId(storedThemeForMode("dark"));
     else {
       const prefersDark =
         typeof window !== "undefined" &&
         typeof window.matchMedia === "function" &&
         window.matchMedia("(prefers-color-scheme: dark)").matches;
-      setThemeId(prefersDark ? DARK_THEME_ID : LIGHT_THEME_ID);
+      setThemeId(storedThemeForMode(prefersDark ? "dark" : "light"));
     }
     setIsCustomActive(false);
   };
@@ -328,7 +428,7 @@ export function AppearanceSettings() {
                         <button
                           key={theme.id}
                           type="button"
-                          onClick={() => setThemeId(theme.id)}
+                          onClick={() => selectTheme(theme)}
                           className={`min-w-0 rounded-[var(--rad-md)] border px-2.5 py-2 text-left transition-colors ${
                             active
                               ? "border-(--ui-accent)/35 bg-(--ui-active)"
@@ -398,14 +498,48 @@ export function AppearanceSettings() {
       <SettingsGroup
         title="Theme editor"
         actions={
-          isCustomActive ? (
-            <SettingsButton onClick={resetTokens}>
-              <RotateCcw className="h-3 w-3" />
-              Reset
+          <div className="flex items-center gap-1">
+            <input
+              ref={themeFileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importTheme(file);
+                event.target.value = "";
+              }}
+            />
+            <SettingsButton onClick={() => themeFileRef.current?.click()} title="Import theme">
+              <Upload className="h-3 w-3" />
+              Import
             </SettingsButton>
-          ) : undefined
+            <SettingsButton onClick={exportTheme} title="Export theme">
+              <Download className="h-3 w-3" />
+              Export
+            </SettingsButton>
+            {!isCustomActive ? (
+              <SettingsButton
+                onClick={() => activateCustomTokens({ ...baseTokens })}
+                title="Duplicate theme"
+              >
+                <Copy className="h-3 w-3" />
+                Duplicate
+              </SettingsButton>
+            ) : (
+              <SettingsButton onClick={resetTokens} title="Reset theme">
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </SettingsButton>
+            )}
+          </div>
         }
       >
+        {themeFileError ? (
+          <div role="alert" className="px-3 py-2 text-[length:var(--fs-xs)] text-(--ui-danger)">
+            {themeFileError}
+          </div>
+        ) : null}
         {editorTokens.map((row) => (
           <SettingsRow
             key={row.key}

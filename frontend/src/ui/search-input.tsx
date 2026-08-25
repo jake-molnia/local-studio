@@ -1,5 +1,6 @@
 "use client";
 
+import { forwardRef, type KeyboardEventHandler } from "react";
 import { Search, X } from "@/ui/icon-registry";
 
 interface SearchInputProps {
@@ -9,16 +10,21 @@ interface SearchInputProps {
   onClear?: () => void;
   className?: string;
   "aria-label"?: string;
+  onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
 }
 
-function SearchInput({
-  value,
-  onChange,
-  placeholder = "Search...",
-  onClear,
-  className = "",
-  "aria-label": ariaLabel,
-}: SearchInputProps) {
+const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
+  {
+    value,
+    onChange,
+    placeholder = "Search...",
+    onClear,
+    className = "",
+    "aria-label": ariaLabel,
+    onKeyDown,
+  },
+  ref,
+) {
   const handleClear = () => {
     if (onClear) {
       onClear();
@@ -34,11 +40,13 @@ function SearchInput({
         className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--ui-muted)"
       />
       <input
+        ref={ref}
         type="text"
         data-ui-control="field"
         value={value}
         aria-label={ariaLabel}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
         placeholder={placeholder}
         className="h-[var(--control-height)] w-full rounded-[5px] border border-(--ui-separator) bg-(--ui-surface) pl-8 pr-8 text-[length:var(--fs-sm)] text-(--ui-fg) transition-[background-color,border-color,box-shadow] duration-[var(--motion-fast)] placeholder:text-(--ui-muted)/70 hover:border-(--ui-border-heavy) focus:border-(--ui-border-heavy) focus:bg-(--ui-bg) focus:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring)"
       />
@@ -55,7 +63,7 @@ function SearchInput({
       )}
     </div>
   );
-}
+});
 
 export { SearchInput };
 export type { SearchInputProps };

@@ -44,6 +44,13 @@ svg.lucide {
   transform-origin: center;
 }
 
+.theme-changing *,
+.theme-changing *::before,
+.theme-changing *::after {
+  transition: none !important;
+  animation-duration: 1ms !important;
+}
+
 html,
 body {
   overflow: hidden;
@@ -199,6 +206,21 @@ a.nav-link:hover,
   transition-duration: var(--motion-instant);
 }
 
+[data-setting-key]:focus {
+  animation: settings-target-pulse 900ms var(--ease-standard);
+}
+
+@keyframes settings-target-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+
+  35% {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent) 45%, transparent);
+  }
+}
+
 [data-ui-control="field"] {
   min-height: var(--control-height);
 }
@@ -255,6 +277,24 @@ a.nav-link:hover,
 @media (prefers-reduced-motion: reduce) {
   [data-ui-control] {
     transition-duration: 1ms;
+  }
+
+  [data-setting-key]:focus {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  * {
+    scrollbar-color: CanvasText Canvas;
+  }
+
+  :focus-visible {
+    outline: 2px solid Highlight;
+  }
+
+  [data-ui-control] {
+    forced-color-adjust: auto;
   }
 }
 

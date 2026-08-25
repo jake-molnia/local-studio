@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   AppPage,
@@ -66,6 +66,85 @@ function settingsSearchKey(value: string): string {
     .replace(/[^a-z0-9]+/g, "-");
 }
 
+function settingsLayoutWidths(width: "default" | "wide") {
+  return width === "wide"
+    ? {
+        layout: "max-w-[82rem] lg:grid-cols-[136px_minmax(0,68rem)]",
+        takeover: "max-w-[72rem]",
+      }
+    : {
+        layout: "max-w-[44rem] lg:grid-cols-[136px_minmax(0,32rem)]",
+        takeover: "max-w-[34rem]",
+      };
+}
+
+function SettingsNavigation<Id extends SettingsSectionId>({
+  query,
+  results,
+  activeSection,
+  activeIndex,
+  title,
+  sections,
+  override,
+  onActiveIndex,
+  onSelectResult,
+  onSelectSection,
+}: {
+  query: string;
+  results: Array<{ section: SettingsSectionDef<Id>; entry: SettingsSearchEntry }>;
+  activeSection: Id;
+  activeIndex: number;
+  title: string;
+  sections: SettingsSectionDef<Id>[];
+  override?: ReactNode;
+  onActiveIndex: (index: number) => void;
+  onSelectResult: (section: Id, target?: string) => void;
+  onSelectSection: (section: Id) => void;
+}) {
+  if (!query.trim()) {
+    return (
+      override ?? (
+        <SectionNav
+          label={`${title} sections`}
+          items={sections}
+          activeItem={activeSection}
+          onSelectItem={onSelectSection}
+        />
+      )
+    );
+  }
+  if (!results.length) {
+    return (
+      <div className="px-2 py-2 text-[length:var(--fs-xs)] text-(--ui-muted)">
+        No settings found
+      </div>
+    );
+  }
+  return (
+    <div role="listbox" aria-label="Matching settings" className="flex flex-col gap-px">
+      {results.map(({ section, entry }, index) => (
+        <button
+          key={`${section.id}:${entry.label}`}
+          type="button"
+          role="option"
+          aria-selected={section.id === activeSection}
+          data-active={index === activeIndex ? "true" : undefined}
+          onPointerEnter={() => onActiveIndex(index)}
+          onClick={() => onSelectResult(section.id, entry.target ?? entry.label)}
+          className="flex h-6 w-full items-center gap-1.5 rounded-[4px] px-2 text-left text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg) data-[active=true]:bg-(--ui-hover) data-[active=true]:text-(--ui-fg)"
+        >
+          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center opacity-70">
+            {section.icon}
+          </span>
+          <span className="min-w-0 truncate">
+            {section.label === entry.label ? section.label : `${section.label} › ${entry.label}`}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>({
   sections,
   activeSection,
@@ -83,14 +162,46 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
   children,
 }: LayoutProps<Id>) {
   const [navigationQuery, setNavigationQuery] = useState("");
+  const deferredNavigationQuery = useDeferredValue(navigationQuery);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [sidebarHost, setSidebarHost] = useState<HTMLElement | null>(null);
   const router = useRouter();
   const active = sections.find((section) => section.id === activeSection);
   useMountSubscription(() => {
     setSidebarHost(document.getElementById(SETTINGS_SIDEBAR_PORTAL_ID));
   }, []);
+  useMountSubscription(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const editing =
+        target instanceof HTMLElement &&
+        Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+      if (event.key === "/" && !editing) {
+        event.preventDefault();
+        const inputs = document.querySelectorAll<HTMLInputElement>(
+          'input[aria-label="Search Settings"]',
+        );
+        [...inputs].find((input) => input.offsetParent !== null)?.focus();
+      }
+      if (
+        event.key === "Escape" &&
+        document.activeElement instanceof HTMLInputElement &&
+        document.activeElement.getAttribute("aria-label") === "Search Settings"
+      ) {
+        if (navigationQuery) {
+          event.preventDefault();
+          setNavigationQuery("");
+          setActiveSearchIndex(0);
+        } else {
+          document.activeElement.blur();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigationQuery]);
   const searchResults = useMemo(() => {
-    const query = navigationQuery.trim().toLowerCase();
+    const query = deferredNavigationQuery.trim().toLowerCase();
     if (!query) return [];
     return sections.flatMap((section) => {
       const entries = section.settings ?? [];
@@ -108,9 +219,10 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         ...matches.map((entry) => ({ section, entry })),
       ];
     });
-  }, [navigationQuery, sections]);
+  }, [deferredNavigationQuery, sections]);
   const updateNavigationQuery = (value: string) => {
     setNavigationQuery(value);
+    setActiveSearchIndex(0);
     const query = value.trim().toLowerCase();
     if (!query) return;
     const match = sections.find((section) => {
@@ -122,11 +234,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
     });
     if (match && match.id !== activeSection) onSelectSection(match.id);
   };
-  const layoutWidth =
-    width === "wide"
-      ? "max-w-[82rem] lg:grid-cols-[136px_minmax(0,68rem)]"
-      : "max-w-[44rem] lg:grid-cols-[136px_minmax(0,32rem)]";
-  const takeoverWidth = width === "wide" ? "max-w-[72rem]" : "max-w-[34rem]";
+  const widths = settingsLayoutWidths(width);
 
   const selectSearchResult = (section: Id, target?: string) => {
     onSelectSection(section);
@@ -136,49 +244,46 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         const element = document.querySelector<HTMLElement>(
           `[data-setting-key="${settingsSearchKey(target)}"]`,
         );
-        element?.scrollIntoView({ block: "center" });
+        const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        element?.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
         element?.focus({ preventScroll: true });
       });
     });
   };
   const navigateBack = useCallback(() => {
-    router.replace("/agent");
+    const fallback = window.sessionStorage.getItem("local-studio:last-workspace-url") ?? "/agent";
+    router.replace(fallback.startsWith("/settings") ? "/agent" : fallback);
   }, [router]);
-  const navigation = navigationQuery.trim() ? (
-    searchResults.length ? (
-      <div role="listbox" aria-label="Matching settings" className="flex flex-col gap-px">
-        {searchResults.map(({ section, entry }) => (
-          <button
-            key={`${section.id}:${entry.label}`}
-            type="button"
-            role="option"
-            aria-selected={section.id === activeSection}
-            onClick={() => selectSearchResult(section.id, entry.target ?? entry.label)}
-            className="flex h-6 w-full items-center gap-1.5 rounded-[4px] px-2 text-left text-[length:var(--fs-xs)] text-(--ui-muted) transition-colors hover:bg-(--ui-hover) hover:text-(--ui-fg)"
-          >
-            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center opacity-70">
-              {section.icon}
-            </span>
-            <span className="min-w-0 truncate">
-              {section.label === entry.label ? section.label : `${section.label} › ${entry.label}`}
-            </span>
-          </button>
-        ))}
-      </div>
-    ) : (
-      <div className="px-2 py-2 text-[length:var(--fs-xs)] text-(--ui-muted)">
-        No settings found
-      </div>
-    )
-  ) : (
-    (navigationOverride ?? (
-      <SectionNav
-        label={`${title} sections`}
-        items={sections}
-        activeItem={activeSection}
-        onSelectItem={onSelectSection}
-      />
-    ))
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!searchResults.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSearchIndex((current) =>
+        event.key === "ArrowDown"
+          ? (current + 1) % searchResults.length
+          : (current - 1 + searchResults.length) % searchResults.length,
+      );
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const result = searchResults[activeSearchIndex];
+      if (result) selectSearchResult(result.section.id, result.entry.target ?? result.entry.label);
+    }
+  };
+  const navigation = (
+    <SettingsNavigation
+      query={navigationQuery}
+      results={searchResults}
+      activeSection={activeSection}
+      activeIndex={activeSearchIndex}
+      title={title}
+      sections={sections}
+      override={navigationOverride}
+      onActiveIndex={setActiveSearchIndex}
+      onSelectResult={selectSearchResult}
+      onSelectSection={onSelectSection}
+    />
   );
   const content = (
     <>
@@ -234,6 +339,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                   <SearchInput
                     value={navigationQuery}
                     onChange={updateNavigationQuery}
+                    onKeyDown={handleSearchKeyDown}
                     placeholder="Search Settings"
                     aria-label="Search Settings"
                     className="[&_input]:h-7 [&_input]:rounded-[4px] [&_input]:bg-(--ui-surface)"
@@ -261,6 +367,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
               <SearchInput
                 value={navigationQuery}
                 onChange={updateNavigationQuery}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Search Settings"
                 aria-label="Search Settings"
                 className="mb-2 [&_input]:h-7 [&_input]:rounded-[4px] [&_input]:bg-(--ui-surface)"
@@ -269,7 +376,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 {navigation}
               </div>
             </div>
-            <div className={cx("mx-auto w-full px-4 pb-12 pt-6 sm:px-8 lg:pt-8", takeoverWidth)}>
+            <div className={cx("mx-auto w-full px-4 pb-12 pt-6 sm:px-8 lg:pt-8", widths.takeover)}>
               {content}
             </div>
           </section>
@@ -283,7 +390,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
       <div
         className={cx(
           "mx-auto grid w-full grid-cols-1 gap-3 px-3 py-3 sm:px-4 lg:justify-center lg:gap-3 lg:py-5",
-          layoutWidth,
+          widths.layout,
         )}
       >
         <aside className="min-w-0 lg:sticky lg:top-5 lg:self-start">
@@ -305,6 +412,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
 
 export function SettingsGroup({
   title,
+  description,
   actions,
   children,
   collapsible,
@@ -349,6 +457,11 @@ export function SettingsGroup({
               {title}
             </h3>
           )}
+          {description ? (
+            <p className="mt-0.5 text-[length:var(--fs-xs)] leading-snug text-(--ui-muted)">
+              {description}
+            </p>
+          ) : null}
         </div>
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
@@ -361,7 +474,15 @@ export function SettingsGroup({
   );
 }
 
-export function SettingsRow({ label, value, control, status, actions, children }: RowProps) {
+export function SettingsRow({
+  label,
+  description,
+  value,
+  control,
+  status,
+  actions,
+  children,
+}: RowProps) {
   const primaryValue = control ?? value;
 
   return (
@@ -378,6 +499,11 @@ export function SettingsRow({ label, value, control, status, actions, children }
           >
             {label}
           </div>
+          {description ? (
+            <div className="mt-0.5 text-[length:var(--fs-xs)] leading-snug text-(--ui-muted)">
+              {description}
+            </div>
+          ) : null}
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {primaryValue ? (

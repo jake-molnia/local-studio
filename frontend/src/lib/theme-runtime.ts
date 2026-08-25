@@ -158,8 +158,16 @@ export function applyThemeToDocument(themeId: ThemeId): ThemeId {
   const nextTheme = THEME_BY_ID.get(themeId) ?? THEME_BY_ID.get(DEFAULT_THEME_ID);
   if (!nextTheme) return themeId;
 
-  document.documentElement.setAttribute("data-theme", nextTheme.id);
+  const root = document.documentElement;
+  root.classList.add("theme-changing");
+  root.setAttribute("data-theme", nextTheme.id);
   setThemeTokens(nextTheme.tokens, nextTheme.ui);
+  root.style.colorScheme = nextTheme.id.includes("light") ? "light" : "dark";
+  document.body.style.backgroundColor = nextTheme.tokens.bg;
+  document
+    .querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    ?.setAttribute("content", nextTheme.tokens.bg);
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-changing")));
   return nextTheme.id;
 }
 

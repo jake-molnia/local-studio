@@ -44,9 +44,11 @@ type SidebarResizeInteraction = {
 
 const SIDEBAR_MIN_WIDTH = 194;
 const SIDEBAR_MAX_WIDTH = 360;
-function clampSidebarWidth(width: number): number {
+const MIN_WORKSPACE_WIDTH = 560;
+const LAST_WORKSPACE_URL_KEY = "local-studio:last-workspace-url";
+function clampSidebarWidth(width: number, maxWidth = SIDEBAR_MAX_WIDTH): number {
   if (!Number.isFinite(width)) return DEFAULT_SIDEBAR_WIDTH;
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+  return Math.min(maxWidth, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
 export function LeftSidebar({ children }: { children: ReactNode }) {
@@ -73,7 +75,8 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
     })),
   );
   const isExpanded = desktopSidebarPinnedOpen;
-  const clampedSidebarWidth = clampSidebarWidth(sidebarWidth);
+  const [sidebarMaxWidth, setSidebarMaxWidth] = useState(SIDEBAR_MAX_WIDTH);
+  const clampedSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarMaxWidth);
   const ownsMobileHeader = routeOwnsMobileHeader(pathname);
   const [paletteMode, setPaletteMode] = useState<PaletteMode>(null);
   const [navView, setNavView] = useState<NavView>("projects");
@@ -88,6 +91,26 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
   );
   const [SessionsCommand, setSessionsCommand] = useState<SessionsCommandComponent | null>(null);
   const resizeInteractionRef = useRef<SidebarResizeInteraction | null>(null);
+
+  useMountSubscription(() => {
+    const updateMaxWidth = () => {
+      setSidebarMaxWidth(
+        Math.max(
+          SIDEBAR_MIN_WIDTH,
+          Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH),
+        ),
+      );
+    };
+    updateMaxWidth();
+    window.addEventListener("resize", updateMaxWidth);
+    return () => window.removeEventListener("resize", updateMaxWidth);
+  }, []);
+
+  useMountSubscription(() => {
+    if (pathname.startsWith("/settings")) return;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.sessionStorage.setItem(LAST_WORKSPACE_URL_KEY, current);
+  }, [pathname]);
 
   useMountSubscription(() => {
     if (!mobileMenuOpen) return;
@@ -189,7 +212,10 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         setSidebarResizing(false);
       };
       const onMouseMove = (moveEvent: MouseEvent) => {
-        interaction.pendingWidth = clampSidebarWidth(startWidth + moveEvent.clientX - startX);
+        interaction.pendingWidth = clampSidebarWidth(
+          startWidth + moveEvent.clientX - startX,
+          sidebarMaxWidth,
+        );
         if (interaction.frame !== null) return;
         interaction.frame = requestAnimationFrame(() => {
           interaction.frame = null;
@@ -203,7 +229,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
       window.addEventListener("mousemove", onMouseMove);
       window.addEventListener("mouseup", cleanup);
     },
-    [clampedSidebarWidth, isExpanded, setSidebarWidth],
+    [clampedSidebarWidth, isExpanded, setSidebarWidth, sidebarMaxWidth],
   );
   const resizeSidebarByKeyboard = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -211,14 +237,23 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
       event.preventDefault();
       const step = event.shiftKey ? 32 : 16;
       const direction = event.key === "ArrowRight" ? 1 : -1;
-      setSidebarWidth(clampSidebarWidth(clampedSidebarWidth + direction * step));
+      setSidebarWidth(clampSidebarWidth(clampedSidebarWidth + direction * step, sidebarMaxWidth));
     },
-    [clampedSidebarWidth, isExpanded, setSidebarWidth],
+    [clampedSidebarWidth, isExpanded, setSidebarWidth, sidebarMaxWidth],
   );
   const openNewTask = useCallback(
     () => router.push(hrefWithOpenNonce("/agent?new=1&replace=1")),
     [router],
   );
+  const navigateBack = useCallback(() => {
+    if (pathname.startsWith("/settings")) {
+      const fallback = window.sessionStorage.getItem(LAST_WORKSPACE_URL_KEY) ?? "/agent";
+      router.replace(fallback.startsWith("/settings") ? "/agent" : fallback);
+      return;
+    }
+    if (window.history.length > 1) router.back();
+    else router.replace("/agent");
+  }, [pathname, router]);
 
   useMountSubscription(() => {
     if (pathname === "/agent") return;
@@ -253,6 +288,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         ProjectsNavSection={ProjectsNavSection}
         onStartResize={startSidebarResize}
         onResizeKeyDown={resizeSidebarByKeyboard}
+        onResetWidth={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
         onRevealProjectsNav={() => {
           if (!hidesAppSidebar && !projectsNavReady) setProjectsNavReady(true);
         }}
@@ -265,6 +301,8 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         runningSessions={runningSessions}
         finishedSessions={finishedSessions}
         onNewTask={openNewTask}
+        onNavigateBack={navigateBack}
+        onNavigateForward={() => router.forward()}
       />
 
       {mobileMenuOpen ? (

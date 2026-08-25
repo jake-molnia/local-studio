@@ -66,6 +66,7 @@ export function DesktopSidebar({
   ProjectsNavSection,
   onStartResize,
   onResizeKeyDown,
+  onResetWidth,
   onRevealProjectsNav,
   onSetPinnedOpen,
   onOpenSearch,
@@ -74,6 +75,8 @@ export function DesktopSidebar({
   runningSessions,
   finishedSessions,
   onNewTask,
+  onNavigateBack,
+  onNavigateForward,
 }: {
   pathname: string;
   isExpanded: boolean;
@@ -83,6 +86,7 @@ export function DesktopSidebar({
   ProjectsNavSection: ProjectsNavSectionComponent | null;
   onStartResize: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onResizeKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onResetWidth: () => void;
   onRevealProjectsNav: () => void;
   onSetPinnedOpen: (open: boolean) => void;
   onOpenSearch: () => void;
@@ -91,6 +95,8 @@ export function DesktopSidebar({
   runningSessions: number;
   finishedSessions: number;
   onNewTask: () => void;
+  onNavigateBack: () => void;
+  onNavigateForward: () => void;
 }) {
   const settingsMode = pathname.startsWith("/settings");
   return (
@@ -119,6 +125,7 @@ export function DesktopSidebar({
           tabIndex={0}
           title="Resize sidebar"
           onMouseDown={onStartResize}
+          onDoubleClick={onResetWidth}
           onKeyDown={onResizeKeyDown}
           className="group absolute right-0 top-0 z-[60] h-full w-2 cursor-col-resize"
         >
@@ -161,7 +168,7 @@ export function DesktopSidebar({
             <SessionStatus running={runningSessions} finished={finishedSessions} />
           </span>
           <button
-            onClick={() => window.history.back()}
+            onClick={onNavigateBack}
             className={HISTORY_STEPPER_CLASS}
             title="Go back"
             aria-label="Go back"
@@ -169,7 +176,7 @@ export function DesktopSidebar({
             <ChevronLeft className="h-3 w-3" strokeWidth={1.75} />
           </button>
           <button
-            onClick={() => window.history.forward()}
+            onClick={onNavigateForward}
             className={HISTORY_STEPPER_CLASS}
             title="Go forward"
             aria-label="Go forward"
