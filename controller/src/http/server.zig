@@ -1,72 +1,73 @@
 const std = @import("std");
-const config_module = @import("config.zig");
-const shutdown = @import("shutdown.zig");
+const config_module = @import("../app/config.zig");
+const shutdown = @import("../app/shutdown.zig");
 const reverse_proxy = @import("reverse_proxy.zig");
 const route_registry = @import("route_registry.zig");
-const rig_service = @import("services/rigs.zig");
-const rig_mutations = @import("services/rig_mutations.zig");
-const worker_service = @import("services/workers.zig");
-const model_service = @import("services/models.zig");
-const tokenization_service = @import("services/tokenization.zig");
-const recipe_service = @import("services/recipes.zig");
-const lifecycle = @import("services/lifecycle.zig");
-const telemetry = @import("services/telemetry.zig");
-const system_service = @import("services/system.zig");
-const runtime_info = @import("services/runtime_info.zig");
-const metrics = @import("services/metrics.zig");
-const logs = @import("services/logs.zig");
-const studio_settings = @import("services/studio_settings.zig");
-const storage_service = @import("services/storage.zig");
-const studio_operations = @import("services/studio_operations.zig");
-const model_files = @import("services/model_files.zig");
-const model_index = @import("services/model_index.zig");
-const studio_models = @import("services/studio_models.zig");
-const runtime_routes = @import("services/runtime_routes.zig");
-const vram_calculator = @import("services/vram_calculator.zig");
-const benchmark_service = @import("services/benchmark.zig");
-const runtime_jobs_service = @import("services/runtime_jobs.zig");
-const huggingface_models = @import("services/huggingface_models.zig");
-const download_manager = @import("services/download_manager.zig");
-const provider_service = @import("services/providers.zig");
-const provider_catalog = @import("services/provider_catalog.zig");
-const provider_routing = @import("services/provider_routing.zig");
-const provider_gateway = @import("services/provider_gateway.zig");
-const openai_protocol = @import("services/openai_protocol.zig");
-const head_providers = @import("services/head_providers.zig");
-const codex_gateway = @import("services/codex_gateway.zig");
-const cursor_gateway = @import("services/cursor_gateway.zig");
-const harness_runtime = @import("services/harness_runtime.zig");
-const agent_coordinator = @import("services/agent_coordinator.zig");
-const agent_sessions = @import("services/agent_sessions.zig");
-const session_change = @import("services/session_change.zig");
-const automations = @import("services/automations.zig");
-const head_connection = @import("services/head_connection.zig");
-const agent_enrollments = @import("services/agent_enrollments.zig");
-const agent_models = @import("services/agent_models.zig");
-const model_catalog = @import("services/model_catalog.zig");
-const agent_projects = @import("services/agent_projects.zig");
-const agent_connectors = @import("services/agent_connectors.zig");
-const agent_oauth = @import("services/agent_oauth.zig");
-const agent_google = @import("services/agent_google.zig");
-const agent_code_storage = @import("services/agent_code_storage.zig");
-const agent_discovery = @import("services/agent_discovery.zig");
-const agent_pr = @import("services/agent_pr.zig");
-const agent_terminal = @import("services/agent_terminal.zig");
-const agent_pty = @import("services/agent_pty.zig");
-const agent_browser = @import("services/agent_browser.zig");
-const agent_goals = @import("services/agent_goals.zig");
-const agent_git = @import("services/agent_git.zig");
-const agent_subagents = @import("services/agent_subagents.zig");
-const request_auth = @import("services/request_auth.zig");
-const compute_plan = @import("services/compute_plan.zig");
-const compute_lifecycle = @import("services/compute_lifecycle.zig");
-const recipes = @import("repository/recipes.zig");
-const peak_metrics = @import("repository/peak_metrics.zig");
-const downloads = @import("repository/downloads.zig");
-const inference_usage = @import("repository/inference_usage.zig");
-const sqlite = @import("repository/sqlite.zig");
-const system_info = @import("platform/system_info.zig");
-const topology = @import("topology.zig");
+const request_tools = @import("request.zig");
+const rig_service = @import("../topology/rigs.zig");
+const rig_mutations = @import("../topology/rig_mutations.zig");
+const worker_service = @import("../topology/workers.zig");
+const model_service = @import("../inference/models/service.zig");
+const tokenization_service = @import("../inference/tokenization.zig");
+const recipe_service = @import("../inference/recipes/service.zig");
+const lifecycle = @import("../inference/runtime/lifecycle.zig");
+const telemetry = @import("../system/telemetry.zig");
+const system_service = @import("../system/service.zig");
+const runtime_info = @import("../inference/runtime/info.zig");
+const metrics = @import("../system/metrics/service.zig");
+const logs = @import("../system/logs.zig");
+const studio_settings = @import("../system/settings/service.zig");
+const storage_service = @import("../system/storage.zig");
+const studio_operations = @import("../system/studio_operations.zig");
+const model_files = @import("../inference/models/files.zig");
+const model_index = @import("../inference/models/index.zig");
+const studio_models = @import("../inference/models/studio.zig");
+const runtime_routes = @import("../inference/runtime/routes.zig");
+const vram_calculator = @import("../inference/compute/vram.zig");
+const benchmark_service = @import("../inference/benchmark/service.zig");
+const runtime_jobs_service = @import("../inference/runtime/jobs.zig");
+const huggingface_models = @import("../inference/models/huggingface.zig");
+const download_manager = @import("../inference/downloads/manager.zig");
+const provider_service = @import("../providers/service.zig");
+const provider_catalog = @import("../providers/catalog.zig");
+const provider_routing = @import("../providers/routing.zig");
+const provider_gateway = @import("../providers/gateway.zig");
+const openai_protocol = @import("../providers/openai_protocol.zig");
+const head_providers = @import("../providers/head.zig");
+const codex_gateway = @import("../providers/codex_gateway.zig");
+const cursor_gateway = @import("../providers/cursor_gateway.zig");
+const harness_runtime = @import("../agent/harness/runtime.zig");
+const agent_coordinator = @import("../agent/sessions/coordinator.zig");
+const agent_sessions = @import("../agent/sessions/service.zig");
+const session_change = @import("../agent/sessions/change.zig");
+const automations = @import("../agent/automations/service.zig");
+const head_connection = @import("../topology/head_connection.zig");
+const agent_enrollments = @import("../topology/enrollments.zig");
+const agent_models = @import("../agent/models/service.zig");
+const model_catalog = @import("../inference/models/catalog.zig");
+const agent_projects = @import("../agent/projects/service.zig");
+const agent_connectors = @import("../agent/connectors/service.zig");
+const agent_oauth = @import("../accounts/oauth/service.zig");
+const agent_google = @import("../accounts/google/service.zig");
+const agent_code_storage = @import("../accounts/code_storage/service.zig");
+const agent_discovery = @import("../agent/discovery/service.zig");
+const agent_pr = @import("../agent/pull_requests/service.zig");
+const agent_terminal = @import("../agent/terminal/service.zig");
+const agent_pty = @import("../agent/terminal/pty.zig");
+const agent_browser = @import("../agent/browser/service.zig");
+const agent_goals = @import("../agent/goals/service.zig");
+const agent_git = @import("../agent/git/service.zig");
+const agent_subagents = @import("../agent/subagents/service.zig");
+const request_auth = @import("../accounts/request_auth.zig");
+const compute_plan = @import("../inference/compute/plan.zig");
+const compute_lifecycle = @import("../inference/compute/lifecycle.zig");
+const recipes = @import("../inference/recipes/store.zig");
+const peak_metrics = @import("../system/metrics/store.zig");
+const downloads = @import("../inference/downloads/store.zig");
+const inference_usage = @import("../inference/usage/store.zig");
+const sqlite = @import("../storage/sqlite.zig");
+const system_info = @import("../system/platform/system_info.zig");
+const topology = @import("../topology/topology.zig");
 
 const Config = config_module.Config;
 const Mode = config_module.Mode;
@@ -258,7 +259,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
 
-    if (mode == .head and std.mem.eql(u8, route.path, "/studio/diagnostics") and requestHeader(request, "X-Local-Studio-Worker-Id") == null) {
+    if (mode == .head and std.mem.eql(u8, route.path, "/studio/diagnostics") and request_tools.header(request, "X-Local-Studio-Worker-Id") == null) {
         const models_dir = try studio.modelsDirectory(allocator, io);
         defer allocator.free(models_dir);
         const response = try studio_operations.diagnosticsPayload(allocator, io, configuration, models_dir, system, runtime_cache);
@@ -316,7 +317,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/:providerId/login") and request.head.method == .POST) {
-        const provider_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/login");
+        const provider_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/login");
         defer allocator.free(provider_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -329,22 +330,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId") and request.head.method == .GET) {
-        const job_id = try pathParameter(allocator, request.head.target, "/api/agent/providers/login/");
+        const job_id = try request_tools.pathParameter(allocator, request.head.target, "/api/agent/providers/login/");
         defer allocator.free(job_id);
-        const response = try head_provider_state.jobPayloadAny(job_id, queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
+        const response = try head_provider_state.jobPayloadAny(job_id, request_tools.queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId/cancel") and request.head.method == .POST) {
-        const job_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/cancel");
+        const job_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/cancel");
         defer allocator.free(job_id);
         if (!(try head_provider_state.cancelAny(job_id))) return respondDownloadError(request, .not_found, "Model provider login job not found");
         try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/login/:jobId/respond") and request.head.method == .POST) {
-        const job_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/respond");
+        const job_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/providers/login/", "/respond");
         defer allocator.free(job_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -358,7 +359,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/providers/:providerId/logout") and request.head.method == .POST) {
-        const provider_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/logout");
+        const provider_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/providers/", "/logout");
         defer allocator.free(provider_id);
         if (!(try head_provider_state.logout(provider_id))) return respondDownloadError(request, .not_found, "Head model provider not found");
         try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -389,7 +390,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/enrollments/:id")) {
-        const node_id = try pathParameter(allocator, request.head.target, "/api/agent/enrollments/");
+        const node_id = try request_tools.pathParameter(allocator, request.head.target, "/api/agent/enrollments/");
         defer allocator.free(node_id);
         const response = agent_enrollments.deletePayload(allocator, io, database, node_id) catch |failure| return respondEnrollmentFailure(request, failure);
         defer allocator.free(response);
@@ -410,7 +411,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/automations/:id")) {
-        const automation_id = try pathParameter(allocator, request.head.target, "/api/agent/automations/");
+        const automation_id = try request_tools.pathParameter(allocator, request.head.target, "/api/agent/automations/");
         defer allocator.free(automation_id);
         const response = if (request.head.method == .DELETE)
             automations.deletePayload(allocator, io, database, automation_id)
@@ -425,7 +426,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/automations/:id/run")) {
-        const automation_id = try pathParameterBetween(allocator, request.head.target, "/api/agent/automations/", "/run");
+        const automation_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/automations/", "/run");
         defer allocator.free(automation_id);
         const response = automations.runPayload(allocator, io, mode, client, database, harness, automation_id) catch |failure| return respondAutomationFailure(request, failure);
         defer allocator.free(response);
@@ -433,9 +434,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/projects")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        const id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "id") else null;
         defer if (id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -451,9 +452,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        const id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "id") else null;
         defer if (id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -479,13 +480,13 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         } else if (std.mem.eql(u8, route.path, "/api/agent/oauth/authorize"))
             if (request.head.method == .POST) oauth.authorizePayload(client, document orelse return false) else oauth.cancelPayload()
         else if (std.mem.eql(u8, route.path, "/api/agent/oauth/status")) local: {
-            const connector_id = try queryParameter(allocator, request.head.target, "connectorId");
+            const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
             break :local oauth.statusPayload(client, database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         } else if (std.mem.eql(u8, route.path, "/api/agent/oauth/client"))
             oauth.clientPayload(database, document orelse return false)
         else local: {
-            const connector_id = try queryParameter(allocator, request.head.target, "connectorId");
+            const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
             break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         };
@@ -518,7 +519,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/api/agent/accounts/code-storage")) {
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
         const response = if (mode != .standalone) remote: {
             const internal_path = if (request.head.method == .DELETE) path: {
@@ -557,7 +558,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/api/agent/accounts/sandboxes")) {
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
         const response = if (mode != .standalone) remote: {
             const internal_path = if (account_id) |value|
@@ -578,15 +579,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/grants")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const probe_id = try queryParameter(allocator, request.head.target, "connector");
+        const probe_id = try request_tools.queryParameter(allocator, request.head.target, "connector");
         defer if (probe_id) |value| allocator.free(value);
         const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
+        const model_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "modelId") else null;
         defer if (model_id) |value| allocator.free(value);
-        const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
+        const connector_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
             .GET => agent_connectors.grantsPayload(allocator, io, mode, configuration, client, database, node_id, probe_id),
@@ -600,9 +601,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/call")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        const model_id = try request_tools.queryParameter(allocator, request.head.target, "model_id");
         defer if (model_id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -616,7 +617,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/test")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -626,7 +627,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/connectors/ssh-server-path")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
         const response = agent_connectors.sshPathPayload(allocator, io, mode, client, database, node_id) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
@@ -634,9 +635,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/skills") or std.mem.eql(u8, route.path, "/api/agent/skills/load") or std.mem.eql(u8, route.path, "/api/agent/prompt-templates") or std.mem.eql(u8, route.path, "/api/agent/prompt-templates/load")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const path = if (std.mem.endsWith(u8, route.path, "/load")) try queryParameter(allocator, request.head.target, "path") else null;
+        const path = if (std.mem.endsWith(u8, route.path, "/load")) try request_tools.queryParameter(allocator, request.head.target, "path") else null;
         defer if (path) |value| allocator.free(value);
         const response = if (std.mem.eql(u8, route.path, "/api/agent/skills"))
             agent_discovery.skillsPayload(allocator, io, mode, configuration, client, database, node_id)
@@ -652,9 +653,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/pr") or std.mem.eql(u8, route.path, "/api/agent/pr/merge")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const cwd = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "cwd") else null;
+        const cwd = if (request.head.method == .GET) try request_tools.queryParameter(allocator, request.head.target, "cwd") else null;
         defer if (cwd) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -668,9 +669,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/git") or std.mem.eql(u8, route.path, "/api/agent/git/branches") or std.mem.eql(u8, route.path, "/api/agent/git/worktrees")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        const cwd = try request_tools.queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -691,7 +692,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.startsWith(u8, route.path, "/api/agent/browser/")) {
         const target = try allocator.dupe(u8, request.head.target);
         defer allocator.free(target);
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -705,7 +706,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal/pty/stream")) {
-        const id = try queryParameter(allocator, request.head.target, "id");
+        const id = try request_tools.queryParameter(allocator, request.head.target, "id");
         defer if (id) |value| allocator.free(value);
         const session_id = id orelse return respondTerminalFailure(request, error.PtyIdRequired);
         if (mode == .standalone) {
@@ -723,7 +724,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return false;
     }
     if (std.mem.startsWith(u8, route.path, "/api/agent/terminal/pty/")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -744,9 +745,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/terminal") or std.mem.eql(u8, route.path, "/api/agent/terminal/resolve-cwd")) {
-        const node_id = try queryParameter(allocator, request.head.target, "nodeId");
+        const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
-        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        const cwd = try request_tools.queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -760,7 +761,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/goal")) {
-        const session_id = try queryParameter(allocator, request.head.target, "piSessionId");
+        const session_id = try request_tools.queryParameter(allocator, request.head.target, "piSessionId");
         defer if (session_id) |value| allocator.free(value);
         const id = session_id orelse return respondGoalFailure(request, error.SessionIdRequired);
         const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
@@ -777,7 +778,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/subagents")) {
-        const parent_id = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "piSessionId") else null;
+        const parent_id = if (request.head.method == .GET) try request_tools.queryParameter(allocator, request.head.target, "piSessionId") else null;
         defer if (parent_id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -792,11 +793,11 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/api/agent/subagents/:runId") or std.mem.eql(u8, route.path, "/api/agent/subagents/:runId/stop")) {
         const run_id = if (std.mem.endsWith(u8, route.path, "/stop"))
-            try pathParameterBetween(allocator, request.head.target, "/api/agent/subagents/", "/stop")
+            try request_tools.pathParameterBetween(allocator, request.head.target, "/api/agent/subagents/", "/stop")
         else
-            try pathParameter(allocator, request.head.target, "/api/agent/subagents/");
+            try request_tools.pathParameter(allocator, request.head.target, "/api/agent/subagents/");
         defer allocator.free(run_id);
-        const parent_id = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "piSessionId") else null;
+        const parent_id = if (request.head.method == .GET) try request_tools.queryParameter(allocator, request.head.target, "piSessionId") else null;
         defer if (parent_id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -811,25 +812,25 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     }
     if (std.mem.eql(u8, route.path, "/api/agent/sessions")) {
         if (request.head.method == .DELETE) return respondDownloadError(request, .method_not_allowed, "Session deletion is disabled. Archive sessions from the UI instead.");
-        const project_id = try queryParameter(allocator, request.head.target, "projectId");
+        const project_id = try request_tools.queryParameter(allocator, request.head.target, "projectId");
         defer if (project_id) |value| allocator.free(value);
-        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        const cwd = try request_tools.queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
         const canonical = if (project_id == null) agent_projects.resolveAllowedPath(allocator, io, environment, cwd orelse return respondSessionFailure(request, error.SessionCwdRequired)) catch |failure| return respondSessionFailure(request, failure) else null;
         defer if (canonical) |value| allocator.free(value);
-        const response = agent_sessions.historyPayload(allocator, io, database, canonical, project_id, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        const response = agent_sessions.historyPayload(allocator, io, database, canonical, project_id, request_tools.queryFlag(request.head.target, "archived"), request_tools.queryFlag(request.head.target, "includeArchived"), request_tools.boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/sessions/all")) {
-        const response = agent_sessions.historyPayload(allocator, io, database, null, null, queryFlag(request.head.target, "archived"), queryFlag(request.head.target, "includeArchived"), boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
+        const response = agent_sessions.historyPayload(allocator, io, database, null, null, request_tools.queryFlag(request.head.target, "archived"), request_tools.queryFlag(request.head.target, "includeArchived"), request_tools.boundedLimit(request.head.target)) catch |failure| return respondSessionFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/sessions/:id")) {
-        const session_id = try pathParameter(allocator, request.head.target, "/api/agent/sessions/");
+        const session_id = try request_tools.pathParameter(allocator, request.head.target, "/api/agent/sessions/");
         defer allocator.free(session_id);
         if (request.head.method == .PATCH) {
             const document = try readBoundedJsonBody(allocator, request) orelse return false;
@@ -855,18 +856,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/status")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
         const session_id = session_id_value orelse "default";
-        const response = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, queryUnsigned(request.head.target, "after") orelse 0);
+        const response = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, request_tools.queryUnsigned(request.head.target, "after") orelse 0);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/events")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
-        agent_coordinator.serveEvents(allocator, io, mode, client, database, harness, session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
+        agent_coordinator.serveEvents(allocator, io, mode, client, database, harness, session_id_value orelse "default", request_tools.queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
             if (failure == error.SessionNotFound) return respondHarnessFailure(request, failure);
             if (failure == error.AssignedHarnessUnavailable) return respondHarnessFailure(request, failure);
             return false;
@@ -878,9 +879,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return false;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/runtime/transcript")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
-        const since = try queryParameter(allocator, request.head.target, "since");
+        const since = try request_tools.queryParameter(allocator, request.head.target, "since");
         defer if (since) |value| allocator.free(value);
         const response = agent_coordinator.transcriptPayload(allocator, io, mode, client, database, harness, session_id_value orelse "default", since) catch |failure| return respondHarnessFailure(request, failure);
         defer allocator.free(response);
@@ -926,7 +927,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/projects")) {
-        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        const id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "id") else null;
         defer if (id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -942,7 +943,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connectors")) {
-        const id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "id") else null;
+        const id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "id") else null;
         defer if (id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -963,13 +964,13 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/authorize"))
             if (request.head.method == .POST) oauth.authorizePayload(client, document orelse return false) else oauth.cancelPayload()
         else if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/status")) local: {
-            const connector_id = try queryParameter(allocator, request.head.target, "connectorId");
+            const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
             break :local oauth.statusPayload(client, database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         } else if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/client"))
             oauth.clientPayload(database, document orelse return false)
         else local: {
-            const connector_id = try queryParameter(allocator, request.head.target, "connectorId");
+            const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
             break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
         };
@@ -997,7 +998,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/internal/node/v1/accounts/code-storage")) {
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
             .GET => code_storage.accountPayload(),
@@ -1026,7 +1027,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/internal/node/v1/accounts/sandboxes")) {
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const account_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "accountId") else null;
+        const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
             .GET => code_storage.sandboxAccountsPayload(),
@@ -1040,13 +1041,13 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-grants")) {
-        const probe_id = try queryParameter(allocator, request.head.target, "connector");
+        const probe_id = try request_tools.queryParameter(allocator, request.head.target, "connector");
         defer if (probe_id) |value| allocator.free(value);
         const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const model_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "modelId") else null;
+        const model_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "modelId") else null;
         defer if (model_id) |value| allocator.free(value);
-        const connector_id = if (request.head.method == .DELETE) try queryParameter(allocator, request.head.target, "connectorId") else null;
+        const connector_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
             .GET => agent_connectors.grantsLocal(allocator, io, configuration, client, database, probe_id),
@@ -1060,7 +1061,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-call")) {
-        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        const model_id = try request_tools.queryParameter(allocator, request.head.target, "model_id");
         defer if (model_id) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -1088,7 +1089,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/skills") or std.mem.eql(u8, route.path, "/internal/node/v1/skills/load") or std.mem.eql(u8, route.path, "/internal/node/v1/prompt-templates") or std.mem.eql(u8, route.path, "/internal/node/v1/prompt-templates/load")) {
-        const path = if (std.mem.endsWith(u8, route.path, "/load")) try queryParameter(allocator, request.head.target, "path") else null;
+        const path = if (std.mem.endsWith(u8, route.path, "/load")) try request_tools.queryParameter(allocator, request.head.target, "path") else null;
         defer if (path) |value| allocator.free(value);
         const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/skills"))
             agent_discovery.skillsLocal(allocator, io, configuration)
@@ -1104,7 +1105,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/pr") or std.mem.eql(u8, route.path, "/internal/node/v1/pr/merge")) {
-        const cwd = if (request.head.method == .GET) try queryParameter(allocator, request.head.target, "cwd") else null;
+        const cwd = if (request.head.method == .GET) try request_tools.queryParameter(allocator, request.head.target, "cwd") else null;
         defer if (cwd) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -1118,7 +1119,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/git") or std.mem.eql(u8, route.path, "/internal/node/v1/git/branches") or std.mem.eql(u8, route.path, "/internal/node/v1/git/worktrees")) {
-        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        const cwd = try request_tools.queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
         const document = if (request.head.method == .POST) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
@@ -1137,7 +1138,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/terminal") or std.mem.eql(u8, route.path, "/internal/node/v1/terminal/resolve-cwd")) {
-        const cwd = try queryParameter(allocator, request.head.target, "cwd");
+        const cwd = try request_tools.queryParameter(allocator, request.head.target, "cwd");
         defer if (cwd) |value| allocator.free(value);
         const document = try readBoundedAgentBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -1151,7 +1152,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/terminal/pty/stream")) {
-        const id = try queryParameter(allocator, request.head.target, "id");
+        const id = try request_tools.queryParameter(allocator, request.head.target, "id");
         defer if (id) |value| allocator.free(value);
         pty.serveStream(id orelse return respondTerminalFailure(request, error.PtyIdRequired), request) catch return false;
         return false;
@@ -1195,28 +1196,28 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/status")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
-        const response = try harness.statusPayload(session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0);
+        const response = try harness.statusPayload(session_id_value orelse "default", request_tools.queryUnsigned(request.head.target, "after") orelse 0);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/events")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
-        harness.serveEvents(session_id_value orelse "default", queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
+        harness.serveEvents(session_id_value orelse "default", request_tools.queryUnsigned(request.head.target, "after") orelse 0, request) catch |failure| {
             if (failure == error.SessionNotFound) return respondHarnessFailure(request, failure);
             return false;
         };
         return false;
     }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/transcript")) {
-        const session_id_value = try queryParameter(allocator, request.head.target, "sessionId");
+        const session_id_value = try request_tools.queryParameter(allocator, request.head.target, "sessionId");
         defer if (session_id_value) |value| allocator.free(value);
-        const native_session_id = try queryParameter(allocator, request.head.target, "nativeSessionId");
+        const native_session_id = try request_tools.queryParameter(allocator, request.head.target, "nativeSessionId");
         defer if (native_session_id) |value| allocator.free(value);
-        const since = try queryParameter(allocator, request.head.target, "since");
+        const since = try request_tools.queryParameter(allocator, request.head.target, "since");
         defer if (since) |value| allocator.free(value);
         const response = harness.transcriptPayload(session_id_value orelse "default", native_session_id, since) catch |failure| return respondHarnessFailure(request, failure);
         defer allocator.free(response);
@@ -1256,7 +1257,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId")) {
-        const rig_id = try pathParameter(allocator, request.head.target, "/studio/rigs/");
+        const rig_id = try request_tools.pathParameter(allocator, request.head.target, "/studio/rigs/");
         defer allocator.free(rig_id);
         const response = if (request.head.method == .DELETE)
             rig_mutations.deleteRig(allocator, io, database, rig_id)
@@ -1271,7 +1272,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId/nodes")) {
-        const rig_id = try pathParameterBetween(allocator, request.head.target, "/studio/rigs/", "/nodes");
+        const rig_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/studio/rigs/", "/nodes");
         defer allocator.free(rig_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -1281,7 +1282,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/rigs/:rigId/nodes/:nodeId")) {
-        const parameters = try rigNodeParameters(allocator, request.head.target);
+        const parameters = try request_tools.rigNodeParameters(allocator, request.head.target);
         defer allocator.free(parameters.rig_id);
         defer allocator.free(parameters.node_id);
         const response = if (request.head.method == .DELETE)
@@ -1311,7 +1312,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/sessions/:sessionId")) {
-        const session_id = try pathParameter(allocator, request.head.target, "/studio/sessions/");
+        const session_id = try request_tools.pathParameter(allocator, request.head.target, "/studio/sessions/");
         defer allocator.free(session_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -1361,7 +1362,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveVramCalculator(allocator, io, configuration, system, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/peak-metrics")) {
-        const model_id = try queryParameter(allocator, request.head.target, "model_id");
+        const model_id = try request_tools.queryParameter(allocator, request.head.target, "model_id");
         defer if (model_id) |value| allocator.free(value);
         const response = response: {
             try database.lock(io);
@@ -1376,7 +1377,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/benchmark")) {
-        const prompt_value = try queryParameter(allocator, request.head.target, "prompt_tokens");
+        const prompt_value = try request_tools.queryParameter(allocator, request.head.target, "prompt_tokens");
         defer if (prompt_value) |value| allocator.free(value);
         const prompt_tokens = if (prompt_value) |value| std.fmt.parseInt(usize, value, 10) catch 0 else 1000;
         if (prompt_tokens < 1 or prompt_tokens > 100_000) {
@@ -1419,17 +1420,17 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/huggingface/models")) {
-        const search_value = try queryParameter(allocator, request.head.target, "search");
+        const search_value = try request_tools.queryParameter(allocator, request.head.target, "search");
         defer if (search_value) |value| allocator.free(value);
-        const filter_value = try queryParameter(allocator, request.head.target, "filter");
+        const filter_value = try request_tools.queryParameter(allocator, request.head.target, "filter");
         defer if (filter_value) |value| allocator.free(value);
-        const sort_value = try queryParameter(allocator, request.head.target, "sort");
+        const sort_value = try request_tools.queryParameter(allocator, request.head.target, "sort");
         defer if (sort_value) |value| allocator.free(value);
-        const search = if (search_value) |value| trimmedOptional(value) else null;
+        const search = if (search_value) |value| request_tools.trimmedOptional(value) else null;
         const filter = if (filter_value) |value| if (value.len > 0) value else null else null;
-        const sort = if (sort_value) |value| trimmedOptional(value) else null;
-        const limit: usize = @intCast(@min(@max(queryUnsigned(request.head.target, "limit") orelse 50, 1), 100));
-        const raw_offset = queryUnsigned(request.head.target, "offset") orelse 0;
+        const sort = if (sort_value) |value| request_tools.trimmedOptional(value) else null;
+        const limit: usize = @intCast(@min(@max(request_tools.queryUnsigned(request.head.target, "limit") orelse 50, 1), 100));
+        const raw_offset = request_tools.queryUnsigned(request.head.target, "offset") orelse 0;
         const offset = std.math.cast(usize, raw_offset) orelse std.math.maxInt(usize);
         var result = huggingface_models.payload(allocator, io, client, environment, search, filter, sort, limit, offset) catch |failure| {
             var output: Io.Writer.Allocating = .init(allocator);
@@ -1460,7 +1461,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveDownloadStart(allocator, io, configuration, studio, download_state, client, database, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/studio/downloads/:downloadId") and request.head.method == .GET) {
-        const download_id = try pathParameter(allocator, request.head.target, "/studio/downloads/");
+        const download_id = try request_tools.pathParameter(allocator, request.head.target, "/studio/downloads/");
         defer allocator.free(download_id);
         const response = response: {
             try database.lock(io);
@@ -1508,7 +1509,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login") and request.head.method == .POST) {
-        const provider_id = try pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/login");
+        const provider_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/login");
         defer allocator.free(provider_id);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -1521,22 +1522,22 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId") and request.head.method == .GET) {
-        const parameters = try modelProviderJobParameters(allocator, request.head.target, "");
+        const parameters = try request_tools.modelProviderJobParameters(allocator, request.head.target, "");
         defer parameters.deinit(allocator);
-        const response = try head_provider_state.jobPayload(parameters.provider_id, parameters.job_id, queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
+        const response = try head_provider_state.jobPayload(parameters.provider_id, parameters.job_id, request_tools.queryUnsigned(request.head.target, "after") orelse 0) orelse return respondDownloadError(request, .not_found, "Model provider login job not found");
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId/cancel") and request.head.method == .POST) {
-        const parameters = try modelProviderJobParameters(allocator, request.head.target, "/cancel");
+        const parameters = try request_tools.modelProviderJobParameters(allocator, request.head.target, "/cancel");
         defer parameters.deinit(allocator);
         if (!(try head_provider_state.cancel(parameters.provider_id, parameters.job_id))) return respondDownloadError(request, .not_found, "Model provider login job not found");
         try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/login/:jobId/respond") and request.head.method == .POST) {
-        const parameters = try modelProviderJobParameters(allocator, request.head.target, "/respond");
+        const parameters = try request_tools.modelProviderJobParameters(allocator, request.head.target, "/respond");
         defer parameters.deinit(allocator);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
@@ -1550,7 +1551,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/model-providers/:providerId/logout") and request.head.method == .POST) {
-        const provider_id = try pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/logout");
+        const provider_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/studio/model-providers/", "/logout");
         defer allocator.free(provider_id);
         if (!(try head_provider_state.logout(provider_id))) return respondDownloadError(request, .not_found, "Head model provider not found");
         try request.respond("{\"ok\":true}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1571,7 +1572,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/studio/providers/:id") and (request.head.method == .PUT or request.head.method == .DELETE)) {
-        const provider_id = try pathParameter(allocator, request.head.target, "/studio/providers/");
+        const provider_id = try request_tools.pathParameter(allocator, request.head.target, "/studio/providers/");
         defer allocator.free(provider_id);
         const response = if (request.head.method == .PUT) response: {
             const document = try readBoundedJsonBody(allocator, request) orelse return false;
@@ -1619,7 +1620,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/targets/:targetId/select")) {
-        const target_id = try pathParameterBetween(allocator, request.head.target, "/runtime/targets/", "/select");
+        const target_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/runtime/targets/", "/select");
         defer allocator.free(target_id);
         try studio.lockSettings(io);
         defer studio.unlockSettings(io);
@@ -1641,7 +1642,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveRuntimeJobCreate(allocator, configuration, runtime_jobs, runtime_cache, request, null, false);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs/:jobId") and request.head.method == .GET) {
-        const job_id = try pathParameter(allocator, request.head.target, "/runtime/jobs/");
+        const job_id = try request_tools.pathParameter(allocator, request.head.target, "/runtime/jobs/");
         defer allocator.free(job_id);
         const response = try runtime_jobs.onePayload(job_id) orelse {
             try request.respond("{\"detail\":\"Runtime job not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1652,7 +1653,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/jobs/:jobId/cancel")) {
-        const job_id = try pathParameterBetween(allocator, request.head.target, "/runtime/jobs/", "/cancel");
+        const job_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/runtime/jobs/", "/cancel");
         defer allocator.free(job_id);
         const response = try runtime_jobs.cancelPayload(job_id) orelse {
             try request.respond("{\"detail\":\"Runtime job not found\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1663,7 +1664,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/runtime/:backend/upgrade")) {
-        const backend = try pathParameterBetween(allocator, request.head.target, "/runtime/", "/upgrade");
+        const backend = try request_tools.pathParameterBetween(allocator, request.head.target, "/runtime/", "/upgrade");
         defer allocator.free(backend);
         if (!runtimeJobBackend(backend)) {
             try request.respond("{\"detail\":\"Unknown runtime backend\"}", .{ .status = .not_found, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1709,7 +1710,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return try serveTokenization(allocator, io, client, database, recipe_column, llm_instance_path, request, inference_origin, .chat);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/launch/:recipeId")) {
-        const recipe_id = try pathParameter(allocator, request.head.target, "/launch/");
+        const recipe_id = try request_tools.pathParameter(allocator, request.head.target, "/launch/");
         defer allocator.free(recipe_id);
         supervisor.launch(client, database, recipe_column, recipe_id, configuration) catch |failure| {
             return try respondLifecycleFailure(request, failure);
@@ -1718,7 +1719,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/launch/:recipeId/cancel")) {
-        const recipe_id = try pathParameterBetween(allocator, request.head.target, "/launch/", "/cancel");
+        const recipe_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/launch/", "/cancel");
         defer allocator.free(recipe_id);
         if (!(try supervisor.cancelLaunch())) {
             var output: Io.Writer.Allocating = .init(allocator);
@@ -1749,7 +1750,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/wait-ready")) {
-        const timeout = queryUnsigned(request.head.target, "timeout") orelse 300;
+        const timeout = request_tools.queryUnsigned(request.head.target, "timeout") orelse 300;
         const started = Io.Clock.awake.now(io);
         const ready = try supervisor.waitReady(client, @min(timeout, 86_400));
         const elapsed = @max(started.durationTo(Io.Clock.awake.now(io)).toSeconds(), 0);
@@ -1818,9 +1819,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId") and request.head.method == .GET) {
-        const session_id = try pathParameter(allocator, request.head.target, "/logs/");
+        const session_id = try request_tools.pathParameter(allocator, request.head.target, "/logs/");
         defer allocator.free(session_id);
-        const limit_value = queryUnsigned(request.head.target, "limit") orelse 2000;
+        const limit_value = request_tools.queryUnsigned(request.head.target, "limit") orelse 2000;
         if (limit_value == 0 or limit_value > 20_000) {
             try request.respond("{\"detail\":\"Invalid log limit\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
             return request.head.keep_alive;
@@ -1840,7 +1841,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId") and request.head.method == .DELETE) {
-        const session_id = try pathParameter(allocator, request.head.target, "/logs/");
+        const session_id = try request_tools.pathParameter(allocator, request.head.target, "/logs/");
         defer allocator.free(session_id);
         const deleted = logs.delete(io, allocator, configuration, session_id) catch |failure| switch (failure) {
             error.InvalidSessionId => {
@@ -1861,9 +1862,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/logs/:sessionId/stream")) {
-        const session_id = try pathParameterBetween(allocator, request.head.target, "/logs/", "/stream");
+        const session_id = try request_tools.pathParameterBetween(allocator, request.head.target, "/logs/", "/stream");
         defer allocator.free(session_id);
-        const tail_value = queryUnsigned(request.head.target, "tail") orelse 2000;
+        const tail_value = request_tools.queryUnsigned(request.head.target, "tail") orelse 2000;
         if (tail_value > 20_000) {
             try request.respond("{\"detail\":\"Invalid log tail\"}", .{ .status = .bad_request, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
             return request.head.keep_alive;
@@ -1892,7 +1893,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return serveComputeLaunch(allocator, configuration, system, compute, client, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/stop") and request.head.method == .POST) {
-        const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/stop");
+        const name = try request_tools.pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/stop");
         defer allocator.free(name);
         const stopped = if (std.mem.eql(u8, name, "llm")) stopped: {
             _ = try compute.cancelActive(name);
@@ -1902,7 +1903,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/compute/instances/:name/cancel") and request.head.method == .POST) {
-        const name = try pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/cancel");
+        const name = try request_tools.pathParameterBetween(allocator, request.head.target, "/compute/instances/", "/cancel");
         defer allocator.free(name);
         const cancelled = if (try compute.cancelActive(name)) true else if (std.mem.eql(u8, name, "llm")) try supervisor.cancelNamed(name) else try compute.cancel(name);
         try request.respond(if (cancelled) "{\"cancelled\":true}" else "{\"cancelled\":false}", .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1915,7 +1916,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .GET) {
-        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        const recipe_id = try request_tools.pathParameter(allocator, request.head.target, "/recipes/");
         defer allocator.free(recipe_id);
         const response = try recipe_service.detailPayload(allocator, io, database, recipe_column, recipe_id, default_trust_remote_code) orelse {
             try request.respond("{\"detail\":\"Recipe not found\"}", .{
@@ -1932,12 +1933,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return try saveRecipe(allocator, io, database, recipe_column, request, null, default_trust_remote_code);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .PUT) {
-        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        const recipe_id = try request_tools.pathParameter(allocator, request.head.target, "/recipes/");
         defer allocator.free(recipe_id);
         return try saveRecipe(allocator, io, database, recipe_column, request, recipe_id, default_trust_remote_code);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/recipes/:recipeId") and request.head.method == .DELETE) {
-        const recipe_id = try pathParameter(allocator, request.head.target, "/recipes/");
+        const recipe_id = try request_tools.pathParameter(allocator, request.head.target, "/recipes/");
         defer allocator.free(recipe_id);
         if (!(try recipe_service.delete(io, database, recipe_id))) {
             try request.respond("{\"detail\":\"Recipe not found\"}", .{
@@ -2058,7 +2059,7 @@ fn serveDownloadControl(allocator: std.mem.Allocator, configuration: *const Conf
         .@"resume" => "/resume",
         .cancel => "/cancel",
     };
-    const id = try pathParameterBetween(allocator, request.head.target, "/studio/downloads/", suffix);
+    const id = try request_tools.pathParameterBetween(allocator, request.head.target, "/studio/downloads/", suffix);
     defer allocator.free(id);
     if (control == .@"resume") {
         const header_token = try capturedDownloadTokenHeader(allocator, request);
@@ -2146,8 +2147,8 @@ fn downloadPatterns(allocator: std.mem.Allocator, object: std.json.ObjectMap, na
 }
 
 fn capturedDownloadTokenHeader(allocator: std.mem.Allocator, request: *const http.Server.Request) !?[]u8 {
-    if (requestHeader(request, "x-hf-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
-    if (requestHeader(request, "x-huggingface-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
+    if (request_tools.header(request, "x-hf-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
+    if (request_tools.header(request, "x-huggingface-token")) |value| if (value.len > 0) return try allocator.dupe(u8, value);
     return null;
 }
 
@@ -2487,19 +2488,19 @@ fn respondTerminalFailure(request: *http.Server.Request, failure: anyerror) !boo
 
 fn localBrowserPayload(allocator: std.mem.Allocator, browser: *agent_browser.Manager, client: *http.Client, route_path: []const u8, target: []const u8, method: http.Method, document: ?[]const u8) ![]u8 {
     if (std.mem.endsWith(u8, route_path, "/fetch")) {
-        const url = try queryParameter(allocator, target, "url");
+        const url = try request_tools.queryParameter(allocator, target, "url");
         defer if (url) |value| allocator.free(value);
         return browser.fetchPayload(client, url orelse return error.BrowserUrlRequired);
     }
     if (std.mem.endsWith(u8, route_path, "/state")) return browser.statePayload();
-    if (std.mem.endsWith(u8, route_path, "/history")) return browser.historyPayload(queryUnsigned(target, "visited") == 1);
+    if (std.mem.endsWith(u8, route_path, "/history")) return browser.historyPayload(request_tools.queryUnsigned(target, "visited") == 1);
     if (std.mem.endsWith(u8, route_path, "/engines")) return browser.enginesPayload();
     if (std.mem.endsWith(u8, route_path, "/localhosts")) return allocator.dupe(u8, "{\"sites\":[]}");
     if (std.mem.endsWith(u8, route_path, "/engine")) return browser.selectEnginePayload(document orelse "");
     if (std.mem.endsWith(u8, route_path, "/frame") or std.mem.endsWith(u8, route_path, "/input") or std.mem.endsWith(u8, route_path, "/viewport")) return error.BrowserInteractiveUnavailable;
     if (method != .POST) return error.InvalidBrowserPath;
     const prefix = if (std.mem.startsWith(u8, route_path, "/internal/node/v1/browser/")) "/internal/node/v1/browser/" else "/api/agent/browser/";
-    const verb = try pathParameter(allocator, target, prefix);
+    const verb = try request_tools.pathParameter(allocator, target, prefix);
     defer allocator.free(verb);
     return browser.verbPayload(client, verb, document orelse "");
 }
@@ -3537,14 +3538,14 @@ fn respondModelNotRunning(allocator: std.mem.Allocator, request: *http.Server.Re
 }
 
 fn serveWorkerProxy(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, request: *http.Server.Request) !bool {
-    if (requestHeader(request, "X-Local-Studio-Federation-Hop") != null) {
+    if (request_tools.header(request, "X-Local-Studio-Federation-Hop") != null) {
         try request.respond("{\"detail\":\"Federation loop rejected\"}", .{
             .status = .loop_detected,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
         });
         return request.head.keep_alive;
     }
-    const worker_id = requestHeader(request, "X-Local-Studio-Worker-Id") orelse {
+    const worker_id = request_tools.header(request, "X-Local-Studio-Worker-Id") orelse {
         try request.respond("{\"detail\":\"Select a Worker before using this controller endpoint\"}", .{
             .status = .conflict,
             .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }},
@@ -3575,139 +3576,6 @@ fn serveWorkerProxy(allocator: std.mem.Allocator, io: Io, client: *http.Client, 
     defer target.deinit();
     try reverse_proxy.serveWorker(allocator, client, target.address, target.api_key, target.id, request);
     return false;
-}
-
-fn requestHeader(request: *const http.Server.Request, expected_name: []const u8) ?[]const u8 {
-    var iterator = request.iterateHeaders();
-    while (iterator.next()) |header| {
-        if (std.ascii.eqlIgnoreCase(header.name, expected_name)) return header.value;
-    }
-    return null;
-}
-
-fn pathParameter(allocator: std.mem.Allocator, target: []const u8, prefix: []const u8) ![]u8 {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
-    const path = target[0..query_start];
-    if (!std.mem.startsWith(u8, path, prefix) or path.len <= prefix.len) return error.InvalidPathParameter;
-    const encoded = path[prefix.len..];
-    const storage = try allocator.dupe(u8, encoded);
-    defer allocator.free(storage);
-    return try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage));
-}
-
-fn pathParameterBetween(allocator: std.mem.Allocator, target: []const u8, prefix: []const u8, suffix: []const u8) ![]u8 {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
-    const path = target[0..query_start];
-    if (!std.mem.startsWith(u8, path, prefix) or !std.mem.endsWith(u8, path, suffix) or path.len <= prefix.len + suffix.len) return error.InvalidPathParameter;
-    const encoded = path[prefix.len .. path.len - suffix.len];
-    const storage = try allocator.dupe(u8, encoded);
-    defer allocator.free(storage);
-    return try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage));
-}
-
-const RigNodeParameters = struct {
-    rig_id: []u8,
-    node_id: []u8,
-};
-
-fn rigNodeParameters(allocator: std.mem.Allocator, target: []const u8) !RigNodeParameters {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
-    const path = target[0..query_start];
-    const prefix = "/studio/rigs/";
-    if (!std.mem.startsWith(u8, path, prefix)) return error.InvalidPathParameter;
-    const separator = std.mem.indexOf(u8, path[prefix.len..], "/nodes/") orelse return error.InvalidPathParameter;
-    const rig_encoded = path[prefix.len .. prefix.len + separator];
-    const node_encoded = path[prefix.len + separator + "/nodes/".len ..];
-    if (rig_encoded.len == 0 or node_encoded.len == 0) return error.InvalidPathParameter;
-    const rig_storage = try allocator.dupe(u8, rig_encoded);
-    defer allocator.free(rig_storage);
-    const rig_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(rig_storage));
-    errdefer allocator.free(rig_id);
-    const node_storage = try allocator.dupe(u8, node_encoded);
-    defer allocator.free(node_storage);
-    return .{ .rig_id = rig_id, .node_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(node_storage)) };
-}
-
-const ModelProviderJobParameters = struct {
-    provider_id: []u8,
-    job_id: []u8,
-
-    fn deinit(parameters: ModelProviderJobParameters, allocator: std.mem.Allocator) void {
-        allocator.free(parameters.provider_id);
-        allocator.free(parameters.job_id);
-    }
-};
-
-fn modelProviderJobParameters(allocator: std.mem.Allocator, target: []const u8, suffix: []const u8) !ModelProviderJobParameters {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
-    const path = target[0..query_start];
-    const prefix = "/studio/model-providers/";
-    if (!std.mem.startsWith(u8, path, prefix) or !std.mem.endsWith(u8, path, suffix)) return error.InvalidPathParameter;
-    const end = path.len - suffix.len;
-    const middle = path[prefix.len..end];
-    const separator = std.mem.indexOf(u8, middle, "/login/") orelse return error.InvalidPathParameter;
-    if (separator == 0 or separator + 7 >= middle.len) return error.InvalidPathParameter;
-    const provider_storage = try allocator.dupe(u8, middle[0..separator]);
-    defer allocator.free(provider_storage);
-    const job_storage = try allocator.dupe(u8, middle[separator + 7 ..]);
-    defer allocator.free(job_storage);
-    const provider_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(provider_storage));
-    errdefer allocator.free(provider_id);
-    return .{ .provider_id = provider_id, .job_id = try allocator.dupe(u8, std.Uri.percentDecodeInPlace(job_storage)) };
-}
-
-fn queryUnsigned(target: []const u8, expected_name: []const u8) ?u64 {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse return null;
-    var parameters = std.mem.splitScalar(u8, target[query_start + 1 ..], '&');
-    while (parameters.next()) |parameter| {
-        const separator = std.mem.findScalar(u8, parameter, '=') orelse continue;
-        if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
-        return std.fmt.parseInt(u64, parameter[separator + 1 ..], 10) catch null;
-    }
-    return null;
-}
-
-fn queryFlag(target: []const u8, expected_name: []const u8) bool {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse return false;
-    var parameters = std.mem.splitScalar(u8, target[query_start + 1 ..], '&');
-    while (parameters.next()) |parameter| {
-        const separator = std.mem.findScalar(u8, parameter, '=') orelse continue;
-        if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
-        const value = parameter[separator + 1 ..];
-        return std.mem.eql(u8, value, "1") or std.ascii.eqlIgnoreCase(value, "true") or std.ascii.eqlIgnoreCase(value, "only");
-    }
-    return false;
-}
-
-fn boundedLimit(target: []const u8) ?usize {
-    const value = queryUnsigned(target, "limit") orelse return null;
-    if (value == 0) return null;
-    return @intCast(@min(value, 10_000));
-}
-
-fn queryParameter(allocator: std.mem.Allocator, target: []const u8, expected_name: []const u8) !?[]u8 {
-    const query_start = std.mem.findScalar(u8, target, '?') orelse return null;
-    var parameters = std.mem.splitScalar(u8, target[query_start + 1 ..], '&');
-    while (parameters.next()) |parameter| {
-        const separator = std.mem.findScalar(u8, parameter, '=') orelse {
-            if (std.mem.eql(u8, parameter, expected_name)) return @as(?[]u8, try allocator.dupe(u8, ""));
-            continue;
-        };
-        if (!std.mem.eql(u8, parameter[0..separator], expected_name)) continue;
-        const encoded = parameter[separator + 1 ..];
-        const storage = try allocator.dupe(u8, encoded);
-        defer allocator.free(storage);
-        for (storage) |*character| if (character.* == '+') {
-            character.* = ' ';
-        };
-        return @as(?[]u8, try allocator.dupe(u8, std.Uri.percentDecodeInPlace(storage)));
-    }
-    return null;
-}
-
-fn trimmedOptional(value: []const u8) ?[]const u8 {
-    const trimmed = std.mem.trim(u8, value, " \t\r\n");
-    return if (trimmed.len == 0) null else trimmed;
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {
