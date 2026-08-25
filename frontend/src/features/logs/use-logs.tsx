@@ -66,7 +66,7 @@ export function useLogs(target?: LogsTarget) {
   const [loading, setLoading] = useState(cachedSessions === null);
   const [loadingContent, setLoadingContent] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);

@@ -5,6 +5,7 @@ import { ErrorBox, Button } from "@/ui";
 import type { GitAction, GitState } from "@/features/agent/contracts";
 import { safeJson } from "@/features/agent/safe-json";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import { FILESYSTEM_CHANGED_EVENT } from "@/lib/workspace-events";
 import { parseUnifiedDiff, type DiffViewMode } from "@/features/agent/ui/git-diff-panel-model";
 import {
   GitPanelHeader,
@@ -82,12 +83,19 @@ export function GitDiffPanel({ cwd }: { cwd: string | null }) {
 
   useMountSubscription(() => {
     void load();
+    const interval = window.setInterval(() => void load(), 3_000);
+    const reload = () => void load();
+    window.addEventListener(FILESYSTEM_CHANGED_EVENT, reload);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener(FILESYSTEM_CHANGED_EVENT, reload);
+    };
   }, [load]);
   const files = useMemo(() => parseUnifiedDiff(payload?.diff ?? ""), [payload?.diff]);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-(--color-panel)">
-      <GitPanelHeader cwd={cwd} loading={loading} payload={payload} onReload={load} />
+      <GitPanelHeader cwd={cwd} payload={payload} />
       <GitWorkflowBar
         payload={payload}
         loading={loading}

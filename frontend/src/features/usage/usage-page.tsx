@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
-import { AppPage, Button, ErrorBox, PageContainer, RefreshButton, Tabs } from "@/ui";
+import { AppPage, Button, ErrorBox, PageContainer, Tabs } from "@/ui";
 import { Activity, AlertTriangle, Server, Sparkles, Upload } from "@/ui/icon-registry";
 import { formatNumber } from "@/lib/formatters";
 import type { UsageStats } from "@/lib/types";
@@ -162,7 +162,6 @@ export default function UsagePage({
             </div>
           </div>
         ) : null}
-        <RefreshButton onRefresh={loadStats} loading={loading} className="h-7 w-7" />
       </header>
 
       <section className="mt-5">

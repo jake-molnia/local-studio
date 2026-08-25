@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitBranchIcon, ReloadIcon } from "@/ui/icons";
+import { GitBranchIcon } from "@/ui/icons";
 import { Input, Button } from "@/ui";
 import type { GitAction, GitRef, GitState } from "@/features/agent/contracts";
 import { safeJson } from "@/features/agent/safe-json";
@@ -9,14 +9,10 @@ import { gitDiffHeaderTitle } from "@/features/agent/ui/git-diff-panel-model";
 
 export function GitPanelHeader({
   cwd,
-  loading,
   payload,
-  onReload,
 }: {
   cwd: string | null;
-  loading: boolean;
   payload: Partial<GitState> | null;
-  onReload: () => Promise<void>;
 }) {
   return (
     <div className="flex h-8 shrink-0 items-center gap-2 border-b border-(--border)/70 bg-(--color-header) px-2 text-xs">
@@ -24,15 +20,6 @@ export function GitPanelHeader({
       <span className="min-w-0 flex-1 truncate text-(--fg)" title={cwd ?? ""}>
         {gitDiffHeaderTitle(payload, cwd)}
       </span>
-      <button
-        type="button"
-        onClick={() => void onReload()}
-        disabled={loading || !cwd}
-        className="rounded p-1 text-(--dim) hover:bg-(--hover) hover:text-(--fg) disabled:opacity-40"
-        title="Refresh review state"
-      >
-        <ReloadIcon className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-      </button>
     </div>
   );
 }

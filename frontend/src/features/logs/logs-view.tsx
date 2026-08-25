@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Download, Menu, RefreshCw } from "@/ui/icon-registry";
+import { ChevronRight, Download, Menu } from "@/ui/icon-registry";
 import { Button, Checkbox, SearchInput, Spinner } from "@/ui";
 import type { LogSession } from "@/lib/types";
 import { LogsSessionsSidebar } from "./logs-sessions-sidebar";
@@ -132,16 +132,6 @@ export function LogsView({
                   placeholder="Filter..."
                   className="w-24 sm:w-36 [&_input]:h-7 [&_input]:py-1 [&_input]:text-[length:var(--fs-xs)]"
                 />
-                <Button
-                  variant="icon"
-                  size="sm"
-                  onClick={() => selectedSession && onLoadLogContent(selectedSession)}
-                  title="Refresh"
-                >
-                  <RefreshCw
-                    className={`h-3.5 w-3.5 text-(--dim) ${loadingContent ? "animate-spin" : ""}`}
-                  />
-                </Button>
                 <Button variant="icon" size="sm" onClick={onDownloadLog} title="Download">
                   <Download className="h-3.5 w-3.5 text-(--dim)" />
                 </Button>

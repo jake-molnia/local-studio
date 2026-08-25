@@ -36,9 +36,6 @@ export type { CardProps, CardPadding } from "./card";
 export { Alert } from "./alert";
 export type { AlertProps, AlertVariant } from "./alert";
 
-export { RefreshButton } from "./refresh-button";
-export type { RefreshButtonProps } from "./refresh-button";
-
 export {
   AppPage,
   AppContentColumn,

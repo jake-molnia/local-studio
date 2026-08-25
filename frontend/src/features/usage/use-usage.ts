@@ -80,9 +80,11 @@ export function useUsage(target?: UsageTarget) {
       if (!event.key || event.key === HEAD_CONNECTION_STORAGE_KEY) reload();
     };
     reload();
+    const interval = window.setInterval(loadStats, 5_000);
     window.addEventListener(HEAD_CONNECTION_CHANGED_EVENT, reload);
     window.addEventListener("storage", onStorage);
     return () => {
+      window.clearInterval(interval);
       window.removeEventListener(HEAD_CONNECTION_CHANGED_EVENT, reload);
       window.removeEventListener("storage", onStorage);
     };
