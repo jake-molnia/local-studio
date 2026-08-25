@@ -425,8 +425,9 @@ export function ActiveSessionRow({
       // The focused row is the one being read, so its unseen/finished marks
       // have already served their purpose; only the live spinner survives focus.
       activity={isFocused && activity !== "running" ? "idle" : activity}
-      timestamp={session.updatedAt || session.startedAt}
       canDoubleClickRename
+      onContextMenu
+      showClearAction
       renameInputClass="text-[length:var(--fs-xs)]"
       card={card}
       secondaryLabel={project.name}
@@ -468,7 +469,6 @@ export function SessionRow({
       label={label}
       initialDraft={cleanSessionTitle(pref.title) || cleanSessionTitle(session.firstUserMessage)}
       activity={activity}
-      timestamp={session.updatedAt || session.startedAt}
       rowClass={`${card ? "sidebar-virtual-card min-h-[52px] border border-(--border)/55 bg-(--surface-2)/35 px-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "sidebar-virtual-row h-[var(--sidebar-row-height)] pl-2 pr-0"} group relative flex items-center rounded-[var(--sidebar-row-radius)] transition-[color,background-color,opacity,border-color,box-shadow] duration-[var(--motion-fast)] hover:bg-(--hover) ${dragging ? "opacity-45" : ""}`}
       renameRowClass="flex h-[var(--sidebar-row-height)] items-center rounded-[var(--sidebar-row-radius)] bg-(--surface)/40 pl-2 pr-1"
       href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&replace=1`}

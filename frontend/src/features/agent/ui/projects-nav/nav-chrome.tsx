@@ -64,9 +64,9 @@ export function PinButton({
       }}
       aria-label={pinned ? `Unpin ${target}` : `Pin ${target}`}
       title={pinned ? "Unpin" : "Pin"}
-      className={`inline-flex h-5 w-5 items-center justify-center rounded-[3px] transition-[opacity,color,background-color] duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg) ${
+      className={`inline-flex h-5 w-5 items-center justify-center transition-[opacity,color] duration-[var(--motion-fast)] hover:text-white ${
         pinned
-          ? "bg-(--active) text-(--fg)/80 opacity-75"
+          ? "text-(--fg)/85 opacity-90"
           : "pointer-events-none opacity-0 text-(--dim)/70 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
       }`}
     >
