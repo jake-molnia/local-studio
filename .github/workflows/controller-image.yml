@@ -7,7 +7,6 @@ on:
     paths:
       - .github/workflows/controller-image.yml
       - .github/workflows/nightly.yml
-      - chat/**
       - controller/**
       - contracts/**
   push:

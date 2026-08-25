@@ -4,7 +4,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm 
 
 WORKDIR /source
 COPY controller ./controller
-COPY chat ./chat
 COPY contracts ./contracts
 RUN node controller/toolchain.mjs build -Doptimize=ReleaseSafe
 

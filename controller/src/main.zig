@@ -2,9 +2,8 @@ const std = @import("std");
 const app_module = @import("app/app.zig");
 const config = @import("app/config.zig");
 const mcp_ssh = @import("agent/mcp/ssh.zig");
-const mcp_bridge = @import("mcp_bridge");
+const mcp_bridge = @import("agent/mcp/bridge.zig");
 const mcp_code_storage = @import("agent/mcp/code_storage.zig");
-const chat = @import("chat");
 
 pub fn main(init: std.process.Init) !void {
     var arguments = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
@@ -14,7 +13,6 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, command, "mcp-ssh")) return mcp_ssh.run(init);
         if (std.mem.eql(u8, command, "mcp-bridge")) return mcp_bridge.run(init);
         if (std.mem.eql(u8, command, "mcp-code-storage")) return mcp_code_storage.run(init);
-        if (std.mem.eql(u8, command, "chat-runtime")) return chat.runChat(init);
     }
     var settings = try config.Config.load(init);
     errdefer settings.deinit();
