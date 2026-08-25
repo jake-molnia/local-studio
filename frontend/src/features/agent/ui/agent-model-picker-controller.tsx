@@ -39,6 +39,7 @@ import {
 } from "./agent-model-picker-components";
 
 type AgentModelPickerProps = {
+  modelsOnly?: boolean;
   models: AgentModel[];
   selectedModel: string;
   selectedRoute?: string;
@@ -91,6 +92,7 @@ const REASONING_MENU_LEVELS: readonly AgentThinkingLevel[] = [
 ];
 
 export function AgentModelPicker({
+  modelsOnly = false,
   models,
   selectedModel,
   selectedRoute,
@@ -185,11 +187,11 @@ export function AgentModelPicker({
   const close = useCallback(
     (restoreFocus = false) => {
       updateOpen(false);
-      setView("inspector");
+      setView(modelsOnly ? "models" : "inspector");
       setQuery("");
       if (restoreFocus) requestAnimationFrame(() => activeTriggerRef.current?.focus());
     },
-    [updateOpen],
+    [modelsOnly, updateOpen],
   );
 
   const togglePicker = useCallback(
@@ -200,10 +202,18 @@ export function AgentModelPicker({
         close();
         return;
       }
-      setView("inspector");
+      if (modelsOnly) {
+        setSelectedCompany(
+          hasModelFavorites()
+            ? "favorites"
+            : (activeChoice?.company.key ?? companies[0]?.key ?? "local"),
+        );
+        setQuery("");
+      }
+      setView(modelsOnly ? "models" : "inspector");
       updateOpen(true);
     },
-    [close, open, updateOpen],
+    [activeChoice?.company.key, close, companies, modelsOnly, open, updateOpen],
   );
 
   const openNested = useCallback(
@@ -254,7 +264,7 @@ export function AgentModelPicker({
       if (event.defaultPrevented) return;
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (view === "inspector") close(true);
+      if (view === "inspector" || modelsOnly) close(true);
       else closeNested();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -263,7 +273,7 @@ export function AgentModelPicker({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [close, closeNested, open, view]);
+  }, [close, closeNested, modelsOnly, open, view]);
 
   useMountSubscription(() => {
     if (!open) return;
@@ -392,27 +402,52 @@ export function AgentModelPicker({
             <div
               ref={placePanel}
               className={cx(
-                `composer-popover fixed z-[300] w-[12rem] max-w-[calc(100vw-1rem)] overflow-visible p-1 ${POPOVER_SURFACE_CLASS}`,
+                modelsOnly
+                  ? `composer-popover fixed z-[300] h-[min(21.625rem,calc(100vh-1rem))] w-[22.5rem] max-w-[calc(100vw-1rem)] overflow-hidden p-0 ${POPOVER_SURFACE_CLASS}`
+                  : `composer-popover fixed z-[300] w-[12rem] max-w-[calc(100vw-1rem)] overflow-visible p-1 ${POPOVER_SURFACE_CLASS}`,
                 open ? "composer-popover-enter" : "composer-popover-exit pointer-events-none",
               )}
               role="menu"
-              aria-label="Model settings"
+              aria-label={modelsOnly ? "Models" : "Model settings"}
               aria-hidden={!open}
               data-open-source={openSource}
               data-model-picker-content
               onKeyDown={(event) => {
                 setOpenSource("keyboard");
+                if (modelsOnly) {
+                  handleModelPickerKeyDown(event, () => {
+                    const first = filteredChoices(choices, selectedCompany, query)[0];
+                    if (first) selectChoice(first);
+                  });
+                  return;
+                }
                 handleMenuKeyDown(event, () => close(true));
               }}
               onPointerDown={stopToolbarEvent}
               onMouseDown={stopToolbarEvent}
             >
-              <PickerInspector activeView={view} rows={pickerRows} onOpen={openNested} />
+              {modelsOnly ? (
+                <ModelPickerPanel
+                  choices={choices}
+                  companies={companies}
+                  selectedCompany={selectedCompany}
+                  onSelectCompany={setSelectedCompany}
+                  query={query}
+                  onQueryChange={setQuery}
+                  searchRef={searchRef}
+                  selectedModel={selectedModel}
+                  onSelect={selectChoice}
+                  activeRoute={activeRoute}
+                  onClose={() => close()}
+                />
+              ) : (
+                <PickerInspector activeView={view} rows={pickerRows} onOpen={openNested} />
+              )}
             </div>,
             document.body,
           )
         : null}
-      {present && open && view !== "inspector" && typeof document !== "undefined"
+      {present && open && !modelsOnly && view !== "inspector" && typeof document !== "undefined"
         ? createPortal(
             <div
               ref={placeNestedPanel}

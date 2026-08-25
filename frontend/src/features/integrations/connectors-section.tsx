@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Schema } from "effect";
 import { ConnectorsResponseSchema, type ConnectorView } from "@shared/agent/connector-contract";
-import { Button, RefreshIconButton, SearchInput, Spinner, StatusPill } from "@/ui";
+import { Button, SearchInput, Spinner, StatusPill } from "@/ui";
 import { Plus, Trash2 } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";
 import { ResourceLogo } from "@/ui/resource-logo";
@@ -183,7 +183,6 @@ export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}
   const [connectors, setConnectors] = useState<readonly ConnectorView[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [localQuery, setLocalQuery] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [managed, setManaged] = useState<ConnectorView | null>(null);
@@ -191,24 +190,19 @@ export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}
   const [catalogEntry, setCatalogEntry] = useState<CatalogEntry | null>(null);
 
   const refresh = useCallback(() => {
-    setRefreshing(true);
     void listConnectors()
       .then(({ connectors: list, catalog: nextCatalog }) => {
         setConnectors(list);
         setCatalog(hydrateConnectorCatalog(nextCatalog.entries));
       })
-      .catch(() => {
-        setConnectors([]);
-        setCatalog([]);
-      })
-      .finally(() => {
-        setLoaded(true);
-        setRefreshing(false);
-      });
+      .catch(() => undefined)
+      .finally(() => setLoaded(true));
   }, [setConnectors]);
 
   useMountSubscription(() => {
     refresh();
+    const interval = window.setInterval(refresh, 3_000);
+    return () => window.clearInterval(interval);
   }, [refresh]);
 
   const open = (connector: ConnectorView) => {
@@ -301,7 +295,6 @@ export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}
             <StatusText tone={loaded ? "ok" : "dim"}>
               {loaded ? `${visibleConnectors.length} registered` : "reading"}
             </StatusText>
-            <RefreshIconButton onClick={refresh} loading={refreshing} label="Reload MCP servers" />
             <Button
               size="sm"
               onClick={() => setEditing({ draft: emptyDraft(), mode: "create", secretKeys: [] })}
@@ -313,12 +306,9 @@ export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}
         }
       >
         {loaded && visibleConnectors.length === 0 ? (
-          <TableNotice
-            title={
-              connectors.length ? "No server matches this search" : "No MCP servers registered"
-            }
-            body="An MCP server is a command this machine runs, or an HTTP endpoint it calls, that hands the model a set of tools. Write one yourself with Add server, or start from an entry below."
-          />
+          <div className="flex min-h-20 items-center justify-center text-[length:var(--fs-xs)] text-(--ui-muted)">
+            {connectors.length ? "No server matches this search" : "No MCP server"}
+          </div>
         ) : (
           <TableFrame minWidthClass={CONNECTOR_MIN_WIDTH}>
             <thead>

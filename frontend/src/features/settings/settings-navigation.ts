@@ -15,6 +15,7 @@ export const settingsHref = (destination: SettingsDestination | string = "connec
   `/settings#${destination}`;
 
 export const legacySettingsHash = (hash: string): string | null => {
+  if (hash === "profile") return "connection";
   if (hash === "desktop") return "terminal";
   if (hash === "status") return "machine:local:status";
   if (hash === "controller") return "machine:local:controller";

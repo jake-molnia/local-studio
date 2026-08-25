@@ -20,7 +20,7 @@ import {
   type SandboxAccountEntry,
   type SandboxProvider,
 } from "@shared/agent/sandbox-account-contract";
-import { Alert, RefreshIconButton } from "@/ui";
+import { Alert } from "@/ui";
 import { ResourceLogo } from "@/ui/resource-logo";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import {
@@ -63,12 +63,10 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
   const [repositories, setRepositories] = useState<readonly CodeStorageAccountEntry[]>([]);
   const [sandboxes, setSandboxes] = useState<readonly SandboxAccountEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [openProvider, setOpenProvider] = useState<AccountProviderId | null>(null);
 
   const refresh = useCallback(() => {
-    setRefreshing(true);
     void Promise.all([
       requestJson("/api/agent/accounts/google", decodeGoogle, { cache: "no-store" }),
       requestJson("/api/agent/accounts/code-storage", decodeCodeStorage, { cache: "no-store" }),
@@ -83,13 +81,14 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
       .catch((loadError: unknown) =>
         setError(loadError instanceof Error ? loadError.message : "Accounts failed"),
       )
-      .finally(() => {
-        setLoaded(true);
-        setRefreshing(false);
-      });
+      .finally(() => setLoaded(true));
   }, []);
 
-  useMountSubscription(refresh, [refresh]);
+  useMountSubscription(() => {
+    refresh();
+    const interval = window.setInterval(refresh, 3_000);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
   const rows = useMemo<ProviderRow[]>(() => {
     const googleRows = GOOGLE_WORKSPACE_PLUGIN_IDS.map((id): ProviderRow => {
       const binding = GOOGLE_WORKSPACE_BINDINGS[id];
@@ -162,7 +161,6 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
             <StatusText tone={error ? "warn" : loaded ? "ok" : "dim"}>
               {loaded ? `${rows.length} providers` : "loading"}
             </StatusText>
-            <RefreshIconButton onClick={refresh} loading={refreshing} label="Refresh accounts" />
           </div>
         }
       >

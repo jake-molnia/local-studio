@@ -65,13 +65,13 @@ function PriorityOrder({
     onChange(next);
   };
   return (
-    <div className="flex min-w-0 flex-wrap justify-end gap-1">
+    <div className="flex w-64 max-w-full flex-col gap-1">
       {ordered.map((item, index) => (
         <div
           key={item.id}
-          className="flex h-7 items-center rounded-[5px] border border-(--ui-separator) bg-(--ui-bg)/45 pl-2 text-[length:var(--fs-xs)] text-(--ui-fg)"
+          className="flex h-7 w-full items-center rounded-[5px] border border-(--ui-separator) bg-(--ui-bg)/45 pl-2 text-[length:var(--fs-xs)] text-(--ui-fg)"
         >
-          <span className="max-w-36 truncate">{item.label}</span>
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
           <button
             type="button"
             aria-label={`Move ${item.label} earlier`}
@@ -117,18 +117,16 @@ export function AgentDefaultsSection() {
   const harnessCatalog = useHarnessCatalog();
   const [models, setModels] = useState<CatalogAgentModel[]>([]);
   const [defaults, setDefaults] = useState<AgentDefaults>(() =>
-    typeof window === "undefined"
-      ? readAgentDefaults({ getItem: () => null })
-      : readAgentDefaults(window.localStorage),
+    readAgentDefaults({ getItem: () => null }),
   );
-  const [thinking, setThinking] = useState<AgentThinkingLevel>(
-    () => loadThinkingLevelDefault() ?? "high",
-  );
+  const [thinking, setThinking] = useState<AgentThinkingLevel>("high");
   useMountSubscription(() => {
     void Effect.runPromise(loadModels().pipe(Effect.catch(() => Effect.succeed([])))).then(
       setModels,
     );
     const sync = () => setDefaults(readAgentDefaults(window.localStorage));
+    sync();
+    setThinking(loadThinkingLevelDefault() ?? "high");
     window.addEventListener(AGENT_DEFAULTS_CHANGED_EVENT, sync);
     return () => {
       window.removeEventListener(AGENT_DEFAULTS_CHANGED_EVENT, sync);
@@ -172,6 +170,7 @@ export function AgentDefaultsSection() {
         description="The model and route selected for a new task."
         control={
           <AgentModelPicker
+            modelsOnly
             models={models}
             selectedModel={defaultChoice?.modelId ?? ""}
             selectedRoute={defaultChoice?.routeId}
@@ -294,6 +293,7 @@ export function AgentDefaultsSection() {
         description="A smaller route run through the embedded Chat runtime for summaries and titles."
         control={
           <AgentModelPicker
+            modelsOnly
             models={models}
             selectedModel={titleChoice?.modelId ?? ""}
             selectedRoute={titleChoice?.routeId}

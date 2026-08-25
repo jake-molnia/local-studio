@@ -10,7 +10,7 @@ import type {
   ProvidersResponse,
   ProviderLoginStartResponse,
 } from "@shared/agent/provider-hub-contract";
-import { Input, ModelButton, RefreshIconButton, SearchInput, Spinner, StatusPill } from "@/ui";
+import { Input, ModelButton, SearchInput, Spinner, StatusPill } from "@/ui";
 import { ExternalLink, LogOut } from "@/ui/icon-registry";
 import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";
 import { ResourceLogo } from "@/ui/resource-logo";
@@ -414,12 +414,10 @@ export function ModelProvidersSection({ searchQuery }: { searchQuery?: string } 
   const [localQuery, setLocalQuery] = useState("");
   const [active, setActive] = useState<ActiveLogin | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderView | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [headConnection, setHead] = useState(getHeadConnection);
 
   const refresh = useCallback(() => {
-    setRefreshing(true);
     setError(null);
     const head = getHeadConnection();
     setHead(head);
@@ -449,11 +447,13 @@ export function ModelProvidersSection({ searchQuery }: { searchQuery?: string } 
         setProviders([]);
         setError(err instanceof Error ? err.message : "Failed to load providers");
       })
-      .finally(() => setRefreshing(false));
+      .finally(() => undefined);
   }, []);
 
   useMountSubscription(() => {
     refresh();
+    const interval = window.setInterval(refresh, 3_000);
+    return () => window.clearInterval(interval);
   }, [refresh]);
 
   useMountSubscription(() => {
@@ -535,11 +535,6 @@ export function ModelProvidersSection({ searchQuery }: { searchQuery?: string } 
                 ? `${connectedCount} connected · ${visibleProviders.length} shown`
                 : "loading"}
             </StatusText>
-            <RefreshIconButton
-              onClick={refresh}
-              loading={refreshing}
-              label="Refresh model accounts"
-            />
           </div>
         }
       >

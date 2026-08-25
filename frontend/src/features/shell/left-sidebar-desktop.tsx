@@ -154,7 +154,7 @@ export function DesktopSidebar({
           isExpanded ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <div className="sticky top-0 z-50 flex h-10 shrink-0 items-center gap-0.5 bg-(--sidebar-bg) pr-2 pl-[calc(0.5rem+var(--desktop-titlebar-left-inset))]">
+        <div className="sticky top-0 z-50 flex h-9 shrink-0 items-center gap-0.5 bg-(--sidebar-bg) pr-2 pl-[calc(0.5rem+var(--desktop-titlebar-left-inset))]">
           <button
             onClick={() => onSetPinnedOpen(false)}
             className="flex h-7 w-7 items-center justify-center rounded-[5px] text-(--hl2) transition-colors duration-[var(--motion-fast)] hover:bg-(--hover) hover:text-(--fg)"

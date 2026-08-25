@@ -56,13 +56,13 @@ export function ModelLabLogo({ lab }: { lab: string }) {
   const [failed, setFailed] = useState(false);
   const logo = LAB_LOGOS[lab];
   const Fallback = FALLBACK_LOGOS[lab] ?? Sparkles;
-  if (!logo || failed) return <Fallback className="h-[22px] w-[22px]" strokeWidth={1.7} />;
+  if (!logo || failed) return <Fallback className="h-5 w-5" strokeWidth={1.7} />;
   return (
     <img
       src={`${LOGO_ROOT}/${logo}`}
       alt=""
       className={cx(
-        "h-6 w-6 object-contain",
+        "h-[22px] w-[22px] object-contain",
         !logo.includes("-color") && "[filter:var(--model-lab-logo-mono-filter)]",
       )}
       onError={() => setFailed(true)}

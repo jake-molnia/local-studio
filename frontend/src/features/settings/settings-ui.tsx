@@ -9,7 +9,6 @@ import {
   Button,
   buttonClasses,
   Input,
-  RefreshIconButton,
   SearchInput,
   SectionNav,
   StatusPill,
@@ -151,12 +150,12 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
   activeSection,
   title,
   status,
-  loading,
-  onReload,
+  loading: _loading,
+  onReload: _onReload,
   onSelectSection,
   eyebrow,
-  refreshLabel = `Refresh ${title.toLowerCase()}`,
-  showRefresh = true,
+  refreshLabel: _refreshLabel = `Refresh ${title.toLowerCase()}`,
+  showRefresh: _showRefresh = false,
   width = "default",
   takeover = false,
   navigationOverride,
@@ -301,18 +300,10 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
           >
             {active?.label ?? title}
           </h2>
-          {!takeover && active?.description ? (
-            <p className="mt-0.5 max-w-[30rem] text-[length:var(--fs-xs)] leading-relaxed text-(--ui-muted)">
-              {active.description}
-            </p>
-          ) : null}
         </div>
-        {!takeover && (status || showRefresh) ? (
+        {!takeover && status ? (
           <div className="flex shrink-0 items-center gap-2 text-[length:var(--fs-xs)] text-(--ui-muted)">
             {status}
-            {showRefresh ? (
-              <RefreshIconButton onClick={onReload} loading={loading} label={refreshLabel} />
-            ) : null}
           </div>
         ) : null}
       </header>
@@ -326,7 +317,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
         {sidebarHost
           ? createPortal(
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex shrink-0 px-1.5 pb-1 pt-1.5">
+                <div className="flex shrink-0 px-1.5 pb-1 pt-0">
                   <button
                     type="button"
                     onClick={navigateBack}
@@ -397,9 +388,6 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
             <h1 className="text-[length:var(--fs-sm)] font-medium tracking-[-0.01em] text-(--ui-fg)">
               {title}
             </h1>
-            {showRefresh ? (
-              <RefreshIconButton onClick={onReload} loading={loading} label={refreshLabel} />
-            ) : null}
           </div>
           {navigation}
         </aside>
@@ -411,7 +399,6 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
 
 export function SettingsGroup({
   title,
-  description,
   actions,
   children,
   collapsible,
@@ -456,11 +443,6 @@ export function SettingsGroup({
               {title}
             </h3>
           )}
-          {description ? (
-            <p className="mt-0.5 text-[length:var(--fs-xs)] leading-snug text-(--ui-muted)">
-              {description}
-            </p>
-          ) : null}
         </div>
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </div>
@@ -473,15 +455,7 @@ export function SettingsGroup({
   );
 }
 
-export function SettingsRow({
-  label,
-  description,
-  value,
-  control,
-  status,
-  actions,
-  children,
-}: RowProps) {
+export function SettingsRow({ label, value, control, status, actions, children }: RowProps) {
   const primaryValue = control ?? value;
 
   return (
@@ -498,11 +472,6 @@ export function SettingsRow({
           >
             {label}
           </div>
-          {description ? (
-            <div className="mt-0.5 text-[length:var(--fs-xs)] leading-snug text-(--ui-muted)">
-              {description}
-            </div>
-          ) : null}
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {primaryValue ? (

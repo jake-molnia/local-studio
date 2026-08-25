@@ -13,7 +13,6 @@ import {
   Paintbrush,
   ServerCog,
   ShieldCheck,
-  Smartphone,
   StatusIcon,
   UsageIcon,
 } from "@/ui/icon-registry";
@@ -71,14 +70,12 @@ interface SettingsViewProps {
 }
 const sectionIcon = (Icon: LucideIcon) => <Icon className="h-3.5 w-3.5" />;
 const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = {
-  profile: [
+  connection: [
     { label: "Your profile", terms: ["name", "avatar", "image", "color", "identity"] },
     {
       label: "Connect your phone",
       terms: ["pairing", "qr", "kittylitter", "download", "connection json"],
     },
-  ],
-  connection: [
     {
       label: "New threads",
       terms: ["default model", "provider", "harness", "effort", "title", "order"],
@@ -132,13 +129,6 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
   ],
 };
 const SECTIONS: SettingsSectionDef[] = [
-  [
-    "profile",
-    "Profile & phone",
-    "Your identity and phone pairing.",
-    Smartphone,
-    "name avatar image color phone pairing qr kittylitter download connection json",
-  ],
   [
     "connection",
     "General",
@@ -297,7 +287,14 @@ export function SettingsView({
   onControllerSectionActive,
 }: SettingsViewProps) {
   const configure = useConfigure();
-  const machineNodes = useMemo(() => configure.rigs.flatMap((rig) => rig.nodes), [configure.rigs]);
+  const machineNodes = useMemo(
+    () => [
+      ...new Map(
+        configure.rigs.flatMap((rig) => rig.nodes).map((node) => [node.id, node] as const),
+      ).values(),
+    ],
+    [configure.rigs],
+  );
   const machineTargets = useMemo(
     () =>
       new Map(
@@ -411,11 +408,11 @@ export function SettingsView({
     >
       {activeSection === "connection" ? (
         <>
+          <ProfileSettings />
           <AgentDefaultsSection />
           <AppVersionSection />
         </>
       ) : null}
-      {activeSection === "profile" ? <ProfileSettings /> : null}
       <SettingsUsage active={activeSection === "usage"} />
       <SettingsModels active={activeSection === "models"} />
       {activeSection === "appearance" ? <AppearanceSettings /> : null}
