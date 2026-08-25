@@ -623,9 +623,14 @@ pub const Manager = struct {
         defer argv.deinit(manager.allocator);
         var model_route = try manager.model_route.prepare(model_id);
         defer model_route.deinit();
+        try model_route.environment.put("LOCAL_STUDIO_MODEL_ID", model_id);
+        try manager.addMcpBridgeEnvironment(&model_route.environment, model_id, session_id);
         const native_id = try harness_session_id.resolve(manager.allocator, session_id, native_value);
         errdefer manager.allocator.free(native_id);
         try argv.appendSlice(manager.allocator, &.{ manager.pi.executable, "--mode", "rpc", "--session-dir", session_dir, "--session-id", native_id, "--model", model_route.model_name });
+        const connector_extension = try manager.piConnectorExtension();
+        defer if (connector_extension) |value| manager.allocator.free(value);
+        if (connector_extension) |value| try argv.appendSlice(manager.allocator, &.{ "--extension", value });
         if (thinking) |level| if (!std.mem.eql(u8, level, "auto")) try argv.appendSlice(manager.allocator, &.{ "--thinking", level });
         if (!std.mem.eql(u8, tool_access, "full")) try argv.appendSlice(manager.allocator, &.{ "--tools", "read,grep,find,ls" });
         var child = try std.process.spawn(manager.io, .{
@@ -739,10 +744,20 @@ pub const Manager = struct {
         const sandbox = if (std.mem.eql(u8, tool_access, "full")) "workspace-write" else "read-only";
         var argv: std.ArrayList([]const u8) = .empty;
         defer argv.deinit(manager.allocator);
+        var environment = try manager.model_route.environment.clone(manager.allocator);
+        defer environment.deinit();
+        try manager.addMcpBridgeEnvironment(&environment, model_id, session_id);
+        const controller_executable = try std.process.executablePathAlloc(manager.io, manager.allocator);
+        defer manager.allocator.free(controller_executable);
+        const command_config = try configAssignment(manager.allocator, "mcp_servers.local-studio.command", controller_executable);
+        defer manager.allocator.free(command_config);
+        const args_config = "mcp_servers.local-studio.args=[\"mcp-bridge\"]";
+        const env_config = "mcp_servers.local-studio.env_vars=[\"LOCAL_STUDIO_MCP_BRIDGE_URL\",\"LOCAL_STUDIO_MCP_BRIDGE_MODEL\",\"LOCAL_STUDIO_MCP_BRIDGE_SESSION\",\"LOCAL_STUDIO_MCP_BRIDGE_KEY\"]";
         if (native_id.len == 0)
             try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", sandbox, "-m", model })
         else
             try argv.appendSlice(manager.allocator, &.{ manager.codex.executable, "exec", "resume", "--json", "--skip-git-repo-check", "-m", model });
+        try argv.appendSlice(manager.allocator, &.{ "-c", command_config, "-c", args_config, "-c", env_config });
         const effort = if (thinking) |value| if (!std.mem.eql(u8, value, "auto") and !std.mem.eql(u8, value, "off")) try std.fmt.allocPrint(manager.allocator, "model_reasoning_effort=\"{s}\"", .{value}) else null else null;
         defer if (effort) |value| manager.allocator.free(value);
         if (effort) |value| try argv.appendSlice(manager.allocator, &.{ "-c", value });
@@ -750,12 +765,32 @@ pub const Manager = struct {
         try argv.append(manager.allocator, message);
         return std.process.spawn(manager.io, .{
             .argv = argv.items,
+            .environ_map = &environment,
             .cwd = .{ .path = cwd },
             .stdin = .ignore,
             .stdout = .pipe,
             .stderr = .{ .file = log_file },
             .pgid = 0,
         });
+    }
+
+    fn piConnectorExtension(manager: *Manager) !?[]u8 {
+        if (manager.model_route.environment.get("LOCAL_STUDIO_RESOURCES_PATH")) |resources| {
+            const path = try std.fs.path.join(manager.allocator, &.{ resources, "desktop", "resources", "pi-extensions", "connectors.ts" });
+            if (Io.Dir.cwd().statFile(manager.io, path, .{})) |_| return path else |_| manager.allocator.free(path);
+        }
+        if (manager.model_route.environment.get("PWD")) |cwd| {
+            const path = try std.fs.path.join(manager.allocator, &.{ cwd, "frontend", "desktop", "resources", "pi-extensions", "connectors.ts" });
+            if (Io.Dir.cwd().statFile(manager.io, path, .{})) |_| return path else |_| manager.allocator.free(path);
+        }
+        return null;
+    }
+
+    fn addMcpBridgeEnvironment(manager: *Manager, environment: *std.process.Environ.Map, model_id: []const u8, session_id: []const u8) !void {
+        try environment.put("LOCAL_STUDIO_MCP_BRIDGE_URL", manager.controller_origin);
+        try environment.put("LOCAL_STUDIO_MCP_BRIDGE_MODEL", model_id);
+        try environment.put("LOCAL_STUDIO_MCP_BRIDGE_SESSION", session_id);
+        try environment.put("LOCAL_STUDIO_MCP_BRIDGE_KEY", manager.controller_api_key orelse "");
     }
 
     fn waitCodexNativeId(manager: *Manager, session: *Session) !void {
@@ -1203,6 +1238,15 @@ fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
 fn codexModelId(value: []const u8) []const u8 {
     const delimiter = std.mem.indexOfScalar(u8, value, '/') orelse return value;
     return value[delimiter + 1 ..];
+}
+
+fn configAssignment(allocator: std.mem.Allocator, key: []const u8, value: anytype) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll(key);
+    try output.writer.writeByte('=');
+    try std.json.Stringify.value(value, .{}, &output.writer);
+    return output.toOwnedSlice();
 }
 
 fn validEntryId(value: []const u8) bool {
