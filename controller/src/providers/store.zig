@@ -1,5 +1,5 @@
 const std = @import("std");
-const studio_settings = @import("studio_settings.zig");
+const studio_settings = @import("../system/settings/studio_store.zig");
 
 const max_document_bytes = 1024 * 1024;
 const max_providers = 1024;

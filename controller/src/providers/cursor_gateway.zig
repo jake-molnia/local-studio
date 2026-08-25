@@ -1,8 +1,8 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const connector_runtime = @import("connector_runtime.zig");
+const config = @import("../app/config.zig");
+const connector_runtime = @import("../agent/connectors/runtime.zig");
 const openai_protocol = @import("openai_protocol.zig");
-const inference_usage = @import("../repository/inference_usage.zig");
+const inference_usage = @import("../inference/usage/store.zig");
 
 const Io = std.Io;
 const max_response_bytes = 64 * 1024 * 1024;

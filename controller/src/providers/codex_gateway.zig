@@ -1,7 +1,7 @@
 const std = @import("std");
-const oauth_credentials = @import("../repository/oauth_credentials.zig");
+const oauth_credentials = @import("../accounts/oauth_credentials.zig");
 const openai_protocol = @import("openai_protocol.zig");
-const inference_usage = @import("../repository/inference_usage.zig");
+const inference_usage = @import("../inference/usage/store.zig");
 
 const max_response_bytes = 64 * 1024 * 1024;
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const provider_settings = @import("../repository/provider_settings.zig");
+const provider_settings = @import("store.zig");
 
 const max_catalog_models = 100_000;
 

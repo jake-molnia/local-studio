@@ -1,8 +1,8 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const oauth_credentials = @import("../repository/oauth_credentials.zig");
+const config = @import("../app/config.zig");
+const oauth_credentials = @import("../accounts/oauth_credentials.zig");
 const cursor_gateway = @import("cursor_gateway.zig");
-const model_catalog = @import("model_catalog.zig");
+const model_catalog = @import("../inference/models/catalog.zig");
 
 const Io = std.Io;
 const codex_id = "openai-codex";

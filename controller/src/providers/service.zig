@@ -1,6 +1,6 @@
 const std = @import("std");
-const provider_settings = @import("../repository/provider_settings.zig");
-const studio_settings = @import("studio_settings.zig");
+const provider_settings = @import("store.zig");
+const studio_settings = @import("../system/settings/service.zig");
 
 const max_field_bytes = 16 * 1024;
 

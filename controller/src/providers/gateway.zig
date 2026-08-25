@@ -1,7 +1,7 @@
 const std = @import("std");
 const openai_protocol = @import("openai_protocol.zig");
-const provider_settings = @import("../repository/provider_settings.zig");
-const inference_usage = @import("../repository/inference_usage.zig");
+const provider_settings = @import("store.zig");
+const inference_usage = @import("../inference/usage/store.zig");
 
 const max_response_bytes = 64 * 1024 * 1024;
 
