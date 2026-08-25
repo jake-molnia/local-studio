@@ -55,7 +55,7 @@ pub fn resolve(allocator: std.mem.Allocator, io: std.Io, environment: *const std
     return error.InvalidConnectorRuntime;
 }
 
-pub fn addEnvironment(allocator: std.mem.Allocator, result: *std.process.Environ.Map, data_dir: []const u8, kind: Kind) !void {
+pub fn addEnvironment(allocator: std.mem.Allocator, io: std.Io, result: *std.process.Environ.Map, data_dir: []const u8, connector: std.json.ObjectMap, kind: Kind) !void {
     const root = try std.fs.path.join(allocator, &.{ data_dir, "mcp", "runtimes" });
     defer allocator.free(root);
     switch (kind) {
@@ -80,6 +80,14 @@ pub fn addEnvironment(allocator: std.mem.Allocator, result: *std.process.Environ
             try result.put("UV_PYTHON_INSTALL_DIR", installs);
         },
     }
+    if (stringField(connector, "id")) |id| if (std.mem.eql(u8, id, "mcp-memory")) {
+        const state_dir = try std.fs.path.join(allocator, &.{ data_dir, "mcp", "state", id });
+        defer allocator.free(state_dir);
+        _ = try std.Io.Dir.cwd().createDirPathStatus(io, state_dir, @enumFromInt(0o700));
+        const memory_file = try std.fs.path.join(allocator, &.{ state_dir, "memory.jsonl" });
+        defer allocator.free(memory_file);
+        try result.put("MEMORY_FILE_PATH", memory_file);
+    };
 }
 
 pub fn validate(runtime_value: std.json.Value) !void {

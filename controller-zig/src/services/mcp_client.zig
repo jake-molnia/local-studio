@@ -33,7 +33,7 @@ pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const st
     const launch = try connector_runtime.resolve(launch_arena.allocator(), io, environment, connector);
     var child_environment = try minimalEnvironment(allocator, environment, connector);
     defer child_environment.deinit();
-    try connector_runtime.addEnvironment(allocator, &child_environment, data_dir, launch.kind);
+    try connector_runtime.addEnvironment(allocator, io, &child_environment, data_dir, connector, launch.kind);
     try oauth_connector_store.injectEnvironment(allocator, io, data_dir, connector, &child_environment);
     var child = try std.process.spawn(io, .{
         .argv = launch.argv,
