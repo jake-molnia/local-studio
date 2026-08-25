@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   images: { unoptimized: true },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  reactCompiler: true,
   // Keep the Pi SDK out of the webpack/turbopack bundle so it loads from
   // node_modules at runtime (Node-only deps, dynamic jiti loader, etc.).
   //
