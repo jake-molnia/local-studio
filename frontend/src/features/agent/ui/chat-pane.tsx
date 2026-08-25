@@ -446,10 +446,6 @@ export function ChatPane({
     onRegisterHandle,
     running: Boolean(running),
   });
-  const openComputerStatus = useCallback(() => {
-    tools.setComputerTab("status");
-    tools.setComputerOpen(true);
-  }, [tools]);
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
   const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
   useMountSubscription(() => {
@@ -507,7 +503,6 @@ export function ChatPane({
       createComposerCommandRegistry([
         builtinCommandProvider({
           compact: () => void compactSession(),
-          openStatus: openComputerStatus,
           toggleBrowserTool: onToggleBrowserTool,
           // The command is `/connectors`, so it lands on the tab it names
           // rather than on whichever tab the page happens to open with.
@@ -534,7 +529,6 @@ export function ChatPane({
       exportSession,
       onForkSession,
       onToggleBrowserTool,
-      openComputerStatus,
       openTerminalAction,
       router,
       tools.promptTemplateCatalogue,
@@ -744,7 +738,6 @@ export function ChatPane({
           }}
           onComposerPaste={handleComposerPaste}
           onInitGit={chatWorkspace ? undefined : onInitGit}
-          onOpenStatus={openComputerStatus}
           onOpenDiff={chatWorkspace ? () => undefined : openDiffDrawer}
           onRemoveAttachment={removeAttachment}
           onRemoveLoadedContext={removeLoadedContext}

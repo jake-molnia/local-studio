@@ -123,12 +123,9 @@ export function loadBrowserState(): BrowserState {
 export function loadComputerState(): ComputerState {
   const storedWidth = Number(read(COMPUTER_WIDTH_KEY));
   const storedTab = read(COMPUTER_TAB_KEY);
-  const tab: ComputerTab = isComputerTab(storedTab) ? storedTab : "status";
+  const tab: ComputerTab = isComputerTab(storedTab) ? storedTab : "files";
   const storedTabs = readComputerTabs();
-  const persistedTabs = uniqueComputerTabs([
-    "status",
-    ...(storedTabs.length ? storedTabs : [tab]),
-  ]);
+  const persistedTabs = uniqueComputerTabs(storedTabs);
   const tabs = persistedTabs.includes(tab)
     ? persistedTabs
     : uniqueComputerTabs([...persistedTabs, tab]);
@@ -163,11 +160,11 @@ export function uniqueComputerTabs(tabs: ComputerTab[]): ComputerTab[] {
     seen.add(tab);
     out.push(tab);
   }
-  return out.includes("status") ? out : ["status", ...out];
+  return out;
 }
 
 export function computerPanelVisibility(current: ComputerState, open: boolean): ComputerState {
-  const tabs = uniqueComputerTabs(current.tabs.length ? current.tabs : ["status"]);
+  const tabs = uniqueComputerTabs(current.tabs.length ? current.tabs : open ? [current.tab] : []);
   const tabsUnchanged =
     tabs.length === current.tabs.length && tabs.every((tab, index) => tab === current.tabs[index]);
   if (current.open === open && tabsUnchanged) return current;

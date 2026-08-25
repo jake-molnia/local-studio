@@ -154,8 +154,8 @@ function buildInitialBrowser(): BrowserState {
 function buildInitialComputer(): ComputerState {
   return {
     open: false,
-    tab: "status",
-    tabs: ["status"],
+    tab: "files",
+    tabs: [],
     width: 0,
   };
 }
@@ -333,10 +333,10 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       computerTabCloseHandlersRef.current.get(tab)?.();
       updateComputer((current) => {
         const tabs = uniqueComputerTabs(current.tabs.filter((item) => item !== tab));
-        const activeTab = current.tab === tab ? (tabs[tabs.length - 1] ?? "status") : current.tab;
+        const activeTab = current.tab === tab ? (tabs[tabs.length - 1] ?? "files") : current.tab;
         writeComputerTabs(tabs);
         writeComputerTab(activeTab);
-        return { ...current, tab: activeTab, tabs };
+        return { ...current, open: tabs.length ? current.open : false, tab: activeTab, tabs };
       });
     },
     [updateComputer],
@@ -375,7 +375,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       }
       return restored?.computer
         ? { ...current, ...restored.computer }
-        : { ...current, open: false, tab: "status", tabs: ["status"] };
+        : { ...current, open: false, tab: "files", tabs: [] };
     });
     setBrowser((current) => {
       if (previous) {

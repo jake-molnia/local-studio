@@ -59,7 +59,6 @@ export type AgentComposerFrameProps = {
   onComposerKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
   onComposerPaste: ClipboardEventHandler<HTMLTextAreaElement>;
   onInitGit?: () => void;
-  onOpenStatus: () => void;
   onOpenDiff: () => void;
   onRemoveAttachment: (id: string) => void;
   onRemoveLoadedContext: (kind: LoadedContextKind, id: string) => void;
@@ -108,7 +107,6 @@ export function AgentComposerFrame({
   onComposerKeyDown,
   onComposerPaste,
   onInitGit,
-  onOpenStatus,
   onOpenDiff,
   onRemoveAttachment,
   onRemoveLoadedContext,
@@ -235,7 +233,6 @@ export function AgentComposerFrame({
           onInitGit={onInitGit}
           currentContextTokens={currentContextTokens}
           contextWindow={contextWindow}
-          onOpenStatus={onOpenStatus}
           onOpenDiff={onOpenDiff}
         />
       ) : (

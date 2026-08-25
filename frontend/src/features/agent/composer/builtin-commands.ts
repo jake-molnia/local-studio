@@ -6,7 +6,6 @@ import type { ComposerCommand, ComposerCommandProvider } from "./command-types";
 
 export type BuiltinComposerActions = {
   compact: () => void;
-  openStatus: () => void;
   toggleBrowserTool: () => void;
   openIntegrations: () => void;
   openTerminal?: () => void;
@@ -54,7 +53,6 @@ export function builtinCommandProvider(actions: BuiltinComposerActions): Compose
         actions.compact,
         (context) => !context.running && !context.compacting,
       ),
-      ...command("status", "Status", "Open the status panel", actions.openStatus),
       ...command("browser", "Browser", "Toggle the browser tool", actions.toggleBrowserTool),
       ...command(
         "connectors",

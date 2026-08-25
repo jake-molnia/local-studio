@@ -11,7 +11,6 @@ export function AgentComposerStatusBar({
   onInitGit,
   currentContextTokens,
   contextWindow,
-  onOpenStatus,
   onOpenDiff,
 }: {
   cwd: string;
@@ -20,7 +19,6 @@ export function AgentComposerStatusBar({
   onInitGit?: () => void;
   currentContextTokens: number;
   contextWindow: number;
-  onOpenStatus: () => void;
   onOpenDiff: () => void;
 }) {
   const displayCwd = formatHomeRelativePath(cwd);
@@ -38,11 +36,7 @@ export function AgentComposerStatusBar({
         <GitBranchState gitBranch={gitBranch} gitSummary={gitSummary} onInitGit={onInitGit} />
         <GitSummaryState gitSummary={gitSummary} onOpenDiff={onOpenDiff} />
       </div>
-      <ContextReadout
-        current={currentContextTokens}
-        contextWindow={contextWindow}
-        onClick={onOpenStatus}
-      />
+      <ContextReadout current={currentContextTokens} contextWindow={contextWindow} />
     </div>
   );
 }
@@ -107,24 +101,14 @@ function GitSummaryState({
   );
 }
 
-function ContextReadout({
-  current,
-  contextWindow,
-  onClick,
-}: {
-  current: number;
-  contextWindow: number;
-  onClick: () => void;
-}) {
-  const title = `Open status · Context ${formatTokenCount(current)} / ${formatTokenCount(contextWindow)}`;
+function ContextReadout({ current, contextWindow }: { current: number; contextWindow: number }) {
+  const title = `Context ${formatTokenCount(current)} / ${formatTokenCount(contextWindow)}`;
   const ratio = contextWindow > 0 ? Math.min(1, Math.max(0, current / contextWindow)) : 0;
   const circumference = 2 * Math.PI * 6;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-sm px-1 text-(--dim) hover:text-(--fg)/80"
+    <span
+      className="ml-auto inline-flex shrink-0 items-center gap-1.5 px-1 text-(--dim)"
       title={title}
       aria-label={title}
     >
@@ -155,7 +139,7 @@ function ContextReadout({
       <span className="tabular-nums">
         {formatTokenCount(current)}/{formatTokenCount(contextWindow)}
       </span>
-    </button>
+    </span>
   );
 }
 
