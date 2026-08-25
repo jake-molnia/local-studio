@@ -27,6 +27,7 @@ import {
   type RouteField,
 } from "./agent-model-picker-data";
 import { useHarnessCatalog } from "./use-harness-catalog";
+import { hasModelFavorites } from "./model-picker-favorites";
 import {
   ComposerPickerTrigger,
   filteredChoices,
@@ -42,7 +43,6 @@ type AgentModelPickerProps = {
   selectedRoute?: string;
   defaultModel?: string;
   onSelect: (modelId: string, routeId: string) => void;
-  onSetDefault?: (modelId: string, routeId: string) => void;
   loading: boolean;
   reasoningLevel?: AgentThinkingLevel;
   reasoningLevels?: readonly AgentThinkingLevel[];
@@ -95,7 +95,6 @@ export function AgentModelPicker({
   selectedRoute,
   defaultModel,
   onSelect,
-  onSetDefault,
   loading,
   reasoningLevel,
   reasoningLevels = [],
@@ -143,7 +142,7 @@ export function AgentModelPicker({
         activeChoice,
         activeRoute,
         supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null,
-        onSelectHarness && selectedHarness !== "chat" ? harnessLabel : null,
+        onSelectHarness ? harnessLabel : null,
         modelTriggerLabel(activeChoice, selectedModel, loading, choices.length),
       ),
     [
@@ -205,7 +204,11 @@ export function AgentModelPicker({
     (nextView: Exclude<PickerView, "inspector">, trigger: HTMLButtonElement) => {
       nestedTriggerRef.current = trigger;
       if (nextView === "models") {
-        setSelectedCompany(activeChoice?.company.key ?? companies[0]?.key ?? "local");
+        setSelectedCompany(
+          hasModelFavorites()
+            ? "favorites"
+            : (activeChoice?.company.key ?? companies[0]?.key ?? "local"),
+        );
         setQuery("");
       }
       setView(nextView);
@@ -446,9 +449,7 @@ export function AgentModelPicker({
                   onQueryChange={setQuery}
                   searchRef={searchRef}
                   selectedModel={selectedModel}
-                  defaultModel={defaultModel}
                   onSelect={selectChoice}
-                  onSetDefault={onSetDefault}
                   activeRoute={activeRoute}
                   onClose={() => close()}
                 />

@@ -215,7 +215,6 @@ const WorkspacePane = memo(function WorkspacePane({
             selectedRoute={view.modelRouteId}
             defaultModel={defaultModel}
             onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
-            onSetDefault={handles.setDefaultModel}
             selectedHarness={chatWorkspace ? "chat" : (view.session?.harness ?? "pi")}
             harnessDisabled={chatWorkspace || !view.isNewSession}
             {...(chatWorkspace

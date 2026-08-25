@@ -13,7 +13,6 @@ import Link from "next/link";
 import { LegendList } from "@legendapp/list/react";
 import { Check, ChevronDown, Search, Star } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
-import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import {
   modelChoiceSearchText,
   routeForChoice,
@@ -22,6 +21,7 @@ import {
   type ModelRoute,
 } from "./agent-model-picker-data";
 import { ModelLabLogo } from "./model-lab-logo";
+import { readModelFavorites, writeModelFavorites } from "./model-picker-favorites";
 
 export function ModelPickerPanel({
   choices,
@@ -32,9 +32,7 @@ export function ModelPickerPanel({
   onQueryChange,
   searchRef,
   selectedModel,
-  defaultModel,
   onSelect,
-  onSetDefault,
   activeRoute,
   onClose,
 }: {
@@ -46,31 +44,17 @@ export function ModelPickerPanel({
   onQueryChange: (query: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   selectedModel: string;
-  defaultModel?: string;
   onSelect: (choice: ModelChoice) => void;
-  onSetDefault?: (modelId: string, routeId: string) => void;
   activeRoute: ModelRoute | null;
   onClose: () => void;
 }) {
-  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
-  useMountSubscription(() => {
-    try {
-      const stored = JSON.parse(
-        window.localStorage.getItem("local-studio:model-favorites") ?? "[]",
-      );
-      if (Array.isArray(stored)) {
-        setFavorites(new Set(stored.filter((value): value is string => typeof value === "string")));
-      }
-    } catch {
-      setFavorites(new Set());
-    }
-  }, []);
+  const [favorites, setFavorites] = useState<Set<string>>(readModelFavorites);
   const updateFavorite = useCallback((modelId: string) => {
     setFavorites((current) => {
       const next = new Set(current);
       if (next.has(modelId)) next.delete(modelId);
       else next.add(modelId);
-      window.localStorage.setItem("local-studio:model-favorites", JSON.stringify([...next]));
+      writeModelFavorites(next);
       return next;
     });
   }, []);
@@ -84,36 +68,20 @@ export function ModelPickerPanel({
     ({ item: choice }: { item: ModelChoice }) => {
       const selected = choice.model.id === selectedModel;
       const preferredRoute = routeForChoice(choice, activeRoute);
-      const isDefault = choice.model.id === defaultModel;
       const isFavorite = favorites.has(choice.model.id);
       return (
         <ModelChoiceRow
           choice={choice}
           selected={selected}
           showCompany={searching}
-          isDefault={isDefault}
           isFavorite={isFavorite}
           disabled={!preferredRoute}
           onSelect={() => onSelect(choice)}
           onToggleFavorite={() => updateFavorite(choice.model.id)}
-          onSetDefault={
-            onSetDefault && preferredRoute
-              ? () => onSetDefault(choice.model.id, preferredRoute.route.id)
-              : undefined
-          }
         />
       );
     },
-    [
-      activeRoute,
-      defaultModel,
-      favorites,
-      onSelect,
-      onSetDefault,
-      searching,
-      selectedModel,
-      updateFavorite,
-    ],
+    [activeRoute, favorites, onSelect, searching, selectedModel, updateFavorite],
   );
   return (
     <div className="flex h-full min-h-0 overflow-hidden rounded-[calc(var(--rad-md)-1px)]">
@@ -148,6 +116,7 @@ export function ModelPickerPanel({
           {visibleChoices.length ? (
             <LegendList
               data={visibleChoices}
+              extraData={favorites}
               keyExtractor={(choice) => choice.key}
               renderItem={renderChoice}
               estimatedItemSize={40}
@@ -243,21 +212,17 @@ function ModelChoiceRow({
   choice,
   selected,
   showCompany,
-  isDefault,
   isFavorite,
   disabled,
   onSelect,
-  onSetDefault,
   onToggleFavorite,
 }: {
   choice: ModelChoice;
   selected: boolean;
   showCompany: boolean;
-  isDefault: boolean;
   isFavorite: boolean;
   disabled: boolean;
   onSelect: () => void;
-  onSetDefault?: () => void;
   onToggleFavorite: () => void;
 }) {
   return (
@@ -299,31 +264,11 @@ function ModelChoiceRow({
           }
           title={isFavorite ? "Remove favorite" : "Add favorite"}
           className={cx(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim) opacity-0 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
+            "mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim)/70 opacity-65 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
             isFavorite && "text-amber-400 opacity-100",
           )}
         >
           <Star className={cx("h-3.5 w-3.5", isFavorite && "fill-current")} />
-        </button>
-      ) : null}
-      {onSetDefault && !disabled ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onSetDefault();
-          }}
-          onKeyDown={(event) => event.stopPropagation()}
-          aria-label={
-            isDefault ? `${choice.label} is the default model` : `Set ${choice.label} as default`
-          }
-          title={isDefault ? "Default model" : "Set as default"}
-          className={cx(
-            "mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim) opacity-0 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
-            isDefault && "text-(--accent) opacity-100",
-          )}
-        >
-          <Check className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>
@@ -448,9 +393,17 @@ export function filteredChoices(
       )
       .map(({ choice }) => choice);
   }
-  if (selectedCompany === "favorites")
-    return choices.filter((choice) => favorites.has(choice.model.id));
-  return choices.filter((choice) => choice.company.key === selectedCompany);
+  return choices
+    .filter((choice) =>
+      selectedCompany === "favorites"
+        ? favorites.has(choice.model.id)
+        : choice.company.key === selectedCompany,
+    )
+    .toSorted(
+      (left, right) =>
+        Number(favorites.has(right.model.id)) - Number(favorites.has(left.model.id)) ||
+        left.label.localeCompare(right.label),
+    );
 }
 
 export function stopToolbarEvent(event: MouseEvent | PointerEvent) {
