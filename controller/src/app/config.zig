@@ -1,5 +1,5 @@
 const std = @import("std");
-const studio_settings = @import("repository/studio_settings.zig");
+const studio_settings = @import("../system/settings/studio_store.zig");
 
 pub const Mode = enum {
     head,

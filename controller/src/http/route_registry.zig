@@ -1,6 +1,5 @@
 const std = @import("std");
-const generated = @import("generated/http_routes.zig");
-const agent = @import("generated/agent_http_routes.zig");
+const generated = @import("../generated/http_routes.zig");
 
 pub const Ownership = generated.Ownership;
 pub const Route = generated.Route;
@@ -15,9 +14,6 @@ pub fn find(method: std.http.Method, target: []const u8) ?Route {
     const query_start = std.mem.findScalar(u8, target, '?') orelse target.len;
     const path = target[0..query_start];
     for (generated.routes) |route| {
-        if (route.method == method and pathMatches(route.path, path)) return route;
-    }
-    for (agent.routes) |route| {
         if (route.method == method and pathMatches(route.path, path)) return route;
     }
     for (spike_routes) |route| {

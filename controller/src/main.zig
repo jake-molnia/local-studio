@@ -1,9 +1,9 @@
 const std = @import("std");
-const app_module = @import("app.zig");
-const config = @import("config.zig");
-const mcp_ssh = @import("mcp_ssh.zig");
+const app_module = @import("app/app.zig");
+const config = @import("app/config.zig");
+const mcp_ssh = @import("agent/mcp/ssh.zig");
 const mcp_bridge = @import("mcp_bridge");
-const mcp_code_storage = @import("mcp_code_storage.zig");
+const mcp_code_storage = @import("agent/mcp/code_storage.zig");
 const fx = @import("fx");
 
 pub fn main(init: std.process.Init) !void {
