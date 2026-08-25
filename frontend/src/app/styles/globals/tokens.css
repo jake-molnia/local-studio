@@ -358,6 +358,7 @@
   --color-syntax-value: light-dark(#c22f88, #ff66ad);
   --color-syntax-comment: light-dark(#767a7e, #8f8f8f);
   --color-syntax-deletion: light-dark(var(--red-600), var(--red-300));
+  --model-lab-logo-mono-filter: light-dark(none, invert(1));
 
   /* Default theme is dark — every theme id that doesn't flip `color-scheme`
      below resolves the dark arm of the pairs above. The `.dark` alias and the

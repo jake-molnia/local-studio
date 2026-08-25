@@ -21,6 +21,7 @@ import {
   type ModelCompany,
   type ModelRoute,
 } from "./agent-model-picker-data";
+import { ModelLabLogo } from "./model-lab-logo";
 
 export function ModelPickerPanel({
   choices,
@@ -79,10 +80,6 @@ export function ModelPickerPanel({
     [choices, deferredQuery, favorites, selectedCompany],
   );
   const searching = query.trim().length > 0;
-  const visibleCompanies = useMemo(
-    () => (favorites.size ? [{ key: "favorites", label: "Favorites" }, ...companies] : companies),
-    [companies, favorites.size],
-  );
   const renderChoice = useCallback(
     ({ item: choice }: { item: ModelChoice }) => {
       const selected = choice.model.id === selectedModel;
@@ -122,7 +119,7 @@ export function ModelPickerPanel({
     <div className="flex h-full min-h-0 overflow-hidden rounded-[calc(var(--rad-md)-1px)]">
       {!searching ? (
         <CompanySidebar
-          companies={visibleCompanies}
+          companies={companies}
           selectedCompany={selectedCompany}
           onSelectCompany={onSelectCompany}
         />
@@ -183,21 +180,32 @@ function CompanySidebar({
   selectedCompany: string;
   onSelectCompany: (company: string) => void;
 }) {
-  const selectedIndex = Math.max(
-    0,
-    companies.findIndex((company) => company.key === selectedCompany),
-  );
   return (
-    <div className="w-11 shrink-0 overflow-hidden bg-(--color-panel-subtle)">
+    <div className="flex w-12 shrink-0 flex-col overflow-hidden bg-(--color-panel-subtle)">
+      <div className="shrink-0 border-b border-(--separator) p-1.5">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={selectedCompany === "favorites"}
+          aria-label="Favorites"
+          title="Favorites"
+          onClick={() => onSelectCompany("favorites")}
+          className={cx(
+            "relative flex aspect-square w-full items-center justify-center text-(--dim) transition-colors hover:text-(--fg) focus-visible:text-(--fg) focus-visible:outline-none",
+            selectedCompany === "favorites" && "text-amber-400",
+          )}
+        >
+          <Star className={cx("h-5 w-5", selectedCompany === "favorites" && "fill-current")} />
+          {selectedCompany === "favorites" ? (
+            <span className="absolute -right-1.5 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-l-full bg-(--accent)" />
+          ) : null}
+        </button>
+      </div>
       <div
         role="tablist"
         aria-label="Model companies"
-        className="relative flex h-full flex-col gap-1 overflow-y-auto overscroll-contain p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="scrollbar-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-1.5"
       >
-        <span
-          className="pointer-events-none absolute -right-0 top-3 z-10 h-5 w-[3px] rounded-l-full bg-(--accent) transition-transform duration-200 ease-out"
-          style={{ transform: `translateY(${selectedIndex * 40}px)` }}
-        />
         {companies.map((company) => {
           const selected = company.key === selectedCompany;
           return (
@@ -210,11 +218,14 @@ function CompanySidebar({
                 title={company.label}
                 onClick={() => onSelectCompany(company.key)}
                 className={cx(
-                  "relative flex aspect-square w-full cursor-pointer items-center justify-center rounded-md text-(--dim) transition-colors hover:bg-(--hover) hover:text-(--fg) focus-visible:bg-(--hover) focus-visible:text-(--fg) focus-visible:outline-none",
-                  selected && "bg-(--active) text-(--fg)",
+                  "relative flex aspect-square w-full cursor-pointer items-center justify-center text-(--dim) opacity-70 transition-[color,opacity] hover:text-(--fg) hover:opacity-100 focus-visible:text-(--fg) focus-visible:opacity-100 focus-visible:outline-none",
+                  selected && "text-(--fg) opacity-100",
                 )}
               >
                 <CompanyGlyph company={company} />
+                {selected ? (
+                  <span className="absolute -right-1.5 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-l-full bg-(--accent)" />
+                ) : null}
               </button>
             </div>
           );
@@ -225,20 +236,7 @@ function CompanySidebar({
 }
 
 function CompanyGlyph({ company }: { company: ModelCompany }) {
-  if (company.logo) {
-    return (
-      <img
-        src={company.logo}
-        alt=""
-        className="h-5 w-5 rounded-[4px] object-contain grayscale contrast-125"
-      />
-    );
-  }
-  return (
-    <span className="flex h-5 w-5 items-center justify-center rounded-[5px] border border-(--border) bg-(--color-input) text-[10px] font-semibold tracking-[-0.04em] text-(--fg)">
-      {company.label.slice(0, 2)}
-    </span>
-  );
+  return <ModelLabLogo lab={company.key} />;
 }
 
 function ModelChoiceRow({
