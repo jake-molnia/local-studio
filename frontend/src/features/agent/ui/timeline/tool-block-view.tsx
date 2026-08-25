@@ -82,8 +82,9 @@ function toolMeta(block: ToolBlock, filePath?: string | null): ToolMeta {
 
   switch (kind) {
     case "edit":
-    case "read":
       return { verb, detail: resolvedPath ?? fileBasename(resolvedPath) };
+    case "read":
+      return { verb: block.status === "running" ? "Reading file" : "Read file", detail: null };
     case "search": {
       const compact = compactToolText(query, 80);
       return { verb, detail: compact ? `for ${compact}` : (path ?? "files") };
@@ -521,8 +522,25 @@ function execCommand(block: ToolBlock): string | null {
     "script",
     "shell",
     "input",
+    "command_line",
+    "commandLine",
   ]);
-  return command && command.trim() ? command : null;
+  if (command?.trim()) return command;
+  const args = block.args;
+  if (!args) return null;
+  for (const key of ["cmd", "command", "script", "shell", "input"]) {
+    const value = args[key];
+    if (Array.isArray(value) && value.every((part) => typeof part === "string")) {
+      return value.join(" ");
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const nested = value as Record<string, unknown>;
+    for (const nestedKey of ["cmd", "command", "script", "shell", "input"]) {
+      const nestedValue = nested[nestedKey];
+      if (typeof nestedValue === "string" && nestedValue.trim()) return nestedValue;
+    }
+  }
+  return null;
 }
 
 function BrowserPreview({ block }: { block: ToolBlock }) {
@@ -588,14 +606,12 @@ export function ToolBlockView({ block }: { block: ToolBlock }) {
     );
   }
   if (kind === "exec") {
-    const command = execCommand(block);
-    if (command) {
-      return (
-        <ToolPreviewHeightProvider kind={kind}>
-          <ShellBlock command={command} output={block.resultText || null} status={block.status} />
-        </ToolPreviewHeightProvider>
-      );
-    }
+    const command = execCommand(block) ?? humanizeToolName(block.name);
+    return (
+      <ToolPreviewHeightProvider kind={kind}>
+        <ShellBlock command={command} output={block.resultText || null} status={block.status} />
+      </ToolPreviewHeightProvider>
+    );
   }
   if (kind === "browser") {
     return (
