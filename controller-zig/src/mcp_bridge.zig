@@ -66,6 +66,19 @@ fn initializeResponse(allocator: std.mem.Allocator, id: std.json.Value, params: 
 }
 
 fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, id: std.json.Value) ![]u8 {
+    const connector_tools = connectorToolFragment(allocator, io, client, base_url, api_key, model_id) catch null;
+    defer if (connector_tools) |value| allocator.free(value);
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try std.json.Stringify.value(id, .{}, &output.writer);
+    try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser_navigate\",\"description\":\"Open a public or localhost HTTP URL in the Local Studio browser and return its title and resolved URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser_get_text\",\"description\":\"Read the visible text from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_html\",\"description\":\"Read HTML from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_url\",\"description\":\"Return the URL currently associated with this Local Studio chat browser session\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
+    if (connector_tools) |value| try output.writer.writeAll(value);
+    try output.writer.writeAll("]}}");
+    return output.toOwnedSlice();
+}
+
+fn connectorToolFragment(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8) ![]u8 {
     const encoded_model = try encodeQuery(allocator, model_id);
     defer allocator.free(encoded_model);
     const url = try std.fmt.allocPrint(allocator, "{s}/internal/node/v1/connector-call?model_id={s}", .{ base_url, encoded_model });
@@ -79,10 +92,6 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
     if (connectors != .array) return error.InvalidConnectorInventory;
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
-    try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
-    try std.json.Stringify.value(id, .{}, &output.writer);
-    try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser_navigate\",\"description\":\"Open a public or localhost HTTP URL in the Local Studio browser and return its title and resolved URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser_get_text\",\"description\":\"Read the visible text from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_html\",\"description\":\"Read HTML from the current Local Studio browser page or a supplied URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"additionalProperties\":false}},{\"name\":\"browser_get_url\",\"description\":\"Return the URL currently associated with this Local Studio chat browser session\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
-    var wrote = true;
     for (connectors.array.items) |connector| {
         if (connector != .object) continue;
         const connector_id = stringField(connector.object, "id") orelse continue;
@@ -91,7 +100,7 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
         for (tools.array.items) |tool| {
             if (tool != .object) continue;
             const name = stringField(tool.object, "name") orelse continue;
-            if (wrote) try output.writer.writeByte(',');
+            try output.writer.writeByte(',');
             try output.writer.writeAll("{\"name\":");
             const namespaced = try std.fmt.allocPrint(allocator, "{s}__{s}", .{ connector_id, name });
             defer allocator.free(namespaced);
@@ -103,10 +112,8 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
             try output.writer.writeAll(",\"inputSchema\":");
             if (tool.object.get("inputSchema")) |schema| try std.json.Stringify.value(schema, .{}, &output.writer) else try output.writer.writeAll("{\"type\":\"object\"}");
             try output.writer.writeByte('}');
-            wrote = true;
         }
     }
-    try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
 }
 

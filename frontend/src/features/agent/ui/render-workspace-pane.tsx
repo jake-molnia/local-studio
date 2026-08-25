@@ -233,10 +233,11 @@ const WorkspacePane = memo(function WorkspacePane({
             {...reasoning}
           />
         )}
-        browserToolEnabled={tools.browser.enabled}
+        browserToolEnabled={chatWorkspace ? true : tools.browser.enabled}
         browserBackend={chatWorkspace ? "embedded" : tools.browser.backend}
         onToggleBrowserBackend={tools.toggleBrowserBackend}
         onToggleBrowserTool={() => {
+          if (chatWorkspace) return;
           if (tools.browser.enabled) {
             tools.setBrowserEnabled(false);
             tools.closeComputerTab("browser");

@@ -136,11 +136,11 @@ pub fn runChat(init: std.process.Init) !void {
     }
     const api_key = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_API_KEY", "AI_GATEWAY_API_KEY" }) orelse return error.FxCredentialRequired;
     const model = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_MODEL", "FX_MODEL" }) orelse return error.FxModelRequired;
-    _ = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_GATEWAY_URL", "FX_GATEWAY_CHAT_URL" }) orelse return error.FxGatewayRequired;
+    const gateway_url = firstEnvironment(init.environ_map, &.{ "LOCAL_STUDIO_FX_GATEWAY_URL", "FX_GATEWAY_CHAT_URL" }) orelse return error.FxGatewayRequired;
     const home = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_FX_HOME"}) orelse return error.FxHomeRequired;
     const native_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_CHAT_SESSION_ID"}) orelse return error.FxSessionRequired;
     const bridge = BridgeConfig{
-        .base_url = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_URL"}) orelse "",
+        .base_url = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_URL"}) orelse gatewayOrigin(gateway_url),
         .api_key = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_KEY"}),
         .model_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_MODEL"}) orelse model,
         .session_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_SESSION"}) orelse native_id,
@@ -174,7 +174,7 @@ fn runChatTurn(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8, mo
     if (parsed.value != .object) return writeChatError(writer, "Invalid Chat request");
     const message = jsonString(parsed.value.object, "message") orelse return writeChatError(writer, "Chat message is required");
     const thinking = jsonString(parsed.value.object, "thinkingLevel");
-    const browser_enabled = jsonBool(parsed.value.object, "browserToolEnabled") orelse false;
+    const browser_enabled = jsonBool(parsed.value.object, "browserToolEnabled") orelse true;
     var catalog = loadChatToolCatalog(allocator, io, bridge, browser_enabled) catch try emptyChatToolCatalog(allocator);
     defer catalog.deinit();
     try history.append(allocator, .{ .role = .user, .content = try allocator.dupe(u8, message) });
@@ -331,6 +331,13 @@ fn emptyChatToolCatalog(allocator: std.mem.Allocator) !ChatToolCatalog {
     return .{ .allocator = allocator, .parsed = parsed, .tools = try allocator.alloc(stream_provider.DynamicFunctionTool, 0) };
 }
 
+fn gatewayOrigin(url: []const u8) []const u8 {
+    for ([_][]const u8{ "/v1/responses", "/v1/chat/completions", "/v1/messages" }) |suffix| {
+        if (std.mem.endsWith(u8, url, suffix)) return url[0 .. url.len - suffix.len];
+    }
+    return "";
+}
+
 fn chatToolAllowed(name: []const u8, browser_enabled: bool) bool {
     if (std.mem.startsWith(u8, name, "browser_")) return browser_enabled;
     for ([_][]const u8{ "computer__", "mcp-filesystem__", "mcp-git__", "filesystem__", "file__", "git__", "shell__", "terminal__", "ssh__" }) |prefix| {
@@ -376,7 +383,7 @@ fn callChatTool(allocator: std.mem.Allocator, io: std.Io, bridge: BridgeConfig, 
     if (parsed.value.object.get("error")) |tool_error| return .{ .text = try boundedJson(allocator, tool_error), .is_error = true };
     const result = parsed.value.object.get("result") orelse return chatToolFailure(allocator, "Tool returned no result");
     const is_error = result == .object and (jsonBool(result.object, "isError") orelse false);
-    return .{ .text = try boundedJson(allocator, result), .is_error = is_error };
+    return .{ .text = try mcpResultText(allocator, result), .is_error = is_error };
 }
 
 fn chatToolFailure(allocator: std.mem.Allocator, message: []const u8) !ChatToolResult {
@@ -392,6 +399,25 @@ fn boundedJson(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
     const marker = "\n[tool result truncated by Local Studio]";
     const result = try allocator.alloc(u8, max_chat_tool_result_bytes + marker.len);
     @memcpy(result[0..max_chat_tool_result_bytes], document[0..max_chat_tool_result_bytes]);
+    @memcpy(result[max_chat_tool_result_bytes..], marker);
+    return result;
+}
+
+fn mcpResultText(allocator: std.mem.Allocator, result: std.json.Value) ![]u8 {
+    if (result == .object) if (result.object.get("content")) |content| if (content == .array) for (content.array.items) |item| {
+        if (item != .object) continue;
+        const item_type = jsonString(item.object, "type") orelse continue;
+        const text = jsonString(item.object, "text") orelse continue;
+        if (std.mem.eql(u8, item_type, "text")) return boundedText(allocator, text);
+    };
+    return boundedJson(allocator, result);
+}
+
+fn boundedText(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
+    if (text.len <= max_chat_tool_result_bytes) return allocator.dupe(u8, text);
+    const marker = "\n[tool result truncated by Local Studio]";
+    const result = try allocator.alloc(u8, max_chat_tool_result_bytes + marker.len);
+    @memcpy(result[0..max_chat_tool_result_bytes], text[0..max_chat_tool_result_bytes]);
     @memcpy(result[max_chat_tool_result_bytes..], marker);
     return result;
 }

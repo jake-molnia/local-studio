@@ -123,7 +123,8 @@ function createPromptTurnContext(
 
   return {
     assistantId: newId("assistant"),
-    browserEnabledForTurn: args.browserToolEnabled ?? deps.browserToolEnabled,
+    browserEnabledForTurn:
+      selected.harness === "chat" ? true : (args.browserToolEnabled ?? deps.browserToolEnabled),
     promptTemplates,
     // The session id is the opaque runtime key the server addresses this
     // session by.

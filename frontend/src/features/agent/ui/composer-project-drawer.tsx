@@ -540,7 +540,7 @@ function ContextMenuRoot({
       detail: browserToolEnabled ? "On" : "Off",
       icon: <Globe2 className="h-3.5 w-3.5" />,
       onClick: onToggleBrowserTool,
-      disabled: false,
+      disabled: !workspaceToolsEnabled,
       drillIn: false,
       group: "tools",
     },
