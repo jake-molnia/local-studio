@@ -115,6 +115,28 @@ pub fn count(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, h
     return total;
 }
 
+pub fn countCapability(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, capability: []const u8) !usize {
+    try database.lock(io);
+    defer database.unlock(io);
+    var documents = try rigs.list(allocator, database);
+    defer documents.deinit();
+    var total: usize = 0;
+    for (documents.items()) |document| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const nodes = parsed.value.object.get("nodes") orelse continue;
+        if (nodes != .array) continue;
+        for (nodes.array.items) |node| {
+            if (!supportsCapability(node, capability)) continue;
+            const id = stringField(node.object, "id") orelse continue;
+            if (std.mem.eql(u8, id, "local")) continue;
+            if (nullableStringField(node.object, "address") != null) total += 1;
+        }
+    }
+    return total;
+}
+
 fn supportsHarness(node: std.json.Value, harness: []const u8) bool {
     if (node != .object) return false;
     const capabilities = node.object.get("capabilities") orelse return false;

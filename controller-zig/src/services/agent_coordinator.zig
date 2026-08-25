@@ -26,10 +26,14 @@ const EventSnapshot = struct {
 
 pub fn setupPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, database: *sqlite.Database, harness: *harness_runtime.Manager) ![]u8 {
     if (mode == .standalone) return harness.setupPayload();
-    const node_count = try harness_nodes.count(allocator, io, database, "pi");
+    const pi_nodes = try harness_nodes.count(allocator, io, database, "pi");
+    const compute_nodes = try harness_nodes.countCapability(allocator, io, database, "compute");
+    const terminal_nodes = try harness_nodes.countCapability(allocator, io, database, "terminal");
+    const browser_nodes = try harness_nodes.countCapability(allocator, io, database, "browser");
+    const mcp_nodes = try harness_nodes.countCapability(allocator, io, database, "mcp");
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
-    try output.writer.print("{{\"checks\":[{{\"id\":\"pi-rpc-node\",\"label\":\"Enrolled Pi harness node\",\"ok\":{},\"value\":\"{d}\",\"guidance\":\"Enroll a node that advertises the Pi harness capability.\"}}],\"diagnostics\":[]}}", .{ node_count > 0, node_count });
+    try output.writer.print("{{\"checks\":[{{\"id\":\"compute-node\",\"label\":\"Compute worker\",\"ok\":{},\"value\":\"{d} nodes\",\"guidance\":\"Enroll a node that advertises compute capability.\",\"blocking\":false}},{{\"id\":\"terminal-node\",\"label\":\"Terminal service\",\"ok\":{},\"value\":\"{d} nodes\",\"guidance\":\"Enroll a node that advertises terminal capability.\",\"blocking\":false}},{{\"id\":\"browser-node\",\"label\":\"Browser service\",\"ok\":{},\"value\":\"{d} nodes\",\"guidance\":\"Enroll a node that advertises browser capability.\",\"blocking\":false}},{{\"id\":\"mcp-node\",\"label\":\"MCP connector runtime\",\"ok\":{},\"value\":\"{d} nodes\",\"guidance\":\"Enroll a node that advertises MCP capability.\",\"blocking\":false}},{{\"id\":\"pi-rpc-node\",\"label\":\"Enrolled Pi harness node\",\"ok\":{},\"value\":\"{d}\",\"guidance\":\"Enroll a node that advertises the Pi harness capability.\",\"blocking\":false}}],\"diagnostics\":[]}}", .{ compute_nodes > 0, compute_nodes, terminal_nodes > 0, terminal_nodes, browser_nodes > 0, browser_nodes, mcp_nodes > 0, mcp_nodes, pi_nodes > 0, pi_nodes });
     return output.toOwnedSlice();
 }
 
