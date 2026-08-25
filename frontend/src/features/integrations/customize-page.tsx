@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import { AppPage, SearchInput } from "@/ui";
+import { AppContentColumn, AppPage, SearchInput } from "@/ui";
 import { GraduationCap, KeyRound, Plug } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
@@ -54,7 +54,7 @@ export function CustomizePage() {
 
   return (
     <AppPage>
-      <div className="mx-auto flex min-h-full w-full max-w-[34rem] flex-col px-4 pb-12 pt-7 sm:px-5">
+      <AppContentColumn className="flex min-h-full flex-col">
         <header className="w-full">
           <h1 className="sr-only">Customize</h1>
           <SearchInput
@@ -99,7 +99,7 @@ export function CustomizePage() {
         >
           <CustomizeSection section={section} query={query.trim()} />
         </section>
-      </div>
+      </AppContentColumn>
     </AppPage>
   );
 }

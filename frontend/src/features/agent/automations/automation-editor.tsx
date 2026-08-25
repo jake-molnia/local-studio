@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, FormField, Input, Select, Textarea } from "@/ui";
+import { AppContentColumn, Button, FormField, Input, Select, Textarea } from "@/ui";
 import { Clock, Pause, Play, Plus, Trash2, X } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import type { Automation, AutomationSchedule } from "@shared/agent/automation";
@@ -117,7 +117,7 @@ export function AutomationEditor({
           onToggleStatus={onToggleStatus}
         />
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[34rem] space-y-5 px-4 py-5 sm:px-5">
+          <AppContentColumn className="space-y-5 py-5 lg:py-5">
             {creating ? (
               <ExamplePicker onSelect={(example) => setDraft(example)} draft={draft} />
             ) : null}
@@ -251,7 +251,7 @@ export function AutomationEditor({
                 onDelete={onDelete}
               />
             ) : null}
-          </div>
+          </AppContentColumn>
         </div>
       </form>
     </section>
@@ -284,7 +284,7 @@ function EditorHeader({
       : `Next run ${relativeTime(automation?.nextRunAt ?? null)}`;
   return (
     <header className="shrink-0 border-b border-(--ui-border)">
-      <div className="mx-auto flex min-h-14 w-full max-w-[34rem] items-center gap-2 px-4 py-2 sm:px-5">
+      <AppContentColumn className="flex min-h-14 items-center gap-2 py-2 lg:py-2">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[length:var(--fs-lg)] font-medium text-(--ui-fg)">
             {creating ? "New scheduled task" : automation?.name}
@@ -340,7 +340,7 @@ function EditorHeader({
         >
           <X className="h-4 w-4" />
         </Button>
-      </div>
+      </AppContentColumn>
     </header>
   );
 }

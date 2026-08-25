@@ -25,6 +25,20 @@ export function AppPage({ children, className }: { children: ReactNode; classNam
   );
 }
 
+export function AppContentColumn({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx("mx-auto w-full max-w-[72rem] px-4 pb-12 pt-6 sm:px-8 lg:pt-8", className)}>
+      {children}
+    </div>
+  );
+}
+
 export type PageWidth = "sm" | "md" | "lg" | "xl";
 
 const pageWidthClasses: Record<PageWidth, string> = {

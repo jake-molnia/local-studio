@@ -5,6 +5,7 @@ import { useCallback, useDeferredValue, useMemo, useState, type ReactNode } from
 import { createPortal } from "react-dom";
 import {
   AppPage,
+  AppContentColumn,
   Button,
   buttonClasses,
   Input,
@@ -376,9 +377,7 @@ export function SettingsLayout<Id extends SettingsSectionId = SettingsSectionId>
                 {navigation}
               </div>
             </div>
-            <div className={cx("mx-auto w-full px-4 pb-12 pt-6 sm:px-8 lg:pt-8", widths.takeover)}>
-              {content}
-            </div>
+            <AppContentColumn className={widths.takeover}>{content}</AppContentColumn>
           </section>
         </AppPage>
       </>

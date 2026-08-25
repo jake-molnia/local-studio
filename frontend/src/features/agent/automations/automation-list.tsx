@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, SearchInput, SegmentedControl } from "@/ui";
+import { AppContentColumn, Button, SearchInput, SegmentedControl } from "@/ui";
 import { ChevronRight, Clock, Menu, Plus } from "@/ui/icon-registry";
 import { useAppStore } from "@/store";
 import type { Automation } from "@shared/agent/automation";
@@ -37,7 +37,7 @@ export function AutomationList({
 
   return (
     <section className="min-h-0 flex-1 overflow-y-auto bg-(--ui-bg)">
-      <div className="mx-auto w-full max-w-[34rem] px-4 pb-12 pt-7 sm:px-5">
+      <AppContentColumn>
         <header className="flex items-start gap-3">
           <button
             type="button"
@@ -157,7 +157,7 @@ export function AutomationList({
             })}
           </div>
         )}
-      </div>
+      </AppContentColumn>
     </section>
   );
 }

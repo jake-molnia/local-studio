@@ -41,6 +41,7 @@ export type { RefreshButtonProps } from "./refresh-button";
 
 export {
   AppPage,
+  AppContentColumn,
   PageContainer,
   PageHeader,
   SectionNav,
