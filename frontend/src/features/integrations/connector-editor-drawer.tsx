@@ -143,15 +143,15 @@ export function draftFromCatalog(
     ...emptyDraft(),
     id: entry.id,
     name: entry.name,
-    transport: entry.transport,
+    transport: entry.transport === "builtin" ? "stdio" : entry.transport,
     command: legacySshServer
       ? "node"
       : entry.command === SSH_SERVER_PLACEHOLDER
         ? (sshServerPath ?? entry.command)
-        : entry.command,
+        : (entry.command ?? ""),
     args: legacySshServer
       ? (sshServerPath ?? "")
-      : entry.args
+      : (entry.args ?? [])
           .map((arg) => (arg === SSH_SERVER_PLACEHOLDER ? (sshServerPath ?? arg) : arg))
           .join("\n"),
     env: entry.envFields.map((field) => ({

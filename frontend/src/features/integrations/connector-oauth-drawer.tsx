@@ -149,7 +149,11 @@ function GrantFacts({
         }
       />
       <ResourceFact label="Scopes" value={scopes || "—"} mono />
-      <ResourceFact label="Runs" value={renderCommandLine(entry.command, entry.args)} mono />
+      <ResourceFact
+        label="Runs"
+        value={renderCommandLine(entry.command ?? "", entry.args ?? [])}
+        mono
+      />
       {entry.auth ? (
         <ResourceFact
           label="Token handling"
