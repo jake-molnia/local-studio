@@ -12,7 +12,6 @@ import {
   FormField,
   Input,
   RefreshIconButton,
-  Select,
   Textarea,
   UiModal,
   UiModalBody,
@@ -51,8 +50,6 @@ function CodeStorageAccountModal({
   const [organization, setOrganization] = useState("");
   const [label, setLabel] = useState("");
   const [privateKey, setPrivateKey] = useState("");
-  const [secretProvider, setSecretProvider] = useState("keyring");
-  const [customProvider, setCustomProvider] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -68,7 +65,6 @@ function CodeStorageAccountModal({
           organization,
           label: label.trim() || undefined,
           privateKey,
-          secretProvider: secretProvider === "custom" ? customProvider : secretProvider,
         }),
       });
       setPrivateKey("");
@@ -81,10 +77,7 @@ function CodeStorageAccountModal({
     }
   };
 
-  const valid =
-    organization.trim().length > 0 &&
-    privateKey.trim().length > 0 &&
-    (secretProvider !== "custom" || customProvider.trim().length > 0);
+  const valid = organization.trim().length > 0 && privateKey.trim().length > 0;
 
   return (
     <UiModal isOpen onClose={busy ? () => undefined : onClose} maxWidth="max-w-lg">
@@ -101,9 +94,8 @@ function CodeStorageAccountModal({
       />
       <UiModalBody className="space-y-4 pb-5">
         <Alert variant="info">
-          The private key is stored through SecretSpec in the configured credential provider, using
-          your system keyring by default. Agents receive short-lived, repository-scoped credentials
-          and never receive the private key.
+          The private key is stored through the credential store selected in Settings. Agents
+          receive short-lived, repository-scoped credentials and never receive the private key.
         </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
         <FormField
@@ -125,34 +117,6 @@ function CodeStorageAccountModal({
             autoComplete="off"
           />
         </FormField>
-        <FormField
-          label="Credential store"
-          description="Choose where SecretSpec writes this account’s private key."
-        >
-          <Select
-            value={secretProvider}
-            onChange={(event) => setSecretProvider(event.target.value)}
-          >
-            <option value="keyring">System keyring</option>
-            <option value="vault">HashiCorp Vault</option>
-            <option value="openbao">OpenBao</option>
-            <option value="custom">SecretSpec alias or URI</option>
-          </Select>
-        </FormField>
-        {secretProvider === "custom" ? (
-          <FormField
-            label="SecretSpec provider"
-            description="A configured alias or provider URI, such as vault://vault.example.com:8200/secret."
-          >
-            <Input
-              value={customProvider}
-              onChange={(event) => setCustomProvider(event.target.value.trim())}
-              placeholder="prod_vault"
-              autoComplete="off"
-              className="font-mono"
-            />
-          </FormField>
-        ) : null}
         <FormField
           label="Private key"
           description="Paste the PKCS8 P-256 PEM generated for this organization."

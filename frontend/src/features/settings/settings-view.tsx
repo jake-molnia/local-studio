@@ -12,6 +12,7 @@ import {
   Monitor,
   Paintbrush,
   ServerCog,
+  ShieldCheck,
   Smartphone,
   StatusIcon,
   UsageIcon,
@@ -28,6 +29,7 @@ import { ApiConnectionSection } from "./api-connection-section";
 import { ArchivedChatsSettings } from "./agent-settings-sections";
 import { AppVersionSection } from "./app-version-section";
 import { AgentDefaultsSection } from "./agent-defaults-section";
+import { CredentialStoreSection } from "./credential-store-section";
 import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -122,6 +124,12 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
     { label: "Model providers", terms: ["cursor", "codex", "openrouter", "oauth", "api key"] },
     { label: "Studio models", terms: ["download", "serve", "recipe", "runtime", "weights"] },
   ],
+  credentials: [
+    {
+      label: "Credential store",
+      terms: ["secrets", "secretspec", "keyring", "vault", "password manager"],
+    },
+  ],
 };
 const SECTIONS: SettingsSectionDef[] = [
   [
@@ -165,6 +173,13 @@ const SECTIONS: SettingsSectionDef[] = [
     "Inference and session usage across the active controller.",
     UsageIcon,
     "usage tokens requests activity models controller errors",
+  ],
+  [
+    "credentials",
+    "Credentials",
+    "SecretSpec storage for every connected account.",
+    ShieldCheck,
+    "credentials secrets secretspec keyring vault password manager account authentication",
   ],
   [
     "models",
@@ -406,6 +421,7 @@ export function SettingsView({
       {activeSection === "appearance" ? <AppearanceSettings /> : null}
       {activeSection === "terminal" ? <ShortcutsSettings /> : null}
       {activeSection === "archive" ? <ArchivedChatsSettings /> : null}
+      {activeSection === "credentials" ? <CredentialStoreSection /> : null}
       {activeSection === MACHINES_SECTION.id ? (
         <div className="space-y-8">
           {configure.error ? <ErrorBox>{configure.error}</ErrorBox> : null}
