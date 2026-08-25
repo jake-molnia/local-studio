@@ -252,6 +252,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
 
+    if (mode == .head and std.mem.eql(u8, route.path, "/studio/diagnostics") and requestHeader(request, "X-Local-Studio-Worker-Id") == null) {
+        const models_dir = try studio.modelsDirectory(allocator, io);
+        defer allocator.free(models_dir);
+        const response = try studio_operations.diagnosticsPayload(allocator, io, configuration, models_dir, system, runtime_cache);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+
     switch (topology.routeDisposition(mode, route)) {
         .local => {},
         .proxy => {
