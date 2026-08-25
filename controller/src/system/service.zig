@@ -1,9 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config_module = @import("../config.zig");
-const system_info = @import("../platform/system_info.zig");
-const lifecycle = @import("lifecycle.zig");
-const runtime_info = @import("runtime_info.zig");
+const config_module = @import("../app/config.zig");
+const system_info = @import("platform/system_info.zig");
+const lifecycle = @import("../inference/runtime/lifecycle.zig");
+const runtime_info = @import("../inference/runtime/info.zig");
 
 const Io = std.Io;
 

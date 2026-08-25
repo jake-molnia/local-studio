@@ -1,10 +1,10 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const instance_repository = @import("../repository/instances.zig");
-const recipe_repository = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const lifecycle = @import("lifecycle.zig");
-const recipes = @import("recipes.zig");
+const config_module = @import("../app/config.zig");
+const instance_repository = @import("../inference/runtime/instance_store.zig");
+const recipe_repository = @import("../inference/recipes/store.zig");
+const sqlite = @import("../storage/sqlite.zig");
+const lifecycle = @import("../inference/runtime/lifecycle.zig");
+const recipes = @import("../inference/recipes/service.zig");
 
 const Io = std.Io;
 const max_tail_bytes = 10 * 1024 * 1024;

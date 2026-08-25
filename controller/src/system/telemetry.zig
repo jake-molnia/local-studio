@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const system_info = @import("../platform/system_info.zig");
+const system_info = @import("platform/system_info.zig");
 
 const Io = std.Io;
 

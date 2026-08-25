@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config_module = @import("../config.zig");
-const system_info = @import("../platform/system_info.zig");
-const runtime_info = @import("runtime_info.zig");
+const config_module = @import("../app/config.zig");
+const system_info = @import("platform/system_info.zig");
+const runtime_info = @import("../inference/runtime/info.zig");
 const storage = @import("storage.zig");
 const telemetry = @import("telemetry.zig");
 

@@ -1,8 +1,8 @@
 const std = @import("std");
-const lifecycle = @import("lifecycle.zig");
-const recipe_repository = @import("../repository/recipes.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const telemetry = @import("telemetry.zig");
+const lifecycle = @import("../../inference/runtime/lifecycle.zig");
+const recipe_repository = @import("../../inference/recipes/store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const telemetry = @import("../telemetry.zig");
 
 const Io = std.Io;
 const http = std.http;

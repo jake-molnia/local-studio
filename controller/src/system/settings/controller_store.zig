@@ -1,5 +1,5 @@
 const std = @import("std");
-const sqlite = @import("sqlite.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 const ui_preferences_key = "ui_preferences";
 

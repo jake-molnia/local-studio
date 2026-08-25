@@ -1,8 +1,8 @@
 const std = @import("std");
-const config_module = @import("../config.zig");
-const controller_settings = @import("../repository/controller_settings.zig");
-const settings_file = @import("../repository/studio_settings.zig");
-const sqlite = @import("../repository/sqlite.zig");
+const config_module = @import("../../app/config.zig");
+const controller_settings = @import("controller_store.zig");
+const settings_file = @import("studio_store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 pub const State = struct {
     allocator: std.mem.Allocator,
