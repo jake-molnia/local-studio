@@ -58,6 +58,7 @@ export function taskTab(session: OpenAgentSession): WorkbenchTab {
 
 export function emptyTaskTab(projectId?: string | null): WorkbenchTab {
   const scope = projectId?.trim() || "workspace";
+  const groupTitle = projectId === "chats" ? "New chat" : "New task";
   const query = new URLSearchParams({ new: "1", replace: "1" });
   if (projectId) query.set("project", projectId);
   return {
@@ -66,7 +67,7 @@ export function emptyTaskTab(projectId?: string | null): WorkbenchTab {
     title: "Chat",
     resourceId: "new",
     groupId: `new:${scope}`,
-    groupTitle: "New task",
+    groupTitle,
     href: `/agent?${query.toString()}`,
     ...(projectId ? { projectId } : {}),
   };

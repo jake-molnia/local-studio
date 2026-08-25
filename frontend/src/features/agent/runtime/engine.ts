@@ -18,7 +18,12 @@ import {
   type ComposerPromptTemplateRef,
   type ComposerSkillRef,
 } from "@/features/agent/composer-context";
-import type { Session, SessionId, UpdateSession } from "@/features/agent/runtime/types";
+import type {
+  AgentHarness,
+  Session,
+  SessionId,
+  UpdateSession,
+} from "@/features/agent/runtime/types";
 import type { BrowserBackend, ToolSelection } from "@/features/agent/tools/types";
 import type {
   AgentQueueAction,
@@ -46,6 +51,7 @@ export type UseSessionEngineDeps = {
   cwd: string;
   browserToolEnabled: boolean;
   browserBackend: BrowserBackend;
+  forcedHarness?: AgentHarness;
   onPiSessionIdChange?: (piSessionId: string) => void;
   /** Mutate a single session record. */
   updateSession: UpdateSession;
@@ -98,6 +104,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
     cwd,
     browserToolEnabled,
     browserBackend,
+    forcedHarness,
     onPiSessionIdChange,
     updateSession,
     selectionFor,
@@ -197,6 +204,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           activeTabId,
           browserToolEnabled,
           browserBackend,
+          forcedHarness,
           cwd,
           modelId,
           modelRouteId,
@@ -218,6 +226,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       cwd,
       browserToolEnabled,
       browserBackend,
+      forcedHarness,
       onPiSessionIdChange,
       updateSession,
     ],

@@ -187,6 +187,7 @@ type Props = {
   modelsLoading: boolean;
   contextWindow: number;
   cwd: string;
+  projectId: string | null;
   projectName: string | null;
   modelSelector?: (props: ComposerModelSelectorProps) => ReactNode;
   gitBranch?: string | null;
@@ -239,6 +240,7 @@ export function ChatPane({
   modelsLoading,
   contextWindow,
   cwd,
+  projectId,
   projectName,
   modelSelector,
   gitBranch,
@@ -342,6 +344,7 @@ export function ChatPane({
   } = useChatPaneSessionTitle({
     activeTab,
     activeTabId,
+    projectId,
     paneId,
     running: Boolean(running),
     onPiSessionIdChange,
@@ -423,6 +426,7 @@ export function ChatPane({
     cwd,
     browserToolEnabled,
     browserBackend,
+    forcedHarness: projectId === "chats" ? "chat" : undefined,
     onPiSessionIdChange: handlePiSessionIdAssigned,
     updateSession: updateTab,
     selectionFor: tools.selectionFor,

@@ -17,7 +17,12 @@ import type {
 import type { BrowserBackend, ToolSelection } from "@/features/agent/tools/types";
 import * as api from "@/features/agent/runtime/api";
 import { sessionRuntimeController } from "@/features/agent/runtime/session-runtime-controller";
-import type { Session, SessionId, UpdateSession } from "@/features/agent/runtime/types";
+import type {
+  AgentHarness,
+  Session,
+  SessionId,
+  UpdateSession,
+} from "@/features/agent/runtime/types";
 import {
   runtimeCanHydrateCanonicalSession,
   settleTurn,
@@ -47,6 +52,7 @@ export type PromptStreamDeps = {
   browserToolEnabled: boolean;
   browserBackend: BrowserBackend;
   cwd: string;
+  forcedHarness?: AgentHarness;
   modelId: string;
   modelRouteId: string;
   thinkingLevel: AgentThinkingLevel;
@@ -100,8 +106,9 @@ function createPromptTurnContext(
   args: SubmitArgs,
 ): PromptTurnContext | null {
   const sessionId = args.targetSessionId ?? deps.activeTabId;
-  const selected = deps.tabsRef.current.find((tab) => tab.id === sessionId);
-  if (!selected || !deps.modelId) return null;
+  const current = deps.tabsRef.current.find((tab) => tab.id === sessionId);
+  if (!current || !deps.modelId) return null;
+  const selected = deps.forcedHarness ? { ...current, harness: deps.forcedHarness } : current;
 
   const selection = deps.selectionFor(sessionId);
   const skills = args.skills ?? selection.skills ?? EMPTY_SKILLS;
@@ -129,7 +136,12 @@ function appendOptimisticPrompt(
 ): void {
   deps.updateSession(context.sessionId, (session) => ({
     ...session,
-    cwd: session.harness === "fx" ? undefined : session.cwd || deps.cwd,
+    harness: deps.forcedHarness ?? session.harness,
+    cwd:
+      (deps.forcedHarness ?? session.harness) === "chat" ||
+      (deps.forcedHarness ?? session.harness) === "fx"
+        ? undefined
+        : session.cwd || deps.cwd,
     modelId: session.modelId || deps.modelId,
     modelRouteId: session.modelRouteId || deps.modelRouteId,
     startedAt: session.startedAt ?? new Date().toISOString(),

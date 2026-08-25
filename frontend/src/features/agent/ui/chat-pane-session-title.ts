@@ -6,6 +6,7 @@ import { useProjectsNavSessionPrefs } from "@/features/agent/ui/projects-nav/use
 export function useChatPaneSessionTitle({
   activeTab,
   activeTabId,
+  projectId,
   paneId,
   running,
   onPiSessionIdChange,
@@ -13,6 +14,7 @@ export function useChatPaneSessionTitle({
 }: {
   activeTab: SessionTab | null;
   activeTabId: string;
+  projectId: string | null;
   paneId: string;
   running: boolean;
   onPiSessionIdChange?: (sessionId: string) => void;
@@ -34,7 +36,9 @@ export function useChatPaneSessionTitle({
   const sessionLooksEmpty =
     !activeTab || (activeTab.messages.length === 0 && !activeTab.input.trim() && !running);
   const emptySessionTitle =
-    activeTab?.harness === "chat" || activeTab?.projectId === "chats" ? "New chat" : "New task";
+    projectId === "chats" || activeTab?.harness === "chat" || activeTab?.projectId === "chats"
+      ? "New chat"
+      : "New task";
   const displayedSessionTitle = sessionLooksEmpty
     ? emptySessionTitle
     : sessionPrefTitle || cleanSessionTitle(activeTab?.title) || "";

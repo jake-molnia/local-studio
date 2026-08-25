@@ -6,7 +6,7 @@ import { ChatPane } from "@/features/agent/ui/chat-pane";
 import { ComposerFocusContext } from "@/features/agent/workspace/pane-context";
 import type { ProjectsContextValue } from "@/features/agent/projects/context";
 import type { useTools } from "@/features/agent/tools/context";
-import type { Project } from "@/features/agent/projects/types";
+import { isChatsProject, type Project } from "@/features/agent/projects/types";
 import type { WorkspaceDispatch } from "@/features/agent/workspace/effects";
 import type {
   AgentModel,
@@ -186,6 +186,7 @@ const WorkspacePane = memo(function WorkspacePane({
   composerOnly,
 }: WorkspacePaneProps) {
   const sessions = view.session ? [view.session] : [];
+  const chatWorkspace = isChatsProject(view.project);
   const composerFocus = useMemo(
     () => ({ tabId: view.pane.sessionId, composerFocusIntent }),
     [view.pane.sessionId, composerFocusIntent],
@@ -202,6 +203,7 @@ const WorkspacePane = memo(function WorkspacePane({
         modelsLoading={modelsLoading}
         contextWindow={view.model?.contextWindow ?? 0}
         cwd={view.cwd}
+        projectId={view.project?.id ?? null}
         projectName={view.project?.name ?? null}
         gitBranch={view.gitBranch}
         gitSummary={view.gitSummary}
@@ -214,14 +216,17 @@ const WorkspacePane = memo(function WorkspacePane({
             defaultModel={defaultModel}
             onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
             onSetDefault={handles.setDefaultModel}
-            selectedHarness={view.session?.harness ?? "pi"}
-            harnessDisabled={!view.isNewSession}
-            onSelectHarness={(harness) =>
-              handles.updateSession(view.pane.sessionId, (session) => ({
-                ...session,
-                harness: harness as AgentHarness,
-              }))
-            }
+            selectedHarness={chatWorkspace ? "chat" : (view.session?.harness ?? "pi")}
+            harnessDisabled={chatWorkspace || !view.isNewSession}
+            {...(chatWorkspace
+              ? {}
+              : {
+                  onSelectHarness: (harness: string) =>
+                    handles.updateSession(view.pane.sessionId, (session) => ({
+                      ...session,
+                      harness: harness as AgentHarness,
+                    })),
+                })}
             loading={modelsLoading}
             {...reasoning}
           />

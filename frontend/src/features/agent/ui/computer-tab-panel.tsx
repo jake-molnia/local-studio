@@ -163,6 +163,7 @@ function SideChatTab({
         modelsLoading={modelsLoading}
         contextWindow={selectedModel?.contextWindow ?? 0}
         cwd={cwd}
+        projectId={activeProject?.id ?? null}
         projectName={activeProject?.name ?? null}
         modelSelector={(reasoning) => (
           <AgentModelPicker
