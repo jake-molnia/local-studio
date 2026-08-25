@@ -19,7 +19,7 @@ const ConnectorOriginSchema = Schema.Struct({
 });
 
 const ConnectorAuthReferenceSchema = Schema.Struct({
-  type: Schema.Literal("oauth"),
+  type: Schema.Union([Schema.Literal("oauth"), Schema.Literal("credential")]),
   provider: Schema.String,
   account: Schema.String,
 });
