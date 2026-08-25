@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -52,6 +52,33 @@ const fxArchive = join(fxCacheRoot, `${fxCommit}.tar.gz`);
 const fxSourceRoot = join(projectRoot, "controller-zig", ".managed", "fx");
 const fxPatch = join(projectRoot, "controller-zig", "fx-patches", "local-studio.patch");
 const fxMaterializerVersion = "2";
+const secretspecVersion = "0.19.1";
+const secretspecArtifacts = {
+  "arm64-darwin": {
+    name: "secretspec-aarch64-apple-darwin",
+    sha256: "076536200199540515ebdf929f7cb3f413d82be3524771a2a5975b80ca85d727",
+  },
+  "x64-darwin": {
+    name: "secretspec-x86_64-apple-darwin",
+    sha256: "c622690f2c7037e113e94411311fe7f7158692f8e048d75fddec6e2933968228",
+  },
+  "arm64-linux": {
+    name: "secretspec-aarch64-unknown-linux-gnu",
+    sha256: "9b0804932f011ee13709d06a342cd7d30222a764bb62d343771964471b2a7e25",
+  },
+  "x64-linux": {
+    name: "secretspec-x86_64-unknown-linux-gnu",
+    sha256: "9a0b5882532f5ffbb1c687d9284fa8041949962b05f14fc131050f86c70e1efc",
+  },
+};
+const secretspecArtifact = secretspecArtifacts[platformKey];
+const secretspecRoot = join(cacheRoot, "secretspec", secretspecVersion, platformKey);
+const secretspecArchive = secretspecArtifact
+  ? join(secretspecRoot, `${secretspecArtifact.name}.tar.xz`)
+  : null;
+const secretspecExecutable = secretspecArtifact
+  ? join(secretspecRoot, secretspecArtifact.name, "secretspec")
+  : null;
 
 const digestFile = async (path) => {
   const digest = createHash("sha256");
@@ -146,6 +173,32 @@ const ensureFxSource = async () => {
   await rename(temporary, fxSourceRoot);
 };
 
+const ensureSecretSpec = async () => {
+  if (!secretspecArtifact || !secretspecArchive || !secretspecExecutable) return null;
+  await mkdir(secretspecRoot, { recursive: true });
+  if (
+    !existsSync(secretspecArchive) ||
+    (await digestFile(secretspecArchive)) !== secretspecArtifact.sha256
+  ) {
+    await rm(secretspecArchive, { force: true });
+    await downloadVerified(
+      `https://github.com/cachix/secretspec/releases/download/v${secretspecVersion}/${secretspecArtifact.name}.tar.xz`,
+      secretspecArchive,
+      secretspecArtifact.sha256,
+    );
+  }
+  if (!existsSync(secretspecExecutable)) {
+    const extracted = spawnSync("tar", ["-xf", secretspecArchive, "-C", secretspecRoot], {
+      stdio: "inherit",
+    });
+    if (extracted.error) throw extracted.error;
+    if (extracted.status !== 0)
+      throw new Error(`Failed to extract SecretSpec: tar exited ${extracted.status}`);
+  }
+  await chmod(secretspecExecutable, 0o755);
+  return secretspecExecutable;
+};
+
 const ensureToolchain = async () => {
   await mkdir(versionRoot, { recursive: true });
   let verified = existsSync(verificationMarker);
@@ -178,11 +231,21 @@ if (arguments_[0] === "build-desktop") {
 }
 await ensureToolchain();
 if (arguments_.length === 0) arguments_.push("version");
-if (arguments_[0] === "build") await ensureFxSource();
+const building = arguments_[0] === "build";
+let resolvedSecretSpec = null;
+if (building) {
+  await ensureFxSource();
+  resolvedSecretSpec = await ensureSecretSpec();
+}
 const result = spawnSync(executable, arguments_, {
   cwd: join(projectRoot, "controller-zig"),
   stdio: "inherit",
   env: process.env,
 });
 if (result.error) throw result.error;
+if (result.status === 0 && building && resolvedSecretSpec) {
+  const destination = join(projectRoot, "controller-zig", "zig-out", "bin", "secretspec");
+  await copyFile(resolvedSecretSpec, destination);
+  await chmod(destination, 0o755);
+}
 process.exit(result.status ?? 1);

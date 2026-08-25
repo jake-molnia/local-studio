@@ -191,6 +191,7 @@ in
       NEXT_PUBLIC_BACKEND_URL = localNodeUrl;
       NEXT_PUBLIC_LOCAL_STUDIO_CONTROLLER_URL = localNodeUrl;
       NEXT_PUBLIC_LOCAL_STUDIO_HEAD_URL = controllerUrl;
+      NEXT_DIST_DIR = ".next-dev";
     };
     restart.on = "never";
     ready = {

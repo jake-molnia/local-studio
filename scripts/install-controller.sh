@@ -42,6 +42,7 @@ ZIG_ROOT="$ZIG_CACHE/toolchain"
 ZIG="$ZIG_ROOT/zig"
 FX_COMMIT="669ef8a7f0bf6b13a1722bfd434fb9fc61d01511"
 FX_SHA256="477a81378ca3d486c0ca87f0a72c48e36f68d8e92a3ba135767a9558faedc06b"
+SECRETSPEC_VERSION="0.19.1"
 
 log() { printf '[local-studio] %s\n' "$*"; }
 
@@ -63,10 +64,10 @@ else
 fi
 
 case "$OS_NAME:$(uname -m)" in
-  Darwin:arm64) ZIG_ARCHIVE="zig-aarch64-macos-$ZIG_VERSION.tar.xz"; ZIG_SHA256="b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489" ;;
-  Darwin:x86_64) ZIG_ARCHIVE="zig-x86_64-macos-$ZIG_VERSION.tar.xz"; ZIG_SHA256="0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7" ;;
-  Linux:aarch64|Linux:arm64) ZIG_ARCHIVE="zig-aarch64-linux-$ZIG_VERSION.tar.xz"; ZIG_SHA256="ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17" ;;
-  Linux:x86_64|Linux:amd64) ZIG_ARCHIVE="zig-x86_64-linux-$ZIG_VERSION.tar.xz"; ZIG_SHA256="70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba7d00" ;;
+  Darwin:arm64) ZIG_ARCHIVE="zig-aarch64-macos-$ZIG_VERSION.tar.xz"; ZIG_SHA256="b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489"; SECRETSPEC_ARTIFACT="secretspec-aarch64-apple-darwin"; SECRETSPEC_SHA256="076536200199540515ebdf929f7cb3f413d82be3524771a2a5975b80ca85d727" ;;
+  Darwin:x86_64) ZIG_ARCHIVE="zig-x86_64-macos-$ZIG_VERSION.tar.xz"; ZIG_SHA256="0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7"; SECRETSPEC_ARTIFACT="secretspec-x86_64-apple-darwin"; SECRETSPEC_SHA256="c622690f2c7037e113e94411311fe7f7158692f8e048d75fddec6e2933968228" ;;
+  Linux:aarch64|Linux:arm64) ZIG_ARCHIVE="zig-aarch64-linux-$ZIG_VERSION.tar.xz"; ZIG_SHA256="ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17"; SECRETSPEC_ARTIFACT="secretspec-aarch64-unknown-linux-gnu"; SECRETSPEC_SHA256="9b0804932f011ee13709d06a342cd7d30222a764bb62d343771964471b2a7e25" ;;
+  Linux:x86_64|Linux:amd64) ZIG_ARCHIVE="zig-x86_64-linux-$ZIG_VERSION.tar.xz"; ZIG_SHA256="70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba7d00"; SECRETSPEC_ARTIFACT="secretspec-x86_64-unknown-linux-gnu"; SECRETSPEC_SHA256="9a0b5882532f5ffbb1c687d9284fa8041949962b05f14fc131050f86c70e1efc" ;;
   *) log "unsupported controller platform: $OS_NAME $(uname -m)"; exit 1 ;;
 esac
 
@@ -87,6 +88,19 @@ if [ ! -x "$ZIG" ]; then
   mv "$ZIG_ROOT.tmp" "$ZIG_ROOT"
 fi
 [ "$("$ZIG" version)" = "$ZIG_VERSION" ] || { log "invalid Zig toolchain at $ZIG"; exit 1; }
+
+SECRETSPEC_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/local-studio/secretspec/$SECRETSPEC_VERSION/$SECRETSPEC_ARTIFACT"
+SECRETSPEC_ARCHIVE="$SECRETSPEC_CACHE/$SECRETSPEC_ARTIFACT.tar.xz"
+SECRETSPEC_BIN="$SECRETSPEC_CACHE/$SECRETSPEC_ARTIFACT/secretspec"
+if [ ! -x "$SECRETSPEC_BIN" ]; then
+  mkdir -p "$SECRETSPEC_CACHE"
+  log "downloading SecretSpec $SECRETSPEC_VERSION"
+  curl -fL "https://github.com/cachix/secretspec/releases/download/v$SECRETSPEC_VERSION/$SECRETSPEC_ARTIFACT.tar.xz" -o "$SECRETSPEC_ARCHIVE.tmp"
+  [ "$(sha256_file "$SECRETSPEC_ARCHIVE.tmp")" = "$SECRETSPEC_SHA256" ] || { rm -f "$SECRETSPEC_ARCHIVE.tmp"; log "SecretSpec checksum mismatch"; exit 1; }
+  mv "$SECRETSPEC_ARCHIVE.tmp" "$SECRETSPEC_ARCHIVE"
+  tar -xf "$SECRETSPEC_ARCHIVE" -C "$SECRETSPEC_CACHE"
+  chmod 755 "$SECRETSPEC_BIN"
+fi
 
 FX_ARCHIVE="$ZIG_CACHE/$FX_COMMIT.tar.gz"
 FX_ROOT="$DIR/controller-zig/.managed/fx"
@@ -164,6 +178,10 @@ mkdir -p "$(dirname "$INSTALL_BIN")"
 cp "$DIR/controller-zig/zig-out/bin/local-studio-controller" "$INSTALL_BIN.tmp"
 chmod 755 "$INSTALL_BIN.tmp"
 mv "$INSTALL_BIN.tmp" "$INSTALL_BIN"
+INSTALL_SECRETSPEC="$DATA_DIR/bin/secretspec"
+cp "$SECRETSPEC_BIN" "$INSTALL_SECRETSPEC.tmp"
+chmod 755 "$INSTALL_SECRETSPEC.tmp"
+mv "$INSTALL_SECRETSPEC.tmp" "$INSTALL_SECRETSPEC"
 
 # --- service -----------------------------------------------------------------
 started=""

@@ -20,6 +20,7 @@ extraResources:
     to: app/controller
     filter:
       - "local-studio-controller*"
+      - "secretspec*"
   - from: node_modules/@lydell/node-pty
     to: desktop-runtime/node_modules/@lydell/node-pty
     filter:

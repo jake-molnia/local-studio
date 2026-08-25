@@ -67,6 +67,12 @@ pub fn addEnvironment(allocator: std.mem.Allocator, io: std.Io, result: *std.pro
             try result.put("npm_config_update_notifier", "false");
             try result.put("npm_config_fund", "false");
             try result.put("npm_config_audit", "false");
+            if (connector.get("runtime")) |runtime_value| if (runtime_value == .object) if (stringField(runtime_value.object, "package")) |package| if (std.mem.eql(u8, package, "mcp-remote")) {
+                const auth_dir = try std.fs.path.join(allocator, &.{ data_dir, "accounts", "remote-mcp" });
+                defer allocator.free(auth_dir);
+                _ = try std.Io.Dir.cwd().createDirPathStatus(io, auth_dir, @enumFromInt(0o700));
+                try result.put("MCP_REMOTE_CONFIG_DIR", auth_dir);
+            };
         },
         .python => {
             const cache = try std.fs.path.join(allocator, &.{ root, "python", "cache" });
