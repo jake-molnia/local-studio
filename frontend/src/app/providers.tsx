@@ -6,6 +6,7 @@ import { ProjectsProvider } from "@/features/agent/projects/context";
 import { ToolsProvider } from "@/features/agent/tools/context";
 import { requestIdleWork } from "@/lib/idle-work";
 import { DesktopWindowAppearanceSync } from "@/lib/desktop-window-appearance";
+import { DiffWorkerProvider } from "@/features/agent/ui/diff-worker-provider";
 
 type GlobalListenersComponent = ComponentType;
 
@@ -40,9 +41,11 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ProjectsProvider>
       <ToolsProvider>
-        <DesktopWindowAppearanceSync />
-        <LazyGlobalListeners />
-        {children}
+        <DiffWorkerProvider>
+          <DesktopWindowAppearanceSync />
+          <LazyGlobalListeners />
+          {children}
+        </DiffWorkerProvider>
       </ToolsProvider>
     </ProjectsProvider>
   );

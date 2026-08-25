@@ -24,11 +24,31 @@ const DIFF_SURFACE_CSS = `
 }
 
 [data-diffs-header] {
+  position: sticky !important;
+  top: 0;
+  z-index: 4;
   min-height: 32px !important;
   background: var(--color-header) !important;
   border-color: var(--border) !important;
   font-family: var(--font-sans) !important;
   font-size: var(--fs-xs) !important;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"]) {
+  height: 24px !important;
+  margin-block: 0 !important;
+  background: var(--color-panel) !important;
+}
+
+:is([data-separator="line-info"], [data-separator="line-info-basic"]) [data-expand-button] {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  border: 0 !important;
 }
 
 [data-title] {
@@ -103,6 +123,14 @@ export function DiffFileList({
           theme: { dark: "github-dark", light: "github-light" },
           themeType: resolvedThemeType,
           unsafeCSS: DIFF_SURFACE_CSS,
+          itemMetrics: {
+            diffHeaderHeight: 32,
+            hunkSeparatorHeight: 24,
+            spacing: 0,
+            paddingTop: 0,
+            paddingBottom: 8,
+          },
+          layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
         }}
       />
     </div>

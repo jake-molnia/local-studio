@@ -139,9 +139,25 @@ function GitDiffPanelBody({
     );
   if (payload?.error) return <ErrorBox className="m-3 p-3">{payload.error}</ErrorBox>;
   if (payload?.isRepo === false) return <InitializeGitPanel initGit={initGit} loading={loading} />;
+  if (files.length === 0 && payload?.diff?.trim()) {
+    return <RawDiffFallback diff={payload.diff} />;
+  }
   if (files.length === 0)
     return <EmptyDiffPanel loading={loading} status={payload?.status ?? []} />;
   return <DiffFileList files={files} viewMode={viewMode} onViewMode={onViewMode} />;
+}
+
+function RawDiffFallback({ diff }: { diff: string }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="mb-2 text-[length:var(--fs-xs)] text-(--dim)">
+        This patch format could not be rendered as a structured diff. Showing the raw patch.
+      </div>
+      <pre className="min-w-max whitespace-pre font-mono text-[length:var(--fs-xs)] leading-5 text-(--fg)/80">
+        {diff}
+      </pre>
+    </div>
+  );
 }
 
 function InitializeGitPanel({
