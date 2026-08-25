@@ -3,6 +3,7 @@ const app_module = @import("app.zig");
 const config = @import("config.zig");
 const mcp_ssh = @import("mcp_ssh.zig");
 const mcp_bridge = @import("mcp_bridge.zig");
+const mcp_code_storage = @import("mcp_code_storage.zig");
 const fx = @import("fx");
 
 pub fn main(init: std.process.Init) !void {
@@ -12,6 +13,7 @@ pub fn main(init: std.process.Init) !void {
     if (arguments.next()) |command| {
         if (std.mem.eql(u8, command, "mcp-ssh")) return mcp_ssh.run(init);
         if (std.mem.eql(u8, command, "mcp-bridge")) return mcp_bridge.run(init);
+        if (std.mem.eql(u8, command, "mcp-code-storage")) return mcp_code_storage.run(init);
         if (std.mem.eql(u8, command, "fx-acp")) return fx.run(init);
     }
     var settings = try config.Config.load(init);

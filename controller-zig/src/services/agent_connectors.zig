@@ -265,6 +265,41 @@ pub fn clearGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.
     }
 }
 
+pub fn connectCodeStorageLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account_id: []const u8, organization: []const u8, label: []const u8) !void {
+    const id = try std.fmt.allocPrint(allocator, "account-code-storage-{s}", .{account_id});
+    defer allocator.free(id);
+    const name = try std.fmt.allocPrint(allocator, "Code.Storage · {s}", .{label});
+    defer allocator.free(name);
+    const executable = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(executable);
+    var document: Io.Writer.Allocating = .init(allocator);
+    defer document.deinit();
+    try document.writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(id, .{}, &document.writer);
+    try document.writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(name, .{}, &document.writer);
+    try document.writer.writeAll(",\"transport\":\"stdio\",\"protocolEra\":\"legacy\",\"command\":");
+    try std.json.Stringify.value(executable, .{}, &document.writer);
+    try document.writer.writeAll(",\"args\":[\"mcp-code-storage\"],\"auth\":{\"type\":\"credential\",\"provider\":\"code-storage\",\"account\":");
+    try std.json.Stringify.value(account_id, .{}, &document.writer);
+    try document.writer.writeAll("},\"origin\":{\"kind\":\"account-adapter\",\"id\":");
+    try std.json.Stringify.value(account_id, .{}, &document.writer);
+    try document.writer.writeAll(",\"binding\":\"code-storage\"},\"env\":{\"CODE_STORAGE_ORGANIZATION\":");
+    try std.json.Stringify.value(organization, .{}, &document.writer);
+    try document.writer.writeAll("},\"enabled\":true}");
+    const response = try upsertLocal(allocator, io, database, document.writer.buffered());
+    allocator.free(response);
+}
+
+pub fn disconnectCodeStorageLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account_id: []const u8) !void {
+    const id = try std.fmt.allocPrint(allocator, "account-code-storage-{s}", .{account_id});
+    defer allocator.free(id);
+    try database.lock(io);
+    defer database.unlock(io);
+    try repository.delete(database, id);
+    try repository.deleteConnectorGrants(database, id);
+}
+
 fn removeOAuthEnv(object: *std.json.ObjectMap) void {
     for ([_][]const u8{ "env", "envSecret" }) |name| {
         const record = object.getPtr(name) orelse continue;

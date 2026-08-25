@@ -1,6 +1,7 @@
 const std = @import("std");
 const connector_runtime = @import("connector_runtime.zig");
 const oauth_connector_store = @import("../repository/oauth_connector_store.zig");
+const account_store = @import("../repository/account_store.zig");
 
 const Io = std.Io;
 const max_frame_bytes = 4 * 1024 * 1024;
@@ -35,6 +36,7 @@ pub fn executeStdio(allocator: std.mem.Allocator, io: Io, environment: *const st
     defer child_environment.deinit();
     try connector_runtime.addEnvironment(allocator, io, &child_environment, data_dir, connector, launch.kind);
     try oauth_connector_store.injectEnvironment(allocator, io, data_dir, connector, &child_environment);
+    try account_store.injectEnvironment(allocator, io, data_dir, connector, environment, &child_environment);
     var child = try std.process.spawn(io, .{
         .argv = launch.argv,
         .environ_map = &child_environment,
