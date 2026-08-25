@@ -3,13 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const contractDirectory = dirname(fileURLToPath(import.meta.url));
-const manifestPath = resolve(contractDirectory, "http-routes.json");
-const outputPath = resolve(contractDirectory, "../../controller-zig/src/generated/http_routes.zig");
+const outputPath = resolve(contractDirectory, "../controller/src/generated/http_routes.zig");
 
 const quote = (value) => JSON.stringify(value);
 
-const render = (manifest) => {
-  const routes = manifest.routes.map(
+const render = (routes) => {
+  const renderedRoutes = routes.map(
     (route) =>
       `    .{ .method = .${route.method}, .path = ${quote(route.path)}, .ownership = .${route.ownership}, .streaming = .${route.streaming} },`,
   );
@@ -26,18 +25,21 @@ const render = (manifest) => {
     "    streaming: Streaming,",
     "};",
     "",
-    `pub const declaration_count: usize = ${manifest.declarationCount};`,
-    `pub const route_count: usize = ${manifest.routeCount};`,
+    `pub const route_count: usize = ${routes.length};`,
     "",
     "pub const routes = [_]Route{",
-    ...routes,
+    ...renderedRoutes,
     "};",
     "",
   ].join("\n");
 };
 
-const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const generated = render(manifest);
+const manifests = await Promise.all(
+  ["http-routes.json", "agent-http-routes.json"].map((name) =>
+    readFile(resolve(contractDirectory, name), "utf8").then(JSON.parse),
+  ),
+);
+const generated = render(manifests.flatMap((manifest) => manifest.routes));
 const mode = process.argv[2] ?? "--check";
 
 if (mode === "--write") {
@@ -46,7 +48,7 @@ if (mode === "--write") {
 } else if (mode === "--check") {
   const existing = await readFile(outputPath, "utf8").catch(() => "");
   if (existing !== generated) {
-    console.error("Zig HTTP route registry is stale; run node controller/contracts/generate-zig-http-routes.mjs --write");
+    console.error("Zig HTTP route registry is stale; run node contracts/generate-zig-http-routes.mjs --write");
     process.exitCode = 1;
   }
 } else {
