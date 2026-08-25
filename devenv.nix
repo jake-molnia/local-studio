@@ -30,10 +30,10 @@ let
   modelsDir = "${localStudioState}/models";
   desktopUserDataDir = "${localStudioState}/electron";
   zigController = "./controller-zig/zig-out/bin/local-studio-controller";
-  portPreflight = ''
+  portPreflight = ports: ''
     ${lib.getExe pkgs.python311} -c '
     import socket, sys
-    ports = [${lib.concatMapStringsSep ", " toString ([ controllerPort ] ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ localNodePort frontendPort ])}]
+    ports = [${lib.concatMapStringsSep ", " toString ports}]
     busy = []
     sockets = []
     for port in ports:
@@ -109,7 +109,7 @@ in
 
   processes.head-node = {
     exec = ''
-      ${portPreflight}
+      ${portPreflight [ controllerPort ]}
       node controller-zig/toolchain.mjs build
       exec ${zigController} --mode head --host 127.0.0.1 --port ${toString controllerPort}
     '';
@@ -130,6 +130,7 @@ in
   processes.local-node = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
     exec = ''
       set -eu
+      ${portPreflight [ localNodePort ]}
       ${zigController} --mode worker --host 127.0.0.1 --port ${toString localNodePort} &
       local_node_pid=$!
       stop_local_node() {
@@ -172,7 +173,10 @@ in
 
   processes.frontend = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
     cwd = "./frontend";
-    exec = "exec ./node_modules/.bin/next dev -p ${toString frontendPort}";
+    exec = ''
+      ${portPreflight [ frontendPort ]}
+      exec ./node_modules/.bin/next dev -p ${toString frontendPort}
+    '';
     after = [
       "devenv:processes:head-node@ready"
       "devenv:processes:local-node@ready"
