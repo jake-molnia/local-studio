@@ -29,11 +29,13 @@ pub const Account = struct {
 
 pub const Store = struct {
     allocator: std.mem.Allocator,
+    secret_provider: []u8,
     accounts: std.ArrayList(Account) = .empty,
 
     pub fn deinit(store: *Store) void {
         for (store.accounts.items) |*account| account.deinit();
         store.accounts.deinit(store.allocator);
+        store.allocator.free(store.secret_provider);
         store.* = undefined;
     }
 
@@ -47,14 +49,21 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8) !Sto
     const file_path = try path(allocator, data_dir);
     defer allocator.free(file_path);
     const document = std.Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(max_document_bytes)) catch |failure| switch (failure) {
-        error.FileNotFound => return .{ .allocator = allocator },
+        error.FileNotFound => return .{ .allocator = allocator, .secret_provider = try allocator.dupe(u8, "keyring") },
         else => return failure,
     };
     defer allocator.free(document);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidAccountStore;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidAccountStore;
-    var store = Store{ .allocator = allocator };
+    const configured_provider = if (parsed.value.object.get("secretProvider")) |value|
+        if (value == .string and value.string.len > 0 and value.string.len <= 512)
+            value.string
+        else
+            "keyring"
+    else
+        "keyring";
+    var store = Store{ .allocator = allocator, .secret_provider = try allocator.dupe(u8, configured_provider) };
     errdefer store.deinit();
     const accounts = parsed.value.object.get("accounts") orelse return store;
     if (accounts != .array or accounts.array.items.len > 10_000) return error.InvalidAccountStore;
@@ -81,7 +90,9 @@ pub fn save(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, stor
     defer allocator.free(file_path);
     var output: std.Io.Writer.Allocating = .init(allocator);
     defer output.deinit();
-    try output.writer.writeAll("{\"version\":1,\"accounts\":[");
+    try output.writer.writeAll("{\"version\":2,\"secretProvider\":");
+    try std.json.Stringify.value(store.secret_provider, .{}, &output.writer);
+    try output.writer.writeAll(",\"accounts\":[");
     for (store.accounts.items, 0..) |account, index| {
         if (index > 0) try output.writer.writeByte(',');
         try output.writer.writeAll("{\"id\":");
@@ -183,6 +194,31 @@ pub fn deleteSecret(allocator: std.mem.Allocator, io: std.Io, environment: *cons
         else => false,
     };
     if (!ok) return error.SecretStoreDeleteFailed;
+}
+
+pub fn migrateSecretProvider(allocator: std.mem.Allocator, io: std.Io, environment: *const std.process.Environ.Map, data_dir: []const u8, store: *Store, provider: []const u8) !void {
+    if (std.mem.eql(u8, store.secret_provider, provider)) return;
+    var values: std.ArrayList([]u8) = .empty;
+    defer {
+        for (values.items) |value| allocator.free(value);
+        values.deinit(allocator);
+    }
+    for (store.accounts.items) |account| {
+        try values.append(allocator, try resolveSecret(allocator, io, environment, data_dir, store, account.secret_ref, account.secret_provider));
+    }
+    for (store.accounts.items, values.items) |account, value| {
+        try setSecret(allocator, io, environment, data_dir, store, account.secret_ref, provider, value);
+    }
+    for (store.accounts.items) |*account| {
+        if (!std.mem.eql(u8, account.secret_provider, provider)) {
+            deleteSecret(allocator, io, environment, data_dir, store, account.secret_ref, account.secret_provider) catch {};
+            allocator.free(account.secret_provider);
+            account.secret_provider = try allocator.dupe(u8, provider);
+        }
+    }
+    allocator.free(store.secret_provider);
+    store.secret_provider = try allocator.dupe(u8, provider);
+    try save(allocator, io, data_dir, store);
 }
 
 pub fn injectEnvironment(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, connector: std.json.ObjectMap, base_environment: *const std.process.Environ.Map, environment: *std.process.Environ.Map) !void {

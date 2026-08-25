@@ -33,6 +33,28 @@ pub const State = struct {
         return writeAccounts(state.allocator, &store);
     }
 
+    pub fn credentialStorePayload(state: *State) ![]u8 {
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        return writeCredentialStore(state.allocator, store.secret_provider);
+    }
+
+    pub fn updateCredentialStorePayload(state: *State, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidCredentialStorePayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidCredentialStorePayload;
+        const provider = stringField(parsed.value.object, "provider") orelse return error.SecretProviderRequired;
+        try validateSecretProvider(provider);
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        try repository.migrateSecretProvider(state.allocator, state.io, state.environment, state.data_dir, &store, provider);
+        return writeCredentialStore(state.allocator, store.secret_provider);
+    }
+
     pub fn connectPayload(state: *State, database: *sqlite.Database, document: []const u8) ![]u8 {
         var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidCodeStorageAccountPayload;
         defer parsed.deinit();
@@ -40,10 +62,8 @@ pub const State = struct {
         const organization = stringField(parsed.value.object, "organization") orelse return error.CodeStorageOrganizationRequired;
         const private_key = stringField(parsed.value.object, "privateKey") orelse return error.CodeStoragePrivateKeyRequired;
         const label = stringField(parsed.value.object, "label") orelse organization;
-        const secret_provider = stringField(parsed.value.object, "secretProvider") orelse configuredSecretProvider(state.environment);
         try code_storage_auth.validateOrganization(organization);
         try code_storage_auth.validatePrivateKey(state.allocator, private_key);
-        try validateSecretProvider(secret_provider);
         const id_buffer = repository.accountId("code-storage", organization, private_key);
         const secret_ref = try std.fmt.allocPrint(state.allocator, "CODE_STORAGE_PRIVATE_KEY_{s}", .{id_buffer});
         defer state.allocator.free(secret_ref);
@@ -52,6 +72,8 @@ pub const State = struct {
         defer state.mutex.unlock(state.io);
         var store = try repository.load(state.allocator, state.io, state.data_dir);
         defer store.deinit();
+        const secret_provider = store.secret_provider;
+        try validateSecretProvider(secret_provider);
         var account = store.find(&id_buffer);
         if (account == null) {
             try store.accounts.append(state.allocator, .{
@@ -138,6 +160,15 @@ fn writeAccounts(allocator: std.mem.Allocator, store: *repository.Store) ![]u8 {
     return output.toOwnedSlice();
 }
 
+fn writeCredentialStore(allocator: std.mem.Allocator, provider: []const u8) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"provider\":");
+    try std.json.Stringify.value(provider, .{}, &output.writer);
+    try output.writer.writeByte('}');
+    return output.toOwnedSlice();
+}
+
 fn formatTimestamp(io: Io, buffer: *[24]u8) []const u8 {
     const seconds = Io.Clock.real.now(io).toSeconds();
     const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(@max(seconds, 0)) };
@@ -154,15 +185,7 @@ fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
     return if (trimmed.len == 0 or trimmed.len > 512 * 1024) null else trimmed;
 }
 
-fn configuredSecretProvider(environment: *const std.process.Environ.Map) []const u8 {
-    const configured = environment.get("LOCAL_STUDIO_SECRET_PROVIDER") orelse return "keyring";
-    const value = std.mem.trim(u8, configured, " \t\r\n");
-    if (value.len == 0 or value.len > 64) return "keyring";
-    for (value) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '-' and byte != '_') return "keyring";
-    return value;
-}
-
-fn validateSecretProvider(value: []const u8) !void {
+pub fn validateSecretProvider(value: []const u8) !void {
     if (value.len == 0 or value.len > 512 or value[0] == '-') return error.InvalidSecretProvider;
     for (value) |byte| if (byte < 0x21 or byte > 0x7e or byte == '"' or byte == '\'' or byte == '\\') return error.InvalidSecretProvider;
 }
