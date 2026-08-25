@@ -2,7 +2,11 @@ import { memo, useMemo, useState } from "react";
 import { PreviewScroll } from "@/ui";
 import { ChevronRight } from "@/ui/icon-registry";
 import type { ThinkingBlock, ToolBlock } from "@/features/agent/messages";
-import type { ToolKind } from "@/features/agent/ui/timeline/tool-metadata";
+import {
+  FILE_WRITE_TOOL_NAMES,
+  toolArg,
+  type ToolKind,
+} from "@/features/agent/ui/timeline/tool-metadata";
 import { useReasoningVisible } from "@/features/agent/messages/use-reasoning-visible";
 import { TOOL_ICONS, ToolBlockView } from "@/features/agent/ui/timeline/tool-block-view";
 import {
@@ -121,6 +125,18 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
   // One kind of tool -> that tool's glyph; a mixed turn -> the terminal glyph.
   const summaryIcon = useMemo(() => summaryIconKind(visibleSegments), [visibleSegments]);
   const preview = live ? activityPreview(visibleSegments) : null;
+  const changedFiles = useMemo(() => {
+    const paths = new Set<string>();
+    for (const segment of visibleSegments) {
+      if (segment.kind !== "tools") continue;
+      for (const block of segment.blocks) {
+        if (!FILE_WRITE_TOOL_NAMES.has(block.name.toLowerCase())) continue;
+        const path = toolArg(block, ["path", "file_path", "filePath", "target"]);
+        if (path) paths.add(path.replace(/\\/g, "/"));
+      }
+    }
+    return [...paths];
+  }, [visibleSegments]);
 
   // Reasoning hidden + nothing else to show → render nothing. The turn's
   // "Working for…"/"Worked for…" divider still signals that the model worked.
@@ -142,57 +158,94 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
   }
 
   return (
-    <details className="group min-w-0" open={expanded}>
-      <summary
-        className="flex min-h-6 min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
-        onClick={(event) => {
-          event.preventDefault();
-          setUserExpanded(!expanded);
-        }}
-      >
-        {/* "Working" is a fixed short word and must never shrink, but the
+    <div className="min-w-0">
+      <details className="group min-w-0" open={expanded}>
+        <summary
+          className="flex min-h-6 min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
+          onClick={(event) => {
+            event.preventDefault();
+            setUserExpanded(!expanded);
+          }}
+        >
+          {/* "Working" is a fixed short word and must never shrink, but the
             collapsed summary grows with the turn ("Ran 20 commands · edited 13
             files · …") and will not fit a phone column — let it truncate
             instead of forcing the row wider than the thread. */}
-        {!busy ? <SummaryGlyph kind={summaryIcon} /> : null}
-        <span
-          className={`text-[length:var(--fs-base)] font-normal leading-5 ${
-            busy ? "codex-shimmer-text shrink-0" : "min-w-0 flex-1 truncate"
-          } ${busy ? "" : "text-(--fg)/48"}`}
-        >
-          {busy ? "Working" : summary}
-        </span>
-        {!expanded && busy && preview ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-(--dim)/70">
-            <PreviewGlyph kind={preview.kind} verb={preview.verb} />
-            <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--codex-chat-code-font-size)] leading-5">
-              {preview.detail || preview.verb}
-            </span>
+          {!busy ? <SummaryGlyph kind={summaryIcon} /> : null}
+          <span
+            className={`text-[length:var(--fs-base)] font-normal leading-5 ${
+              busy ? "codex-shimmer-text shrink-0" : "min-w-0 flex-1 truncate"
+            } ${busy ? "" : "text-(--fg)/48"}`}
+          >
+            {busy ? "Working" : summary}
           </span>
-        ) : busy ? (
-          <span className="min-w-0 flex-1" />
+          {!expanded && busy && preview ? (
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-(--dim)/70">
+              <PreviewGlyph kind={preview.kind} verb={preview.verb} />
+              <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--codex-chat-code-font-size)] leading-5">
+                {preview.detail || preview.verb}
+              </span>
+            </span>
+          ) : busy ? (
+            <span className="min-w-0 flex-1" />
+          ) : null}
+          <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)/50 transition-transform group-open:rotate-90" />
+        </summary>
+        {expanded ? (
+          <div className="mb-1.5 ml-2 mt-1 flex min-w-0 flex-col gap-0.5 border-l border-(--separator) pl-2">
+            {items.map((item, index) => {
+              const isLastItem = index === items.length - 1;
+              if (item.kind === "reasoning") {
+                return (
+                  <ReasoningDisclosure
+                    key={item.id}
+                    block={item.block}
+                    active={live && isLastItem}
+                  />
+                );
+              }
+              if (item.kind === "explore") {
+                return <ExploreAccordion key={item.id} blocks={item.blocks} live={live} />;
+              }
+              return <ToolBlockView key={item.id} block={item.block} />;
+            })}
+          </div>
         ) : null}
-        <ChevronRight className="h-3 w-3 shrink-0 text-(--dim)/50 transition-transform group-open:rotate-90" />
-      </summary>
-      {expanded ? (
-        <div className="mb-1.5 ml-2 mt-1 flex min-w-0 flex-col gap-0.5 border-l border-(--separator) pl-2">
-          {items.map((item, index) => {
-            const isLastItem = index === items.length - 1;
-            if (item.kind === "reasoning") {
-              return (
-                <ReasoningDisclosure key={item.id} block={item.block} active={live && isLastItem} />
-              );
-            }
-            if (item.kind === "explore") {
-              return <ExploreAccordion key={item.id} blocks={item.blocks} live={live} />;
-            }
-            return <ToolBlockView key={item.id} block={item.block} />;
-          })}
-        </div>
-      ) : null}
-    </details>
+      </details>
+      {!live && changedFiles.length ? <ChangedFilesSummary paths={changedFiles} /> : null}
+    </div>
   );
 });
+
+function ChangedFilesSummary({ paths }: { paths: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ml-1 mt-1 overflow-hidden rounded-[var(--rad-md)] border border-(--border)/70 bg-(--surface)/45">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-7 w-full items-center gap-2 px-2 text-left text-[length:var(--fs-xs)] text-(--fg)/65 hover:bg-(--hover) hover:text-(--fg)"
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <span className="min-w-0 flex-1">
+          Changed {paths.length} {paths.length === 1 ? "file" : "files"}
+        </span>
+      </button>
+      {open ? (
+        <div className="max-h-48 overflow-y-auto border-t border-(--border)/60 px-2 py-1.5 font-mono text-[length:var(--codex-chat-code-font-size)] text-(--dim)">
+          {paths.map((path) => (
+            <div key={path} className="truncate py-0.5" title={path}>
+              {path}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /** Leading glyph for the collapsed summary: the single tool kind's icon, the
  *  terminal icon for a mixed turn, nothing for reasoning-only. */

@@ -438,7 +438,7 @@
 @media (min-width: 1024px) {
   :root {
     --composer-w: 40rem;
-    --thread-w: 900px;
+    --thread-w: 768px;
   }
 }
 
@@ -453,7 +453,7 @@
   --h-toolbar: 34px;
   --h-toolbar-pane: 28px;
   --composer-w: 40rem;
-  --thread-w: 900px;
+  --thread-w: 768px;
   --composer-radius: 12px;
   --composer-radius-inner: 12px;
   --composer-font-size: 13px;

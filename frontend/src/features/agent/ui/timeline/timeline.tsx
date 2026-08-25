@@ -439,7 +439,7 @@ function formatPromptTime(timestamp?: string): string {
   );
 }
 
-const AT_BOTTOM_THRESHOLD_PX = 80;
+const AT_BOTTOM_THRESHOLD_PX = 40;
 const USER_HOLD_MS = 700;
 
 function useTimelineScrollEffects({
@@ -534,10 +534,38 @@ function useTimelineScrollEffects({
     const onKeyDown = (event: KeyboardEvent) => {
       if (["ArrowUp", "PageUp", "Home"].includes(event.key)) holdAndDetach();
       else if (["ArrowDown", "PageDown", "End"].includes(event.key)) releaseHold();
+      if (["Enter", " "].includes(event.key)) preserveDisclosureAnchor(event.target);
     };
+    let anchorFrame: number | null = null;
+    const preserveDisclosureAnchor = (target: EventTarget | null) => {
+      if (!(target instanceof Element) || !target.closest("summary, [aria-expanded]")) return;
+      if (anchorFrame !== null) cancelAnimationFrame(anchorFrame);
+      if (stickRef.current) {
+        anchorFrame = requestAnimationFrame(() => {
+          anchorFrame = requestAnimationFrame(() => {
+            anchorFrame = null;
+            void listRef.current?.scrollToEnd({ animated: false });
+          });
+        });
+        return;
+      }
+      const scrollerTop = el.getBoundingClientRect().top;
+      const rows = [...el.querySelectorAll<HTMLElement>("[data-timeline-message-id]")];
+      const anchor = rows.find((row) => row.getBoundingClientRect().bottom > scrollerTop);
+      if (!anchor) return;
+      const before = anchor.getBoundingClientRect().top;
+      anchorFrame = requestAnimationFrame(() => {
+        anchorFrame = requestAnimationFrame(() => {
+          anchorFrame = null;
+          el.scrollTop += anchor.getBoundingClientRect().top - before;
+        });
+      });
+    };
+    const onPointerDown = (event: PointerEvent) => preserveDisclosureAnchor(event.target);
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", onWheel, { passive: true });
     el.addEventListener("keydown", onKeyDown);
+    el.addEventListener("pointerdown", onPointerDown, true);
 
     let restoreFrame: number | null = null;
     let restoreAttempts = 0;
@@ -561,6 +589,8 @@ function useTimelineScrollEffects({
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("keydown", onKeyDown);
+      el.removeEventListener("pointerdown", onPointerDown, true);
+      if (anchorFrame !== null) cancelAnimationFrame(anchorFrame);
       if (restoreFrame !== null) window.cancelAnimationFrame(restoreFrame);
       persistTimer?.cancel();
       if (viewIdentity) {

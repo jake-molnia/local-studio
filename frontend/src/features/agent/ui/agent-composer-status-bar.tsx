@@ -117,15 +117,41 @@ function ContextReadout({
   onClick: () => void;
 }) {
   const title = `Open status · Context ${formatTokenCount(current)} / ${formatTokenCount(contextWindow)}`;
+  const ratio = contextWindow > 0 ? Math.min(1, Math.max(0, current / contextWindow)) : 0;
+  const circumference = 2 * Math.PI * 6;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto inline-flex shrink-0 items-center rounded-sm px-1 text-(--dim) hover:text-(--fg)/80"
+      className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-sm px-1 text-(--dim) hover:text-(--fg)/80"
       title={title}
       aria-label={title}
     >
+      <svg viewBox="0 0 16 16" className="h-4 w-4 -rotate-90" aria-hidden="true">
+        <circle
+          cx="8"
+          cy="8"
+          r="6"
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity="0.18"
+          strokeWidth="2"
+        />
+        <circle
+          cx="8"
+          cy="8"
+          r="6"
+          fill="none"
+          stroke={
+            ratio > 0.9 ? "var(--ui-danger)" : ratio > 0.75 ? "var(--ui-warning)" : "var(--accent)"
+          }
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - ratio)}
+        />
+      </svg>
       <span className="tabular-nums">
         {formatTokenCount(current)}/{formatTokenCount(contextWindow)}
       </span>

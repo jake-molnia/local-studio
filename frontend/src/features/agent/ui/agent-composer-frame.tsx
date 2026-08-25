@@ -133,7 +133,7 @@ export function AgentComposerFrame({
     <form
       onSubmit={onSubmit}
       className={cx(
-        "agent-composer-form relative z-[100] mx-auto w-full max-w-[672px] shrink-0 px-4",
+        "agent-composer-form relative z-[100] mx-auto w-full max-w-(--thread-w) shrink-0 px-4",
         floating
           ? "bg-transparent"
           : dense
