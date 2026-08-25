@@ -43,7 +43,7 @@ const APP_DESTINATIONS: AppDestination[] = [
     href: "/customize",
     label: "Customize",
     keywords:
-      "connectors mcp servers accounts google gmail workspace access grants providers cloud models sign in oauth api keys skills plugins",
+      "connectors mcp servers accounts google gmail workspace access grants providers cloud models sign in oauth api keys skills",
     description: "Connectors, accounts, model sign-ins, and skills.",
   },
   {

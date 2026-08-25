@@ -344,7 +344,7 @@ export function SettingsView({
   useMountSubscription(() => {
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
-      if (["connectors", "plugins", "accounts", "access", "skills"].includes(hash)) {
+      if (["connectors", "accounts", "access", "skills"].includes(hash)) {
         window.location.replace(`/customize#${hash}`);
         return;
       }

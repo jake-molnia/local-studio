@@ -37,7 +37,7 @@ export function AutomationList({
 
   return (
     <section className="min-h-0 flex-1 overflow-y-auto bg-(--ui-bg)">
-      <div className="mx-auto w-full max-w-[52rem] px-5 pb-16 pt-7 sm:px-8 lg:pt-9">
+      <div className="mx-auto w-full max-w-[34rem] px-4 pb-12 pt-7 sm:px-5">
         <header className="flex items-start gap-3">
           <button
             type="button"

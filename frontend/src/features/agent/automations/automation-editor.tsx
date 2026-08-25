@@ -117,7 +117,7 @@ export function AutomationEditor({
           onToggleStatus={onToggleStatus}
         />
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl space-y-5 px-5 py-5 sm:px-7">
+          <div className="mx-auto w-full max-w-[34rem] space-y-5 px-4 py-5 sm:px-5">
             {creating ? (
               <ExamplePicker onSelect={(example) => setDraft(example)} draft={draft} />
             ) : null}
@@ -284,7 +284,7 @@ function EditorHeader({
       : `Next run ${relativeTime(automation?.nextRunAt ?? null)}`;
   return (
     <header className="shrink-0 border-b border-(--ui-border)">
-      <div className="mx-auto flex min-h-14 w-full max-w-[52rem] items-center gap-2 px-5 py-2 sm:px-8">
+      <div className="mx-auto flex min-h-14 w-full max-w-[34rem] items-center gap-2 px-4 py-2 sm:px-5">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[length:var(--fs-lg)] font-medium text-(--ui-fg)">
             {creating ? "New scheduled task" : automation?.name}

@@ -3,16 +3,14 @@
 import { useState } from "react";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { AppPage, SearchInput } from "@/ui";
-import { GraduationCap, KeyRound, Plug, Puzzle } from "@/ui/icon-registry";
+import { GraduationCap, KeyRound, Plug } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
 import { ConnectorsSection } from "./connectors-section";
 import { AccountsSection } from "./accounts-section";
 import { integrationSectionFromHash, type IntegrationSectionId } from "./integration-navigation";
-import { PluginsSection } from "./plugins-section";
 import { SkillsSection } from "./skills-section";
 
 const CATEGORIES = [
-  { id: "plugins", label: "Plugins", icon: Puzzle, description: "Agent extensions" },
   { id: "connectors", label: "MCPs", icon: Plug, description: "Servers and tools" },
   { id: "skills", label: "Skills", icon: GraduationCap, description: "Session instructions" },
   { id: "accounts", label: "Accounts", icon: KeyRound, description: "Connected accounts" },
@@ -25,7 +23,6 @@ const CATEGORIES = [
 
 function CustomizeSection({ section, query }: { section: IntegrationSectionId; query: string }) {
   if (section === "connectors") return <ConnectorsSection searchQuery={query} />;
-  if (section === "plugins") return <PluginsSection searchQuery={query} />;
   if (section === "accounts") return <AccountsSection searchQuery={query} />;
   return <SkillsSection searchQuery={query} />;
 }
@@ -63,8 +60,8 @@ export function CustomizePage() {
           <SearchInput
             value={query}
             onChange={setQuery}
-            placeholder="Search plugins, skills, MCPs..."
-            aria-label="Search plugins, skills, and MCPs"
+            placeholder="Search skills and MCPs..."
+            aria-label="Search skills and MCPs"
             className="w-full [&_input]:h-7 [&_input]:rounded-[5px] [&_input]:bg-(--ui-surface) [&_input]:text-[length:var(--fs-xs)]"
           />
         </header>
