@@ -140,7 +140,7 @@ pub fn runChat(init: std.process.Init) !void {
     const home = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_FX_HOME"}) orelse return error.FxHomeRequired;
     const native_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_CHAT_SESSION_ID"}) orelse return error.FxSessionRequired;
     const bridge = BridgeConfig{
-        .base_url = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_URL"}) orelse return error.BridgeUrlRequired,
+        .base_url = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_URL"}) orelse "",
         .api_key = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_KEY"}),
         .model_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_MODEL"}) orelse model,
         .session_id = firstEnvironment(init.environ_map, &.{"LOCAL_STUDIO_MCP_BRIDGE_SESSION"}) orelse native_id,
@@ -175,10 +175,7 @@ fn runChatTurn(allocator: std.mem.Allocator, io: std.Io, api_key: []const u8, mo
     const message = jsonString(parsed.value.object, "message") orelse return writeChatError(writer, "Chat message is required");
     const thinking = jsonString(parsed.value.object, "thinkingLevel");
     const browser_enabled = jsonBool(parsed.value.object, "browserToolEnabled") orelse false;
-    var catalog = loadChatToolCatalog(allocator, io, bridge, browser_enabled) catch |failure| {
-        try writeChatError(writer, @errorName(failure));
-        return;
-    };
+    var catalog = loadChatToolCatalog(allocator, io, bridge, browser_enabled) catch try emptyChatToolCatalog(allocator);
     defer catalog.deinit();
     try history.append(allocator, .{ .role = .user, .content = try allocator.dupe(u8, message) });
     var keep_user = false;
@@ -287,6 +284,7 @@ fn writeChatError(writer: *std.Io.Writer, message: []const u8) !void {
 }
 
 fn loadChatToolCatalog(allocator: std.mem.Allocator, io: std.Io, bridge: BridgeConfig, browser_enabled: bool) !ChatToolCatalog {
+    if (bridge.base_url.len == 0) return emptyChatToolCatalog(allocator);
     const client = if (gateway_client) |*value| value else return error.FxGatewayUnavailable;
     const response = try mcp_bridge.handle(allocator, io, client, bridge.base_url, bridge.api_key, bridge.model_id, bridge.session_id, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}");
     defer allocator.free(response);
@@ -325,6 +323,12 @@ fn loadChatToolCatalog(allocator: std.mem.Allocator, io: std.Io, bridge: BridgeC
         index += 1;
     }
     return .{ .allocator = allocator, .parsed = parsed, .tools = tools };
+}
+
+fn emptyChatToolCatalog(allocator: std.mem.Allocator) !ChatToolCatalog {
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, "{\"result\":{\"tools\":[]}}", .{});
+    errdefer parsed.deinit();
+    return .{ .allocator = allocator, .parsed = parsed, .tools = try allocator.alloc(stream_provider.DynamicFunctionTool, 0) };
 }
 
 fn chatToolAllowed(name: []const u8, browser_enabled: bool) bool {
