@@ -1,5 +1,5 @@
 const std = @import("std");
-const sqlite = @import("sqlite.zig");
+const sqlite = @import("../../storage/sqlite.zig");
 
 pub const Project = struct {
     allocator: std.mem.Allocator,

@@ -1,8 +1,8 @@
 const std = @import("std");
-const config = @import("../config.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const agent_coordinator = @import("agent_coordinator.zig");
-const harness_runtime = @import("harness_runtime.zig");
+const config = @import("../../app/config.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const agent_coordinator = @import("coordinator.zig");
+const harness_runtime = @import("../harness/runtime.zig");
 
 const Io = std.Io;
 const http = std.http;

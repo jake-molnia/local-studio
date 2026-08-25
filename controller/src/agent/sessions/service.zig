@@ -1,7 +1,7 @@
 const std = @import("std");
-const records = @import("../repository/agent_control.zig");
-const sqlite = @import("../repository/sqlite.zig");
-const session_change = @import("session_change.zig");
+const records = @import("control_store.zig");
+const sqlite = @import("../../storage/sqlite.zig");
+const session_change = @import("change.zig");
 
 const Io = std.Io;
 const thread_title_project_id = "__local_studio_thread_title__";
