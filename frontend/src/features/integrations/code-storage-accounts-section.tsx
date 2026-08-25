@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import { Schema } from "effect";
 import {
   CodeStorageAccountsResponseSchema,
@@ -11,34 +11,16 @@ import {
   Button,
   FormField,
   Input,
-  RefreshIconButton,
   Textarea,
   UiModal,
   UiModalBody,
   UiModalHeader,
 } from "@/ui";
-import { Eye, EyeOff, KeyRound, Plus, X } from "@/ui/icon-registry";
-import { ResourceLogo } from "@/ui/resource-logo";
-import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import {
-  DataRow,
-  EndCell,
-  HeadCell,
-  IdentityCell,
-  RowAction,
-  StatusText,
-  TableFrame,
-  TableNotice,
-  TableSection,
-  TableSkeleton,
-  TextCell,
-} from "@/features/recipes/recipes-content/catalog-table-shell";
+import { Eye, EyeOff, KeyRound, X } from "@/ui/icon-registry";
 import { requestJson } from "./google-account-model";
 
 const ACCOUNT_URL = "/api/agent/accounts/code-storage";
 const decodeAccounts = Schema.decodeUnknownSync(CodeStorageAccountsResponseSchema);
-const ACCOUNT_COLUMNS = ["Account", "Organization", "State"] as const;
-const ACCOUNT_MIN_WIDTH = "min-w-[34rem]";
 
 export function CodeStorageAccountModal({
   accounts = [],
@@ -196,184 +178,5 @@ export function CodeStorageAccountModal({
         </div>
       </UiModalBody>
     </UiModal>
-  );
-}
-
-export function CodeStorageAccountsSection({ searchQuery = "" }: { searchQuery?: string } = {}) {
-  const [accounts, setAccounts] = useState<readonly CodeStorageAccountEntry[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [busyAccount, setBusyAccount] = useState<string | null>(null);
-  const [error, setError] = useState("");
-
-  const refresh = useCallback(() => {
-    setRefreshing(true);
-    void requestJson(ACCOUNT_URL, decodeAccounts, { cache: "no-store" })
-      .then((result) => {
-        setAccounts(result.accounts);
-        setError("");
-      })
-      .catch((loadError: unknown) => {
-        setError(loadError instanceof Error ? loadError.message : "Code.Storage accounts failed");
-      })
-      .finally(() => {
-        setLoaded(true);
-        setRefreshing(false);
-      });
-  }, []);
-
-  useMountSubscription(() => {
-    refresh();
-  }, [refresh]);
-
-  const disconnect = async (accountId: string) => {
-    setBusyAccount(accountId);
-    setError("");
-    try {
-      const result = await requestJson(
-        `${ACCOUNT_URL}?accountId=${encodeURIComponent(accountId)}`,
-        decodeAccounts,
-        {
-          method: "DELETE",
-        },
-      );
-      setAccounts(result.accounts);
-      setDisconnecting(null);
-    } catch (disconnectError) {
-      setError(disconnectError instanceof Error ? disconnectError.message : "Disconnect failed");
-    } finally {
-      setBusyAccount(null);
-    }
-  };
-
-  const visibleAccounts = useMemo(() => {
-    const normalized = searchQuery.trim().toLowerCase();
-    if (!normalized) return accounts;
-    return accounts.filter((account) =>
-      `${account.label} ${account.organization} Code.Storage`.toLowerCase().includes(normalized),
-    );
-  }, [accounts, searchQuery]);
-
-  return (
-    <>
-      {error ? (
-        <div className="mb-4">
-          <Alert variant="error">{error}</Alert>
-        </div>
-      ) : null}
-      <TableSection
-        title="Repositories"
-        description="Repository accounts agents can clone, fetch, list, and push. Code.Storage is the first available provider."
-        actions={
-          <div className="flex items-center gap-2">
-            <StatusText tone={error ? "warn" : loaded ? "ok" : "dim"}>
-              {loaded ? `${accounts.length} connected` : "loading"}
-            </StatusText>
-            <RefreshIconButton onClick={refresh} loading={refreshing} label="Refresh accounts" />
-            <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus className="h-3 w-3" />
-              Connect
-            </Button>
-          </div>
-        }
-      >
-        {!loaded ? (
-          <TableSkeleton columns={ACCOUNT_COLUMNS} rows={1} minWidthClass={ACCOUNT_MIN_WIDTH} />
-        ) : visibleAccounts.length === 0 ? (
-          <TableNotice
-            title={
-              accounts.length ? "No account matches this search" : "No repository account connected"
-            }
-            body={
-              accounts.length
-                ? "Search by account label or organization."
-                : "Connect Code.Storage to give agents scoped repository access."
-            }
-          />
-        ) : (
-          <TableFrame minWidthClass={ACCOUNT_MIN_WIDTH}>
-            <thead>
-              <tr>
-                {ACCOUNT_COLUMNS.map((column, index) => (
-                  <HeadCell key={column} numeric={index === ACCOUNT_COLUMNS.length - 1}>
-                    {column}
-                  </HeadCell>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleAccounts.map((account) => {
-                const confirming = disconnecting === account.id;
-                const busy = busyAccount === account.id;
-                return (
-                  <DataRow key={account.id} ariaLabel={`${account.label} Code.Storage account`}>
-                    <IdentityCell
-                      leading={
-                        <ResourceLogo
-                          identity="code-storage"
-                          label="Code.Storage"
-                          company="The Pierre Computer Company"
-                        />
-                      }
-                      label={account.label}
-                      description={`Connected ${new Date(account.connectedAt).toLocaleDateString()}`}
-                    />
-                    <TextCell mono>{account.organization}</TextCell>
-                    <EndCell>
-                      <div className="flex items-center justify-end gap-2">
-                        <StatusText tone="ok">{account.secretProvider}</StatusText>
-                        {confirming ? (
-                          <>
-                            <RowAction
-                              alwaysVisible
-                              disabled={busy}
-                              onClick={() => setDisconnecting(null)}
-                              title="Keep account connected"
-                            >
-                              Keep
-                            </RowAction>
-                            <RowAction
-                              alwaysVisible
-                              disabled={busy}
-                              onClick={() => void disconnect(account.id)}
-                              tone="danger"
-                              title={`Disconnect ${account.label}`}
-                            >
-                              Confirm
-                            </RowAction>
-                          </>
-                        ) : (
-                          <RowAction
-                            alwaysVisible
-                            disabled={Boolean(busyAccount)}
-                            onClick={() => setDisconnecting(account.id)}
-                            tone="danger"
-                            title={`Disconnect ${account.label}`}
-                          >
-                            Disconnect
-                          </RowAction>
-                        )}
-                      </div>
-                    </EndCell>
-                  </DataRow>
-                );
-              })}
-            </tbody>
-          </TableFrame>
-        )}
-      </TableSection>
-      {open ? (
-        <CodeStorageAccountModal
-          accounts={accounts}
-          onClose={() => setOpen(false)}
-          onChanged={(nextAccounts) => {
-            setAccounts(nextAccounts);
-            setLoaded(true);
-          }}
-        />
-      ) : null}
-    </>
   );
 }

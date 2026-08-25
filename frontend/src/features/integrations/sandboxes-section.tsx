@@ -1,39 +1,14 @@
 "use client";
 
 import { Schema } from "effect";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import {
   SandboxAccountsResponseSchema,
   type SandboxAccountEntry,
   type SandboxProvider,
 } from "@shared/agent/sandbox-account-contract";
-import {
-  Alert,
-  Button,
-  FormField,
-  Input,
-  RefreshIconButton,
-  Select,
-  UiModal,
-  UiModalBody,
-  UiModalHeader,
-} from "@/ui";
-import { Boxes, Eye, EyeOff, Plus, X } from "@/ui/icon-registry";
-import { ResourceLogo } from "@/ui/resource-logo";
-import { useMountSubscription } from "@/hooks/use-mount-subscription";
-import {
-  DataRow,
-  EndCell,
-  HeadCell,
-  IdentityCell,
-  RowAction,
-  StatusText,
-  TableFrame,
-  TableNotice,
-  TableSection,
-  TableSkeleton,
-  TextCell,
-} from "@/features/recipes/recipes-content/catalog-table-shell";
+import { Alert, Button, FormField, Input, Select, UiModal, UiModalBody, UiModalHeader } from "@/ui";
+import { Boxes, Eye, EyeOff, X } from "@/ui/icon-registry";
 import { requestJson } from "./google-account-model";
 
 const ACCOUNT_URL = "/api/agent/accounts/sandboxes";
@@ -42,7 +17,6 @@ const PROVIDERS: Array<{ id: SandboxProvider; label: string; company: string }> 
   { id: "modal", label: "Modal", company: "Modal Labs" },
   { id: "daytona", label: "Daytona", company: "Daytona Platforms" },
 ];
-const COLUMNS = ["Account", "Endpoint", "State"] as const;
 
 export function SandboxAccountModal({
   initialProvider,
@@ -235,7 +209,6 @@ export function SandboxAccountModal({
     </UiModal>
   );
 }
-
 function SecretVisibility({ visible, onToggle }: { visible: boolean; onToggle: () => void }) {
   return (
     <button
@@ -246,140 +219,5 @@ function SecretVisibility({ visible, onToggle }: { visible: boolean; onToggle: (
     >
       {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
     </button>
-  );
-}
-
-export function SandboxesSection({ searchQuery = "" }: { searchQuery?: string } = {}) {
-  const [accounts, setAccounts] = useState<readonly SandboxAccountEntry[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState("");
-
-  const refresh = useCallback(() => {
-    setRefreshing(true);
-    void requestJson(ACCOUNT_URL, decodeAccounts, { cache: "no-store" })
-      .then((result) => {
-        setAccounts(result.accounts);
-        setError("");
-      })
-      .catch((loadError: unknown) => {
-        setError(loadError instanceof Error ? loadError.message : "Sandbox accounts failed");
-      })
-      .finally(() => {
-        setLoaded(true);
-        setRefreshing(false);
-      });
-  }, []);
-
-  useMountSubscription(refresh, [refresh]);
-  const visibleAccounts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    return query
-      ? accounts.filter((account) =>
-          `${account.label} ${account.provider} ${account.endpoint}`.toLowerCase().includes(query),
-        )
-      : accounts;
-  }, [accounts, searchQuery]);
-
-  const disconnect = async (accountId: string) => {
-    try {
-      const result = await requestJson(
-        `${ACCOUNT_URL}?accountId=${encodeURIComponent(accountId)}`,
-        decodeAccounts,
-        { method: "DELETE" },
-      );
-      setAccounts(result.accounts);
-    } catch (disconnectError) {
-      setError(disconnectError instanceof Error ? disconnectError.message : "Disconnect failed");
-    }
-  };
-
-  return (
-    <>
-      {error ? <Alert variant="error">{error}</Alert> : null}
-      <TableSection
-        title="Sandboxes"
-        description="Stored logins for Modal and Daytona. Runtime abilities will be added separately."
-        actions={
-          <div className="flex items-center gap-2">
-            <StatusText tone={loaded ? "ok" : "dim"}>
-              {loaded ? `${accounts.length} connected` : "loading"}
-            </StatusText>
-            <RefreshIconButton onClick={refresh} loading={refreshing} label="Refresh accounts" />
-            <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus className="h-3 w-3" /> Connect
-            </Button>
-          </div>
-        }
-      >
-        {!loaded ? (
-          <TableSkeleton columns={COLUMNS} rows={2} minWidthClass="min-w-[34rem]" />
-        ) : visibleAccounts.length === 0 ? (
-          <TableNotice
-            title={
-              accounts.length ? "No account matches this search" : "No sandbox login connected"
-            }
-            body="Connect Modal or Daytona credentials. This does not enable sandbox execution yet."
-          />
-        ) : (
-          <TableFrame minWidthClass="min-w-[34rem]">
-            <thead>
-              <tr>
-                {COLUMNS.map((column, index) => (
-                  <HeadCell key={column} numeric={index === COLUMNS.length - 1}>
-                    {column}
-                  </HeadCell>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleAccounts.map((account) => {
-                const provider = PROVIDERS.find((entry) => entry.id === account.provider);
-                return (
-                  <DataRow key={account.id} ariaLabel={`${account.label} sandbox account`}>
-                    <IdentityCell
-                      leading={
-                        <ResourceLogo
-                          identity={account.provider}
-                          label={provider?.label ?? account.provider}
-                          company={provider?.company}
-                        />
-                      }
-                      label={account.label}
-                      description={provider?.label ?? account.provider}
-                    />
-                    <TextCell mono>{account.endpoint}</TextCell>
-                    <EndCell>
-                      <div className="flex items-center justify-end gap-2">
-                        <StatusText tone="ok">stored</StatusText>
-                        <RowAction
-                          alwaysVisible
-                          tone="danger"
-                          title={`Disconnect ${account.label}`}
-                          onClick={() => void disconnect(account.id)}
-                        >
-                          Disconnect
-                        </RowAction>
-                      </div>
-                    </EndCell>
-                  </DataRow>
-                );
-              })}
-            </tbody>
-          </TableFrame>
-        )}
-      </TableSection>
-      {open ? (
-        <SandboxAccountModal
-          accounts={accounts}
-          onClose={() => setOpen(false)}
-          onChanged={(next) => {
-            setAccounts(next);
-            setLoaded(true);
-          }}
-        />
-      ) : null}
-    </>
   );
 }
