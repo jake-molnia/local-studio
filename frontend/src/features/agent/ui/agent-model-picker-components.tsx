@@ -1,9 +1,19 @@
 "use client";
 
-import type { MouseEvent, PointerEvent, RefObject } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 import Link from "next/link";
+import { LegendList } from "@legendapp/list/react";
 import { Check, ChevronDown, Search, Star } from "@/ui/icon-registry";
 import { cx } from "@/ui/utils";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import {
   modelChoiceSearchText,
   routeForChoice,
@@ -41,13 +51,78 @@ export function ModelPickerPanel({
   activeRoute: ModelRoute | null;
   onClose: () => void;
 }) {
-  const visibleChoices = filteredChoices(choices, selectedCompany, query);
+  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
+  useMountSubscription(() => {
+    try {
+      const stored = JSON.parse(
+        window.localStorage.getItem("local-studio:model-favorites") ?? "[]",
+      );
+      if (Array.isArray(stored)) {
+        setFavorites(new Set(stored.filter((value): value is string => typeof value === "string")));
+      }
+    } catch {
+      setFavorites(new Set());
+    }
+  }, []);
+  const updateFavorite = useCallback((modelId: string) => {
+    setFavorites((current) => {
+      const next = new Set(current);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
+      window.localStorage.setItem("local-studio:model-favorites", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const deferredQuery = useDeferredValue(query);
+  const visibleChoices = useMemo(
+    () => filteredChoices(choices, selectedCompany, deferredQuery, favorites),
+    [choices, deferredQuery, favorites, selectedCompany],
+  );
   const searching = query.trim().length > 0;
+  const visibleCompanies = useMemo(
+    () => (favorites.size ? [{ key: "favorites", label: "Favorites" }, ...companies] : companies),
+    [companies, favorites.size],
+  );
+  const renderChoice = useCallback(
+    ({ item: choice }: { item: ModelChoice }) => {
+      const selected = choice.model.id === selectedModel;
+      const preferredRoute = routeForChoice(choice, activeRoute);
+      const isDefault = choice.model.id === defaultModel;
+      const isFavorite = favorites.has(choice.model.id);
+      return (
+        <ModelChoiceRow
+          choice={choice}
+          selected={selected}
+          showCompany={searching}
+          isDefault={isDefault}
+          isFavorite={isFavorite}
+          disabled={!preferredRoute}
+          onSelect={() => onSelect(choice)}
+          onToggleFavorite={() => updateFavorite(choice.model.id)}
+          onSetDefault={
+            onSetDefault && preferredRoute
+              ? () => onSetDefault(choice.model.id, preferredRoute.route.id)
+              : undefined
+          }
+        />
+      );
+    },
+    [
+      activeRoute,
+      defaultModel,
+      favorites,
+      onSelect,
+      onSetDefault,
+      searching,
+      selectedModel,
+      updateFavorite,
+    ],
+  );
   return (
     <div className="flex h-full min-h-0 overflow-hidden rounded-[calc(var(--rad-md)-1px)]">
       {!searching ? (
         <CompanySidebar
-          companies={companies}
+          companies={visibleCompanies}
           selectedCompany={selectedCompany}
           onSelectCompany={onSelectCompany}
         />
@@ -72,29 +147,15 @@ export function ModelPickerPanel({
             />
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pt-1">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {visibleChoices.length ? (
-            visibleChoices.map((choice) => {
-              const selected = choice.model.id === selectedModel;
-              const preferredRoute = routeForChoice(choice, activeRoute);
-              const isDefault = choice.model.id === defaultModel;
-              return (
-                <ModelChoiceRow
-                  key={choice.key}
-                  choice={choice}
-                  selected={selected}
-                  showCompany={searching}
-                  isDefault={isDefault}
-                  disabled={!preferredRoute}
-                  onSelect={() => onSelect(choice)}
-                  onSetDefault={
-                    onSetDefault && preferredRoute
-                      ? () => onSetDefault(choice.model.id, preferredRoute.route.id)
-                      : undefined
-                  }
-                />
-              );
-            })
+            <LegendList
+              data={visibleChoices}
+              keyExtractor={(choice) => choice.key}
+              renderItem={renderChoice}
+              estimatedItemSize={40}
+              className="h-full overscroll-contain p-1.5 pt-1 [scrollbar-gutter:stable]"
+            />
           ) : (
             <div className="px-2 py-3 text-[length:var(--fs-xs)] text-(--dim)">
               <p>{query ? `No models match “${query}”.` : "No models are available."}</p>
@@ -185,17 +246,21 @@ function ModelChoiceRow({
   selected,
   showCompany,
   isDefault,
+  isFavorite,
   disabled,
   onSelect,
   onSetDefault,
+  onToggleFavorite,
 }: {
   choice: ModelChoice;
   selected: boolean;
   showCompany: boolean;
   isDefault: boolean;
+  isFavorite: boolean;
   disabled: boolean;
   onSelect: () => void;
   onSetDefault?: () => void;
+  onToggleFavorite: () => void;
 }) {
   return (
     <div
@@ -223,6 +288,26 @@ function ModelChoiceRow({
           ) : null}
         </div>
       </button>
+      {!disabled ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavorite();
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          aria-label={
+            isFavorite ? `Remove ${choice.label} from favorites` : `Favorite ${choice.label}`
+          }
+          title={isFavorite ? "Remove favorite" : "Add favorite"}
+          className={cx(
+            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim) opacity-0 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
+            isFavorite && "text-amber-400 opacity-100",
+          )}
+        >
+          <Star className={cx("h-3.5 w-3.5", isFavorite && "fill-current")} />
+        </button>
+      ) : null}
       {onSetDefault && !disabled ? (
         <button
           type="button"
@@ -236,11 +321,11 @@ function ModelChoiceRow({
           }
           title={isDefault ? "Default model" : "Set as default"}
           className={cx(
-            "mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim) opacity-60 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
-            isDefault && "text-amber-400 opacity-100",
+            "mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--dim) opacity-0 transition-[background-color,color,opacity] hover:bg-(--active) hover:text-(--fg) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--focus-ring) group-hover/model-choice:opacity-100",
+            isDefault && "text-(--accent) opacity-100",
           )}
         >
-          <Star className={cx("h-3.5 w-3.5", isDefault && "fill-current")} />
+          <Check className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>
@@ -339,15 +424,34 @@ export function ComposerPickerTrigger({
   );
 }
 
-export function filteredChoices(choices: ModelChoice[], selectedCompany: string, query: string) {
+export function filteredChoices(
+  choices: ModelChoice[],
+  selectedCompany: string,
+  query: string,
+  favorites: ReadonlySet<string> = new Set(),
+) {
   const normalized = query.trim().toLocaleLowerCase();
   if (normalized) {
     const tokens = normalized.split(/\s+/).filter(Boolean);
-    return choices.filter((choice) => {
-      const text = modelChoiceSearchText(choice);
-      return tokens.every((token) => text.includes(token));
-    });
+    return choices
+      .flatMap((choice) => {
+        const text = modelChoiceSearchText(choice);
+        let score = favorites.has(choice.model.id) ? 1000 : 0;
+        for (const token of tokens) {
+          const index = text.indexOf(token);
+          if (index < 0) return [];
+          score += index === 0 ? 100 : Math.max(1, 50 - index);
+        }
+        return [{ choice, score }];
+      })
+      .toSorted(
+        (left, right) =>
+          right.score - left.score || left.choice.label.localeCompare(right.choice.label),
+      )
+      .map(({ choice }) => choice);
   }
+  if (selectedCompany === "favorites")
+    return choices.filter((choice) => favorites.has(choice.model.id));
   return choices.filter((choice) => choice.company.key === selectedCompany);
 }
 
