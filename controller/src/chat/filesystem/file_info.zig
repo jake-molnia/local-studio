@@ -1,7 +1,7 @@
 const std = @import("std");
-const io_mod = @import("../../core/shared/io.zig");
-const pathing = @import("../../core/workspace/pathing.zig");
-const tool_dispatch = @import("../../core/tooling/tool_dispatch.zig");
+const io_mod = @import("../engine/core/shared/io.zig");
+const pathing = @import("../engine/core/workspace/pathing.zig");
+const tool_dispatch = @import("../engine/core/tooling/tool_dispatch.zig");
 
 const Allocator = std.mem.Allocator;
 

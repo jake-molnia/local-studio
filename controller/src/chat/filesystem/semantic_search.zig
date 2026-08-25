@@ -1,12 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const debug_trace = @import("../../core/shared/debug_trace.zig");
-const io_mod = @import("../../core/shared/io.zig");
-const pathing = @import("../../core/workspace/pathing.zig");
-const text_utils = @import("../../core/shared/text_utils.zig");
-const tool_dispatch = @import("../../core/tooling/tool_dispatch.zig");
-const workspace_access = @import("../../core/workspace/workspace_access.zig");
-const sort_utils = @import("../../core/shared/sort_utils.zig");
+const debug_trace = @import("../engine/core/shared/debug_trace.zig");
+const io_mod = @import("../engine/core/shared/io.zig");
+const pathing = @import("../engine/core/workspace/pathing.zig");
+const text_utils = @import("../engine/core/shared/text_utils.zig");
+const tool_dispatch = @import("../engine/core/tooling/tool_dispatch.zig");
+const workspace_access = @import("../engine/core/workspace/workspace_access.zig");
+const sort_utils = @import("../engine/core/shared/sort_utils.zig");
 
 pub const Config = struct {
     workspace_root: []const u8,

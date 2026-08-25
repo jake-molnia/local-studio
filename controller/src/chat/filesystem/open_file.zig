@@ -1,9 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const debug_trace = @import("../../core/shared/debug_trace.zig");
-const io_mod = @import("../../core/shared/io.zig");
-const pathing = @import("../../core/workspace/pathing.zig");
-const tool_dispatch = @import("../../core/tooling/tool_dispatch.zig");
+const debug_trace = @import("../engine/core/shared/debug_trace.zig");
+const io_mod = @import("../engine/core/shared/io.zig");
+const pathing = @import("../engine/core/workspace/pathing.zig");
+const tool_dispatch = @import("../engine/core/tooling/tool_dispatch.zig");
 
 const Allocator = std.mem.Allocator;
 

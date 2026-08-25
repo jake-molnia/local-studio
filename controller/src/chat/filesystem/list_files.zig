@@ -1,10 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const io_mod = @import("../../core/shared/io.zig");
-const list_files_listing = @import("../../core/workspace/list_files_listing.zig");
-const pathing = @import("../../core/workspace/pathing.zig");
-const tool_dispatch = @import("../../core/tooling/tool_dispatch.zig");
-const tool_result_errors = @import("../../core/tooling/tool_result_errors.zig");
+const io_mod = @import("../engine/core/shared/io.zig");
+const list_files_listing = @import("../engine/core/workspace/list_files_listing.zig");
+const pathing = @import("../engine/core/workspace/pathing.zig");
+const tool_dispatch = @import("../engine/core/tooling/tool_dispatch.zig");
+const tool_result_errors = @import("../engine/core/tooling/tool_result_errors.zig");
 
 const Allocator = std.mem.Allocator;
 

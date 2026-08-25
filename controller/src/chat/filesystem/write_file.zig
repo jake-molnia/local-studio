@@ -1,25 +1,23 @@
 const std = @import("std");
-const file_mutation_contract = @import("../../core/tooling/file_mutation_contract.zig");
-const tool_dispatch = @import("../../core/tooling/tool_dispatch.zig");
+const file_mutation_contract = @import("../engine/core/tooling/file_mutation_contract.zig");
+const tool_dispatch = @import("../engine/core/tooling/tool_dispatch.zig");
 
 const Allocator = std.mem.Allocator;
 const max_content_bytes: usize = 4 * 1024 * 1024;
 
-/// Typed input for the core edit_file tool.
+/// Typed input for the built-in write_file tool.
 pub const Input = struct {
     path: []u8,
-    old_string: []u8,
-    new_string: []u8,
+    content: []u8,
 
     pub fn deinit(self: *Input, alloc: Allocator) void {
         alloc.free(self.path);
-        alloc.free(self.old_string);
-        alloc.free(self.new_string);
-        self.* = .{ .path = &.{}, .old_string = &.{}, .new_string = &.{} };
+        alloc.free(self.content);
+        self.* = .{ .path = &.{}, .content = &.{} };
     }
 };
 
-/// Decodes edit_file JSON into an owned Input released by ToolInput.deinit.
+/// Decodes write_file JSON into an owned Input released by ToolInput.deinit.
 pub fn decode(
     ctx: tool_dispatch.DispatchContext,
     args_json: []const u8,
@@ -32,7 +30,7 @@ pub fn decode(
     ) catch {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file arguments must be valid JSON",
+            "write_file arguments must be valid JSON",
         ) };
     };
     defer parsed.deinit();
@@ -40,46 +38,33 @@ pub fn decode(
     if (parsed.value != .object) {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file arguments must be an object",
+            "write_file arguments must be an object",
         ) };
     }
 
     const path_value = parsed.value.object.get("path") orelse {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file requires string field \"path\"",
+            "write_file requires string field \"path\"",
         ) };
     };
     if (path_value != .string) {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file field \"path\" must be a string",
+            "write_file field \"path\" must be a string",
         ) };
     }
 
-    const old_value = parsed.value.object.get("old_string") orelse {
+    const content_value = parsed.value.object.get("content") orelse {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file requires string field \"old_string\"",
+            "write_file requires string field \"content\"",
         ) };
     };
-    if (old_value != .string) {
+    if (content_value != .string) {
         return .{ .failure = try ctx.allocator.dupe(
             u8,
-            "edit_file field \"old_string\" must be a string",
-        ) };
-    }
-
-    const new_value = parsed.value.object.get("new_string") orelse {
-        return .{ .failure = try ctx.allocator.dupe(
-            u8,
-            "edit_file requires string field \"new_string\"",
-        ) };
-    };
-    if (new_value != .string) {
-        return .{ .failure = try ctx.allocator.dupe(
-            u8,
-            "edit_file field \"new_string\" must be a string",
+            "write_file field \"content\" must be a string",
         ) };
     }
 
@@ -87,14 +72,11 @@ pub fn decode(
     errdefer ctx.allocator.destroy(input);
     const owned_path = try ctx.allocator.dupe(u8, path_value.string);
     errdefer ctx.allocator.free(owned_path);
-    const owned_old = try ctx.allocator.dupe(u8, old_value.string);
-    errdefer ctx.allocator.free(owned_old);
-    const owned_new = try ctx.allocator.dupe(u8, new_value.string);
-    errdefer ctx.allocator.free(owned_new);
+    const owned_content = try ctx.allocator.dupe(u8, content_value.string);
+    errdefer ctx.allocator.free(owned_content);
     input.* = .{
         .path = owned_path,
-        .old_string = owned_old,
-        .new_string = owned_new,
+        .content = owned_content,
     };
     return .{ .input = .{ .ptr = input, .deinit_fn = inputDeinit } };
 }
@@ -110,13 +92,12 @@ pub fn takeFileMutationInput(
     alloc: Allocator,
 ) file_mutation_contract.FileMutationInput {
     const input = tool_input.as(Input);
-    const moved = file_mutation_contract.EditInput{
+    const moved = file_mutation_contract.WriteInput{
         .path = input.path,
-        .old_string = input.old_string,
-        .new_string = input.new_string,
+        .content = input.content,
     };
     alloc.destroy(input);
-    return .{ .edit = moved };
+    return .{ .write = moved };
 }
 
 pub fn validate(
@@ -130,16 +111,10 @@ pub fn validate(
             "file mutation preparation failed: path exceeds the preparation limit",
         );
     }
-    if (input.old_string.len > max_content_bytes) {
+    if (input.content.len > max_content_bytes) {
         return try ctx.allocator.dupe(
             u8,
-            "edit_file failed: old_string exceeds the 4 MiB preparation limit",
-        );
-    }
-    if (input.new_string.len > max_content_bytes) {
-        return try ctx.allocator.dupe(
-            u8,
-            "edit_file failed: new_string exceeds the 4 MiB preparation limit",
+            "write_file failed: content exceeds the 4 MiB preparation limit",
         );
     }
     return null;
@@ -151,35 +126,33 @@ pub fn call(
 ) tool_dispatch.DispatchError!tool_dispatch.ToolResult {
     return .{ .failure = try ctx.allocator.dupe(
         u8,
-        "edit_file execution requires canonical tool runtime authorization",
+        "write_file execution requires canonical tool runtime authorization",
     ) };
 }
 
-/// Reports that edit_file mutates filesystem state.
+/// Reports that write_file mutates filesystem state.
 pub fn readsOnly(_: tool_dispatch.ToolInput) bool {
     return false;
 }
 
-/// Reports that edit_file can destroy prior file content.
+/// Reports that write_file can destroy prior file content.
 pub fn isIrreversible(_: tool_dispatch.ToolInput) bool {
     return true;
 }
 
 fn noopInputDeinit(_: *anyopaque, _: Allocator) void {}
 
-test "edit_file decodes invalid argument shapes as failures" {
+test "write_file decodes invalid argument shapes as failures" {
     const cases = [_]struct {
         json: []const u8,
         reason: []const u8,
     }{
-        .{ .json = "{", .reason = "edit_file arguments must be valid JSON" },
-        .{ .json = "[]", .reason = "edit_file arguments must be an object" },
-        .{ .json = "{\"old_string\":\"a\",\"new_string\":\"b\"}", .reason = "edit_file requires string field \"path\"" },
-        .{ .json = "{\"path\":1,\"old_string\":\"a\",\"new_string\":\"b\"}", .reason = "edit_file field \"path\" must be a string" },
-        .{ .json = "{\"path\":\"/tmp/x\",\"new_string\":\"b\"}", .reason = "edit_file requires string field \"old_string\"" },
-        .{ .json = "{\"path\":\"/tmp/x\",\"old_string\":1,\"new_string\":\"b\"}", .reason = "edit_file field \"old_string\" must be a string" },
-        .{ .json = "{\"path\":\"/tmp/x\",\"old_string\":\"a\"}", .reason = "edit_file requires string field \"new_string\"" },
-        .{ .json = "{\"path\":\"/tmp/x\",\"old_string\":\"a\",\"new_string\":1}", .reason = "edit_file field \"new_string\" must be a string" },
+        .{ .json = "{", .reason = "write_file arguments must be valid JSON" },
+        .{ .json = "[]", .reason = "write_file arguments must be an object" },
+        .{ .json = "{\"content\":\"x\"}", .reason = "write_file requires string field \"path\"" },
+        .{ .json = "{\"path\":1,\"content\":\"x\"}", .reason = "write_file field \"path\" must be a string" },
+        .{ .json = "{\"path\":\"/tmp/x\"}", .reason = "write_file requires string field \"content\"" },
+        .{ .json = "{\"path\":\"/tmp/x\",\"content\":1}", .reason = "write_file field \"content\" must be a string" },
     };
 
     for (cases) |case| {
@@ -200,10 +173,10 @@ test "edit_file decodes invalid argument shapes as failures" {
     }
 }
 
-test "edit_file decodes owned typed input" {
+test "write_file decodes owned typed input" {
     const decoded = try decode(
         .{ .allocator = std.testing.allocator },
-        "{\"path\":\"file.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}",
+        "{\"path\":\"file.txt\",\"content\":\"hello\\n\"}",
     );
     const erased = switch (decoded) {
         .input => |input| input,
@@ -215,21 +188,20 @@ test "edit_file decodes owned typed input" {
     defer erased.deinit(std.testing.allocator);
     const input = erased.as(Input);
     try std.testing.expectEqualStrings("file.txt", input.path);
-    try std.testing.expectEqualStrings("old", input.old_string);
-    try std.testing.expectEqualStrings("new", input.new_string);
+    try std.testing.expectEqualStrings("hello\n", input.content);
     try std.testing.expect(
         try validate(.{ .allocator = std.testing.allocator }, erased) == null,
     );
 }
 
-test "edit_file validation enforces independent preparation limits" {
+test "write_file validation enforces path and content preparation limits" {
     const alloc = std.testing.allocator;
     const oversized_path = try alloc.alloc(u8, std.Io.Dir.max_path_bytes + 1);
     defer alloc.free(oversized_path);
     @memset(oversized_path, 'p');
-    const oversized_value = try alloc.alloc(u8, 4 * 1024 * 1024 + 1);
-    defer alloc.free(oversized_value);
-    @memset(oversized_value, 'x');
+    const oversized_content = try alloc.alloc(u8, 4 * 1024 * 1024 + 1);
+    defer alloc.free(oversized_content);
+    @memset(oversized_content, 'x');
 
     const cases = [_]struct {
         input: Input,
@@ -238,26 +210,16 @@ test "edit_file validation enforces independent preparation limits" {
         .{
             .input = .{
                 .path = oversized_path,
-                .old_string = @constCast("old"),
-                .new_string = @constCast("new"),
+                .content = @constCast("content"),
             },
             .reason = "file mutation preparation failed: path exceeds the preparation limit",
         },
         .{
             .input = .{
                 .path = @constCast("file.txt"),
-                .old_string = oversized_value,
-                .new_string = @constCast("new"),
+                .content = oversized_content,
             },
-            .reason = "edit_file failed: old_string exceeds the 4 MiB preparation limit",
-        },
-        .{
-            .input = .{
-                .path = @constCast("file.txt"),
-                .old_string = @constCast("old"),
-                .new_string = oversized_value,
-            },
-            .reason = "edit_file failed: new_string exceeds the 4 MiB preparation limit",
+            .reason = "write_file failed: content exceeds the 4 MiB preparation limit",
         },
     };
 
