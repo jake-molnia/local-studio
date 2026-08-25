@@ -2,7 +2,6 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import { PreviewScroll } from "@/ui";
 import { PREVIEW_HEIGHT_PX, type PreviewHeight } from "@/ui/preview-scroll";
 import {
-  ChevronRight,
   FilePenLine,
   FileText,
   Globe2,
@@ -137,29 +136,19 @@ function ToolSummary({
   block,
   filePath,
   children,
-  open = false,
 }: {
   block: ToolBlock;
   filePath?: string | null;
   children?: ReactNode;
-  open?: boolean;
 }) {
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const expanded = userOpen ?? open;
   const meta = toolMeta(block, filePath);
   const running = block.status === "running";
   const kind = classifyTool(block);
   const idleColor = toolKindNodeColor(kind);
   const Icon = TOOL_ICONS[kind];
   return (
-    <details className="group min-w-0" open={expanded}>
-      <summary
-        className="flex min-h-5 min-w-0 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-(--hover) [&::-webkit-details-marker]:hidden"
-        onClick={(event) => {
-          event.preventDefault();
-          setUserOpen(!expanded);
-        }}
-      >
+    <div className="min-w-0">
+      <div className="flex min-h-5 min-w-0 items-center gap-1.5 px-1 py-0.5">
         <Icon className="h-3.5 w-3.5 shrink-0 text-(--dim)/65" strokeWidth={1.7} />
         <span
           className={`shrink-0 text-[length:var(--fs-sm)] font-normal leading-5 ${
@@ -178,13 +167,9 @@ function ToolSummary({
         {block.status === "error" ? (
           <span className="shrink-0 text-[length:var(--fs-sm)] text-(--err)">failed</span>
         ) : null}
-        <ChevronRight
-          className="h-3.5 w-3.5 shrink-0 text-(--dim)/55 transition-transform group-open:rotate-90"
-          strokeWidth={1.7}
-        />
-      </summary>
-      {expanded && children ? <div className="mb-1.5 ml-1.5 mt-1 min-w-0">{children}</div> : null}
-    </details>
+      </div>
+      {children ? <div className="mb-1.5 ml-1.5 mt-1 min-w-0">{children}</div> : null}
+    </div>
   );
 }
 
@@ -457,7 +442,7 @@ function FileWritePreview({
   const sourceLang = fileContent === null && patchContent !== null ? "diff" : lang;
 
   return (
-    <ToolSummary block={block} filePath={filePath} open>
+    <ToolSummary block={block} filePath={filePath}>
       {patchContent ? (
         <DiffPreviewSource body={patchContent} filePath={filePath} />
       ) : (
@@ -522,7 +507,7 @@ function diffPreviewData(block: ToolBlock): string | null {
 function DiffPreview({ block, diffText }: { block: ToolBlock; diffText: string }) {
   const filePath = toolArg(block, ["path", "file_path", "filePath", "file", "filename"]);
   return (
-    <ToolSummary block={block} filePath={filePath} open>
+    <ToolSummary block={block} filePath={filePath}>
       <DiffPreviewSource body={diffText} filePath={filePath} />
     </ToolSummary>
   );
@@ -545,7 +530,7 @@ function BrowserPreview({ block }: { block: ToolBlock }) {
     compactBrowserResult(block.resultText) ||
     (block.text && block.text !== block.argsText ? compactBrowserResult(block.text) : null);
   return (
-    <ToolSummary block={block} open={block.status === "running"}>
+    <ToolSummary block={block}>
       {args ? (
         <div className="mb-1.5 rounded-md border border-(--border) bg-(--color-input) px-3 py-1.5 font-mono text-[length:var(--fs-sm)] leading-[1.6] text-(--fg)/75">
           {args}
@@ -606,7 +591,7 @@ export function ToolBlockView({ block }: { block: ToolBlock }) {
     if (command) {
       return (
         <ToolPreviewHeightProvider kind={kind}>
-          <ToolSummary block={block} open={block.status === "running"}>
+          <ToolSummary block={block}>
             <ShellBlock command={command} output={block.resultText || null} status={block.status} />
           </ToolSummary>
         </ToolPreviewHeightProvider>
@@ -625,9 +610,7 @@ export function ToolBlockView({ block }: { block: ToolBlock }) {
     block.resultText || (block.text && block.text !== block.argsText ? block.text : "");
   return (
     <ToolPreviewHeightProvider kind={kind}>
-      <ToolSummary block={block} open={block.status === "running"}>
-        {display ? <ToolOutput>{display}</ToolOutput> : null}
-      </ToolSummary>
+      <ToolSummary block={block}>{display ? <ToolOutput>{display}</ToolOutput> : null}</ToolSummary>
     </ToolPreviewHeightProvider>
   );
 }
