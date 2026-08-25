@@ -67,7 +67,7 @@ pub fn serve(allocator: std.mem.Allocator, client: *std.http.Client, credential:
         },
     });
     switch (public_protocol) {
-        .responses => try openai_protocol.writeResponsesStream(allocator, &downstream.writer, converted),
+        .responses => try downstream.writer.writeAll(upstream_body.buffered()),
         .chat_completions => {
             const chunk = try chatChunk(allocator, converted);
             defer allocator.free(chunk);

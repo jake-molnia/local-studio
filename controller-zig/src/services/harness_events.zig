@@ -78,7 +78,13 @@ pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness:
         }
         return writer.writeAll(document);
     };
-    if (object.get("result") != null or object.get("error") != null) return writer.writeAll("{\"type\":\"agent_settled\"}");
+    if (object.get("error")) |value| {
+        try writer.writeAll("{\"type\":\"extension_error\",\"message\":");
+        try std.json.Stringify.value(acpError(value) orelse "Chat turn failed", .{}, writer);
+        try writer.writeByte('}');
+        return;
+    }
+    if (object.get("result") != null) return writer.writeAll("{\"type\":\"agent_settled\"}");
     return writer.writeAll(document);
 }
 
@@ -185,7 +191,7 @@ fn writeAcpNormalized(writer: *Io.Writer, harness: []const u8, object: std.json.
 }
 
 fn isAcp(harness: []const u8) bool {
-    return std.mem.eql(u8, harness, "chat") or std.mem.eql(u8, harness, "fx");
+    return std.mem.eql(u8, harness, "fx");
 }
 
 fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u8 {
@@ -216,6 +222,12 @@ fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u
 
 fn codexError(object: std.json.ObjectMap) ?[]const u8 {
     const value = object.get("error") orelse return null;
+    if (value == .string) return value.string;
+    if (value != .object) return null;
+    return stringField(value.object, "message");
+}
+
+fn acpError(value: std.json.Value) ?[]const u8 {
     if (value == .string) return value.string;
     if (value != .object) return null;
     return stringField(value.object, "message");
