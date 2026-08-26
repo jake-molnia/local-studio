@@ -255,8 +255,9 @@ pub const Manager = struct {
         try std.json.Stringify.value(message.prompt, .{}, &turn.writer);
         try turn.writer.writeAll(",\"toolAccess\":\"read\",\"browserToolEnabled\":true,\"mode\":\"prompt\"}");
         const accepted = try coordinator.turnPayload(manager.allocator, manager.io, mode, client, database, harness, turn.writer.buffered());
+        const cursor = run_completion.acceptedEventCursor(manager.allocator, accepted);
         manager.allocator.free(accepted);
-        var result = try run_completion.wait(manager.allocator, manager.io, mode, client, database, harness, session_id, 2000);
+        var result = try run_completion.wait(manager.allocator, manager.io, mode, client, database, harness, session_id, cursor, 2000);
         defer result.deinit();
         const response = if (result.failure) |failure| failure else if (std.mem.trim(u8, result.summary, " \t\r\n").len > 0) result.summary else "Chat completed without a text response.";
         try manager.sendReply(client, message.provider, message.account_id, message.conversation_id, response);

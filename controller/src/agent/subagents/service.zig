@@ -76,11 +76,12 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
         try settleFailure(io, database, parent_id, run_id, null, "", @errorName(failure));
         return failure;
     };
+    const cursor = agent_run_completion.acceptedEventCursor(allocator, accepted);
     allocator.free(accepted);
     var child = try lockedSession(allocator, io, database, runtime_id);
     defer if (child) |*value| value.deinit();
     if (child) |value| if (value.native_session_id) |native_id| try lockedAdopt(io, database, parent_id, run_id, native_id);
-    var result = agent_run_completion.wait(allocator, io, mode, client, database, harness, runtime_id, 8000) catch |failure| {
+    var result = agent_run_completion.wait(allocator, io, mode, client, database, harness, runtime_id, cursor, 8000) catch |failure| {
         try settleFailure(io, database, parent_id, run_id, if (child) |value| value.native_session_id else null, "", @errorName(failure));
         return failure;
     };

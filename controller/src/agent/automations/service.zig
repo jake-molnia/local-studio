@@ -162,7 +162,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     defer if (response) |value| allocator.free(value);
     var result: ?agent_run_completion.Result = null;
     defer if (result) |*value| value.deinit();
-    if (response != null) result = agent_run_completion.wait(allocator, io, mode, client, database, harness, session_id, 2000) catch |failure| failed: {
+    if (response) |accepted| result = agent_run_completion.wait(allocator, io, mode, client, database, harness, session_id, agent_run_completion.acceptedEventCursor(allocator, accepted), 2000) catch |failure| failed: {
         run_error = @errorName(failure);
         break :failed null;
     };

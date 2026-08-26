@@ -21,8 +21,17 @@ pub const Result = struct {
     }
 };
 
-pub fn wait(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, max_summary: usize) !Result {
-    var cursor: u64 = 0;
+pub fn acceptedEventCursor(allocator: std.mem.Allocator, document: []const u8) u64 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return 0;
+    defer parsed.deinit();
+    if (parsed.value != .object) return 0;
+    const status = parsed.value.object.get("status") orelse return 0;
+    if (status != .object) return 0;
+    return unsignedField(status.object, "eventSeq") orelse 0;
+}
+
+pub fn wait(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, after: u64, max_summary: usize) !Result {
+    var cursor = after;
     var native_session: ?[]u8 = null;
     errdefer if (native_session) |value| allocator.free(value);
     var attempts: usize = 0;

@@ -98,6 +98,7 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, client: *std.http.Client, c
         entry.deinit();
     };
     try store.save();
+    try output.writeMessage(assistant);
     try sink.emit("{\"type\":\"agent_settled\"}");
 }
 
