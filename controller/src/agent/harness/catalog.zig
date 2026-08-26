@@ -116,8 +116,6 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const I
     try writer.writeAll("{\"harnesses\":[");
     try writePi(writer, pi);
     try writer.writeAll(",");
-    try writeChat(writer);
-    try writer.writeAll(",");
     try writeInstallation(writer, "fx", "FX", "acp", fx);
     try writer.writeAll(",");
     try writeInstallation(writer, "opencode", "OpenCode", "acp", opencode);
@@ -130,7 +128,6 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const I
 
 pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
-    if (std.mem.eql(u8, harness, "chat")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "opencode")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
     if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
@@ -303,12 +300,6 @@ fn writeInstallation(writer: *Io.Writer, id: []const u8, name: []const u8, trans
     if (installation.version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
     try writer.writeAll("},\"capabilities\":");
     try writeCapabilities(writer, id);
-    try writer.writeByte('}');
-}
-
-fn writeChat(writer: *Io.Writer) !void {
-    try writer.writeAll("{\"id\":\"chat\",\"name\":\"Chat\",\"status\":\"available\",\"selectable\":false,\"transport\":\"embedded-acp\",\"installation\":{\"source\":\"embedded\",\"executable\":\"self\",\"version\":\"0.0.0-local-studio\"},\"capabilities\":");
-    try writeCapabilities(writer, "chat");
     try writer.writeByte('}');
 }
 
