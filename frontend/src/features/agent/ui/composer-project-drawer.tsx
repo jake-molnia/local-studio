@@ -15,23 +15,12 @@ import {
   Monitor,
   Plus,
   RefreshCw,
-  Trash2,
-  X,
 } from "@/ui/icon-registry";
-import { GitBranchIcon } from "@/ui/icons";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { useProjects } from "@/features/agent/projects/context";
 import type { GitSummary, Project } from "@/features/agent/projects/types";
-import {
-  addProjectFromPath,
-  addWorktree,
-  createBranch,
-  listBranches,
-  listWorktrees,
-  removeWorktree,
-  switchBranch,
-} from "@/features/agent/projects/api";
-import type { GitBranch as GitBranchType, GitWorktree } from "@/features/agent/contracts";
+import { createBranch, listBranches, switchBranch } from "@/features/agent/projects/api";
+import type { GitBranch as GitBranchType } from "@/features/agent/contracts";
 import { GoalCard, type GoalDraft } from "@/features/agent/ui/goal-card";
 import { GoalStrip } from "@/features/agent/ui/goal-strip";
 import { useSessionGoal } from "@/features/agent/ui/use-session-goal";
@@ -357,7 +346,7 @@ export function ComposerProjectDrawer({
                   </div>
                 ) : (
                   <ContextViewHeader
-                    label={view === "goal" ? "Goal" : "Branches and worktrees"}
+                    label={view === "goal" ? "Goal" : "Branches"}
                     onBack={() => {
                       setView("root");
                       setQuery("");
@@ -435,13 +424,6 @@ export function ComposerProjectDrawer({
                     onBranchSwitched={async () => {
                       await projects.loadGitSummary(cwd);
                       await projects.refresh();
-                    }}
-                    onWorktreePicked={async (path: string) => {
-                      try {
-                        const project = await addProjectFromPath(path);
-                        projects.upsertProject(project);
-                        pickProject(project);
-                      } catch {}
                     }}
                   />
                 ) : null}
@@ -581,7 +563,7 @@ function ContextMenuRoot({
           gitSummary.isRepo
             ? {
                 key: "git",
-                label: "Branch or worktree",
+                label: "Branch",
                 detail: gitBranch ?? "Choose a branch",
                 icon: <GitBranch className="h-3.5 w-3.5" />,
                 onClick: onGit,
@@ -660,15 +642,12 @@ function GitResourceSections({
   cwd,
   enabled,
   onBranchSwitched,
-  onWorktreePicked,
 }: {
   cwd: string;
   enabled: boolean;
   onBranchSwitched: () => Promise<void>;
-  onWorktreePicked: (path: string) => Promise<void>;
 }) {
   const [branches, setBranches] = useState<GitBranchType[] | null>(null);
-  const [worktrees, setWorktrees] = useState<GitWorktree[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -677,12 +656,7 @@ function GitResourceSections({
     setLoading(true);
     setError(null);
     try {
-      const [nextBranches, nextWorktrees] = await Promise.all([
-        listBranches(cwd),
-        listWorktrees(cwd),
-      ]);
-      setBranches(nextBranches);
-      setWorktrees(nextWorktrees);
+      setBranches(await listBranches(cwd));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to load git state");
     } finally {
@@ -746,25 +720,6 @@ function GitResourceSections({
             await createBranch(cwd, name);
             await onBranchSwitched();
           }, "Failed to create branch")
-        }
-      />
-      <WorktreeSection
-        worktrees={worktrees}
-        loading={loading}
-        busy={busy}
-        enabled={enabled}
-        cwd={cwd}
-        onSwitch={(path) => void run(() => onWorktreePicked(path), "Failed to open worktree")}
-        onCreate={(branch, path) =>
-          void run(async () => {
-            await addWorktree(cwd, branch, path);
-            await onWorktreePicked(path);
-          }, "Failed to create worktree")
-        }
-        onRemove={(path) =>
-          void run(async () => {
-            await removeWorktree(cwd, path);
-          }, "Failed to remove worktree")
         }
       />
     </>
@@ -880,144 +835,6 @@ function BranchSection({
   );
 }
 
-function WorktreeSection({
-  cwd,
-  worktrees,
-  loading,
-  busy,
-  enabled,
-  onSwitch,
-  onCreate,
-  onRemove,
-}: {
-  cwd: string;
-  worktrees: GitWorktree[] | null;
-  loading: boolean;
-  busy: boolean;
-  enabled: boolean;
-  onSwitch: (path: string) => void;
-  onCreate: (branch: string, path: string) => void;
-  onRemove: (path: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [draftBranch, setDraftBranch] = useState("");
-  const [draftPath, setDraftPath] = useState("");
-  const filtered = useFilteredItems(worktrees ?? [], (worktree) => worktree.path, query);
-
-  const startCreate = () => {
-    const branch = draftBranch.trim();
-    const path = draftPath.trim();
-    if (!branch || !path) return;
-    onCreate(branch, path);
-    setDraftBranch("");
-    setDraftPath("");
-    setCreating(false);
-  };
-
-  return (
-    <SectionShell
-      icon={<GitBranchIcon className="h-3.5 w-3.5 shrink-0 text-(--fg)/46" />}
-      label="Worktrees"
-      count={worktrees?.length ?? 0}
-      addLabel="New worktree"
-      addDisabled={!enabled}
-      onAdd={() => setCreating((value) => !value)}
-      query={query}
-      onQueryChange={setQuery}
-      placeholder="Search worktrees…"
-      loading={loading}
-      itemsLoaded={worktrees !== null}
-      emptyLabel="No worktrees"
-      empty={worktrees !== null && filtered.length === 0}
-      create={
-        creating ? (
-          <div className="flex flex-col gap-1 px-2 pb-0.5">
-            <input
-              autoFocus
-              value={draftBranch}
-              onChange={(event) => setDraftBranch(event.target.value)}
-              placeholder="Branch (e.g. feat/new-thing)"
-              className={searchInputClass}
-              aria-label="New worktree branch"
-            />
-            <input
-              value={draftPath}
-              onChange={(event) => setDraftPath(event.target.value)}
-              placeholder={defaultWorktreePath(cwd, draftBranch)}
-              className={searchInputClass}
-              aria-label="New worktree path"
-            />
-            <div className="flex justify-end gap-1">
-              <button
-                type="button"
-                onClick={() => setCreating(false)}
-                className={iconButtonClass}
-                aria-label="Cancel creating worktree"
-                title="Cancel"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                disabled={!draftBranch.trim() || busy}
-                onClick={startCreate}
-                className={`${iconButtonClass} bg-(--fg)/90 text-(--bg) hover:bg-(--fg) hover:text-(--bg) disabled:opacity-35`}
-                aria-label="Create worktree"
-                title="Create worktree"
-              >
-                <Check className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        ) : null
-      }
-    >
-      {filtered.map((worktree) => (
-        <div key={worktree.path} className="group flex min-w-0 items-center">
-          <button
-            type="button"
-            disabled={busy || worktree.current || !enabled}
-            onClick={() => onSwitch(worktree.path)}
-            className={cx(
-              listRowClass,
-              "min-w-0 flex-1",
-              worktree.current ? "bg-(--hover)/50 text-(--fg)/90" : "hover:bg-(--hover)",
-              "disabled:opacity-60",
-            )}
-            title={worktree.current ? "Current working tree" : `Open worktree at ${worktree.path}`}
-          >
-            {worktree.current ? (
-              <Check className="h-3.5 w-3.5 shrink-0 text-(--accent)" />
-            ) : (
-              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-(--fg)/34" strokeWidth={1.7} />
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-mono text-[length:var(--fs-xs)]">
-                {worktree.branch ?? "detached"}
-              </span>
-              <span className="block truncate text-[length:var(--fs-xs)] text-(--fg)/40">
-                {worktree.path}
-              </span>
-            </span>
-          </button>
-          {!worktree.current && enabled ? (
-            <button
-              type="button"
-              onClick={() => onRemove(worktree.path)}
-              className="mr-1 shrink-0 rounded-md p-1 text-(--fg)/40 opacity-0 transition-opacity hover:bg-(--fg)/[0.06] hover:text-(--err) group-hover:opacity-100"
-              aria-label="Remove worktree"
-              title="Remove worktree"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          ) : null}
-        </div>
-      ))}
-    </SectionShell>
-  );
-}
-
 function SectionShell({
   icon,
   label,
@@ -1090,12 +907,6 @@ function SectionShell({
       )}
     </div>
   );
-}
-
-function defaultWorktreePath(cwd: string, branch: string): string {
-  const cleaned = branch.trim().replace(/\//g, "-") || "worktree";
-  const parent = cwd.slice(0, cwd.lastIndexOf("/") + 1) || "./";
-  return `${parent}${cleaned}`;
 }
 
 function ProjectList({

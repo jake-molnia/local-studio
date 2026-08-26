@@ -39,6 +39,7 @@ export type AgentComposerFrameProps = {
   contextWindow: number;
   currentContextTokens: number;
   cwd: string;
+  projectName?: string | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
   gitBranch?: string | null;
   gitSummary?: GitSummary | null;
@@ -68,6 +69,7 @@ export type AgentComposerFrameProps = {
   goalMode?: boolean;
   onExitGoalMode?: () => void;
   drawer?: ReactNode;
+  setupBar?: ReactNode;
   showStatusBar: boolean;
   promptTemplates: ComposerPromptTemplateRef[];
   readingAttachments: boolean;
@@ -87,6 +89,7 @@ export function AgentComposerFrame({
   contextWindow,
   currentContextTokens,
   cwd,
+  projectName,
   fileInputRef,
   gitBranch,
   gitSummary,
@@ -116,6 +119,7 @@ export function AgentComposerFrame({
   goalMode = false,
   onExitGoalMode,
   drawer,
+  setupBar,
   showStatusBar,
   promptTemplates,
   readingAttachments,
@@ -145,6 +149,7 @@ export function AgentComposerFrame({
           {banner.label}
         </div>
       ) : null}
+      {setupBar}
       {drawer ? <div className="w-full">{drawer}</div> : null}
       <div
         onDragOver={onComposerDragOver}
@@ -228,6 +233,7 @@ export function AgentComposerFrame({
       {showStatusBar ? (
         <AgentComposerStatusBar
           cwd={cwd}
+          projectName={projectName}
           gitBranch={gitBranch}
           gitSummary={gitSummary}
           onInitGit={onInitGit}

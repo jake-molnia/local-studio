@@ -6,6 +6,7 @@ import { GitBranchIcon } from "@/ui/icons";
 
 export function AgentComposerStatusBar({
   cwd,
+  projectName,
   gitBranch,
   gitSummary,
   onInitGit,
@@ -14,6 +15,7 @@ export function AgentComposerStatusBar({
   onOpenDiff,
 }: {
   cwd: string;
+  projectName?: string | null;
   gitBranch?: string | null;
   gitSummary?: GitSummary | null;
   onInitGit?: () => void;
@@ -21,7 +23,7 @@ export function AgentComposerStatusBar({
   contextWindow: number;
   onOpenDiff: () => void;
 }) {
-  const displayCwd = formatHomeRelativePath(cwd);
+  const displayCwd = projectName || projectNameFromPath(cwd);
 
   return (
     <div className="relative z-20 mt-1.5 flex w-full items-center gap-2 overflow-visible font-mono text-[length:var(--fs-xs)] text-(--dim) sm:mt-2">
@@ -94,9 +96,6 @@ function GitSummaryState({
     >
       <span className="text-(--ok)">+{gitSummary.additions}</span>
       <span className="text-(--err)">-{gitSummary.deletions}</span>
-      {gitSummary.statusCount > 0 ? (
-        <span className="text-(--dim)">· {gitSummary.statusCount} files</span>
-      ) : null}
     </button>
   );
 }
@@ -143,10 +142,8 @@ function ContextReadout({ current, contextWindow }: { current: number; contextWi
   );
 }
 
-function formatHomeRelativePath(value: string): string {
+function projectNameFromPath(value: string): string {
   const normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
   if (!normalized) return "";
-  const homeMatch = normalized.match(/^\/Users\/[^/]+(\/.*)?$/);
-  if (homeMatch) return `~${homeMatch[1] ?? ""}`;
-  return normalized;
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
 }

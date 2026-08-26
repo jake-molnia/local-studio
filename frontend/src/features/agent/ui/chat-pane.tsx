@@ -17,6 +17,7 @@ import { type FileMentionRow, type MentionRow } from "@/features/agent/ui/agent-
 import { builtinCommandProvider } from "@/features/agent/composer/builtin-commands";
 import { AutomationDrawer } from "@/features/agent/ui/automation-drawer";
 import { ComposerProjectDrawer } from "@/features/agent/ui/composer-project-drawer";
+import { TaskSetupBar } from "@/features/agent/ui/task-setup-bar";
 import { SubagentChips } from "@/features/agent/ui/subagent-chips";
 import { GitDiffDrawer } from "@/features/agent/ui/git-diff-drawer";
 import {
@@ -64,6 +65,7 @@ import { useSessionEngine } from "@/features/agent/runtime/engine";
 import type { Session, UpdateSession } from "@/features/agent/runtime/types";
 import { useTools } from "@/features/agent/tools/context";
 import { isChatsProject, type GitSummary, type Project } from "@/features/agent/projects/types";
+import { useProjects } from "@/features/agent/projects/context";
 import type { BrowserBackend } from "@/features/agent/tools/types";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import {
@@ -267,6 +269,8 @@ export function ChatPane({
   const router = useRouter();
   const routeProjectId = useSearchParams().get("project");
   const effectiveProjectId = projectId ?? routeProjectId;
+  const projects = useProjects();
+  const selectedProject = effectiveProjectId ? projects.findById(effectiveProjectId) : null;
   const chatWorkspace = effectiveProjectId === "chats";
   const workspaceCwd = chatWorkspace ? "" : cwd;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -491,7 +495,11 @@ export function ChatPane({
         executionKind: isChatsProject(project) ? "chat" : "project",
         harness: undefined,
         projectId: project.id,
-        cwd: isChatsProject(project) ? undefined : project.path,
+        cwd: isChatsProject(project) || project.repository ? undefined : project.path,
+        managedProject: Boolean(project.repository),
+        baseRef: project.defaultBranch,
+        branchName: undefined,
+        detached: Boolean(project.repository),
       }));
     },
     [activeTab, updateTab],
@@ -606,6 +614,11 @@ export function ChatPane({
   });
   const handleComposerSubmit = useCallback(
     (event: FormEvent) => {
+      if (!activeTab?.projectId && effectiveProjectId !== "chats") {
+        event.preventDefault();
+        updateTab(activeTabId, (session) => ({ ...session, error: "Choose a project" }));
+        return;
+      }
       if (goalModeApi.submitAsGoal(event, activeTab?.input ?? "")) return;
       const invocation = parseSlashInvocation(activeTab?.input ?? "");
       if (invocation && commandRegistry.find(invocation.name, commandContext)) {
@@ -615,7 +628,17 @@ export function ChatPane({
       }
       void sendMessage(event);
     },
-    [activeTab, commandContext, commandRegistry, goalModeApi, runCommandInvocation, sendMessage],
+    [
+      activeTab,
+      activeTabId,
+      commandContext,
+      commandRegistry,
+      effectiveProjectId,
+      goalModeApi,
+      runCommandInvocation,
+      sendMessage,
+      updateTab,
+    ],
   );
   const loadEarlierHistory = useCallback(
     () => (activeTabId ? engine.loadEarlier(activeTabId) : Promise.resolve()),
@@ -700,6 +723,7 @@ export function ChatPane({
             contextWindow={effectiveContextWindow}
             currentContextTokens={currentContextTokens}
             cwd={workspaceCwd}
+            projectName={selectedProject?.name ?? projectName}
             fileInputRef={fileInputRef}
             gitBranch={chatWorkspace ? null : gitBranch}
             gitSummary={chatWorkspace ? null : gitSummary}
@@ -709,6 +733,19 @@ export function ChatPane({
             mentionRows={mentionRows}
             modelSupportsVision={modelSupportsVision}
             modelSelector={composerModelSelector}
+            setupBar={
+              !chatWorkspace && activeTab && !activeTab.startedAt ? (
+                <TaskSetupBar
+                  session={activeTab}
+                  project={selectedProject}
+                  disabled={Boolean(activeTab.startedAt)}
+                  onProject={handleProjectPicked}
+                  onPatch={(patch) =>
+                    updateTab(activeTab.id, (session) => ({ ...session, ...patch }))
+                  }
+                />
+              ) : null
+            }
             contextOpen={contextOpen}
             contextTriggerRef={contextTriggerRef}
             onOpenContext={() => {

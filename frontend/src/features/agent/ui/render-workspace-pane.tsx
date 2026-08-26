@@ -222,8 +222,6 @@ const WorkspacePane = memo(function WorkspacePane({
             onSelect={(modelId, routeId) => handles.selectPaneModel(view.paneId, modelId, routeId)}
             selectedHarness={view.session?.harness ?? defaultHarness}
             harnessDisabled={chatWorkspace || !view.isNewSession}
-            selectedPlacement={view.session?.placement ?? "local"}
-            selectedSandboxAccountId={view.session?.sandboxAccountId}
             {...(chatWorkspace
               ? {}
               : {
@@ -231,12 +229,6 @@ const WorkspacePane = memo(function WorkspacePane({
                     handles.updateSession(view.pane.sessionId, (session) => ({
                       ...session,
                       harness: harness as AgentHarness,
-                    })),
-                  onSelectPlacement: (placement: "local" | "daytona", accountId?: string) =>
-                    handles.updateSession(view.pane.sessionId, (session) => ({
-                      ...session,
-                      placement,
-                      sandboxAccountId: accountId,
                     })),
                 })}
             loading={modelsLoading}
