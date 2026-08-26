@@ -76,7 +76,62 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \\  PRIMARY KEY(provider, account_id)
         \\);
+        \\CREATE TABLE IF NOT EXISTS agent_messaging_defaults (
+        \\  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        \\  model_id TEXT NOT NULL,
+        \\  route_id TEXT NOT NULL,
+        \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        \\);
     );
+}
+
+pub const Defaults = struct {
+    allocator: std.mem.Allocator,
+    model_id: []u8,
+    route_id: []u8,
+
+    pub fn deinit(defaults_value: *Defaults) void {
+        defaults_value.allocator.free(defaults_value.model_id);
+        defaults_value.allocator.free(defaults_value.route_id);
+        defaults_value.* = undefined;
+    }
+};
+
+pub fn defaults(allocator: std.mem.Allocator, database: *sqlite.Database) !Defaults {
+    var statement = try database.prepare("SELECT model_id, route_id FROM agent_messaging_defaults WHERE singleton = 1");
+    defer statement.deinit();
+    if (try statement.step() != .row) return .{
+        .allocator = allocator,
+        .model_id = try allocator.dupe(u8, ""),
+        .route_id = try allocator.dupe(u8, ""),
+    };
+    return .{
+        .allocator = allocator,
+        .model_id = try allocator.dupe(u8, statement.columnText(0) orelse ""),
+        .route_id = try allocator.dupe(u8, statement.columnText(1) orelse ""),
+    };
+}
+
+pub fn setDefaults(database: *sqlite.Database, model_id: []const u8, route_id: []const u8) !void {
+    if (model_id.len == 0 or model_id.len > 1024 or route_id.len == 0 or route_id.len > 1024) return error.MessagingModelRequired;
+    var statement = try database.prepare("INSERT INTO agent_messaging_defaults (singleton, model_id, route_id) VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET model_id = excluded.model_id, route_id = excluded.route_id, updated_at = CURRENT_TIMESTAMP");
+    defer statement.deinit();
+    try statement.bindText(1, model_id);
+    try statement.bindText(2, route_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn defaultsPayload(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
+    var configured = try defaults(allocator, database);
+    defer configured.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"modelId\":");
+    try std.json.Stringify.value(configured.model_id, .{}, &output.writer);
+    try output.writer.writeAll(",\"modelRouteId\":");
+    try std.json.Stringify.value(configured.route_id, .{}, &output.writer);
+    try output.writer.writeByte('}');
+    return output.toOwnedSlice();
 }
 
 pub fn allowed(database: *sqlite.Database, provider: []const u8, account_id: []const u8, external_user_id: []const u8) !bool {

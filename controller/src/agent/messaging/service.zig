@@ -35,14 +35,10 @@ const BotAccountList = struct {
 const BotConfiguration = struct {
     allocator: std.mem.Allocator,
     token: []u8,
-    model_id: []u8,
-    model_route_id: []u8,
     public_key: ?[]u8,
 
     fn deinit(configuration: *BotConfiguration) void {
         configuration.allocator.free(configuration.token);
-        configuration.allocator.free(configuration.model_id);
-        configuration.allocator.free(configuration.model_route_id);
         if (configuration.public_key) |value| configuration.allocator.free(value);
         configuration.* = undefined;
     }
@@ -106,6 +102,24 @@ pub const Manager = struct {
         try database.lock(manager.io);
         defer database.unlock(manager.io);
         return repository.accessPayload(manager.allocator, database);
+    }
+
+    pub fn defaultsPayload(manager: *Manager, database: *sqlite.Database) ![]u8 {
+        try database.lock(manager.io);
+        defer database.unlock(manager.io);
+        return repository.defaultsPayload(manager.allocator, database);
+    }
+
+    pub fn updateDefaultsPayload(manager: *Manager, database: *sqlite.Database, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidMessagingDefaults;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidMessagingDefaults;
+        const model_id = stringField(parsed.value.object, "modelId") orelse return error.MessagingModelRequired;
+        const route_id = stringField(parsed.value.object, "modelRouteId") orelse return error.MessagingModelRequired;
+        try database.lock(manager.io);
+        defer database.unlock(manager.io);
+        try repository.setDefaults(database, model_id, route_id);
+        return repository.defaultsPayload(manager.allocator, database);
     }
 
     pub fn approvePayload(manager: *Manager, database: *sqlite.Database, document: []const u8) ![]u8 {
@@ -220,8 +234,13 @@ pub const Manager = struct {
     }
 
     fn dispatch(manager: *Manager, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, message: *const repository.Message) !void {
-        var bot = try manager.configuration(message.account_id, message.provider);
-        defer bot.deinit();
+        var defaults = blk: {
+            try database.lock(manager.io);
+            defer database.unlock(manager.io);
+            break :blk try repository.defaults(manager.allocator, database);
+        };
+        defer defaults.deinit();
+        if (defaults.model_id.len == 0 or defaults.route_id.len == 0) return error.MessagingModelRequired;
         const session_id = try std.fmt.allocPrint(manager.allocator, "message:{s}:{s}:{s}", .{ message.provider, message.account_id, message.external_user_id });
         defer manager.allocator.free(session_id);
         var turn: Io.Writer.Allocating = .init(manager.allocator);
@@ -229,9 +248,9 @@ pub const Manager = struct {
         try turn.writer.writeAll("{\"sessionId\":");
         try std.json.Stringify.value(session_id, .{}, &turn.writer);
         try turn.writer.writeAll(",\"kind\":\"chat\",\"modelId\":");
-        try std.json.Stringify.value(bot.model_id, .{}, &turn.writer);
+        try std.json.Stringify.value(defaults.model_id, .{}, &turn.writer);
         try turn.writer.writeAll(",\"modelRouteId\":");
-        try std.json.Stringify.value(bot.model_route_id, .{}, &turn.writer);
+        try std.json.Stringify.value(defaults.route_id, .{}, &turn.writer);
         try turn.writer.writeAll(",\"message\":");
         try std.json.Stringify.value(message.prompt, .{}, &turn.writer);
         try turn.writer.writeAll(",\"toolAccess\":\"read\",\"browserToolEnabled\":true,\"mode\":\"prompt\"}");
@@ -297,13 +316,9 @@ pub const Manager = struct {
         defer parsed_configuration.deinit();
         if (parsed_secret.value != .object or parsed_configuration.value != .object) return error.InvalidMessagingConfiguration;
         const token = stringField(parsed_secret.value.object, "token") orelse return error.InvalidMessagingCredential;
-        const model_id = stringField(parsed_configuration.value.object, "modelId") orelse return error.InvalidMessagingConfiguration;
-        const model_route_id = stringField(parsed_configuration.value.object, "modelRouteId") orelse model_id;
         return .{
             .allocator = manager.allocator,
             .token = try manager.allocator.dupe(u8, token),
-            .model_id = try manager.allocator.dupe(u8, model_id),
-            .model_route_id = try manager.allocator.dupe(u8, model_route_id),
             .public_key = if (stringField(parsed_configuration.value.object, "publicKey")) |value| try manager.allocator.dupe(u8, value) else null,
         };
     }

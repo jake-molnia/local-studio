@@ -355,6 +355,18 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/messaging/defaults")) {
+        const document = if (request.head.method == .PUT) try readBoundedJsonBody(allocator, request) else null;
+        defer if (document) |value| allocator.free(value);
+        const response = if (request.head.method == .PUT)
+            messaging.updateDefaultsPayload(database, document orelse return false)
+        else
+            messaging.defaultsPayload(database);
+        const payload = response catch |failure| return respondMessagingFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/models")) {
         if (request.head.method == .POST) {
             const document = try readBoundedAgentBody(allocator, request) orelse return false;
@@ -2507,7 +2519,7 @@ fn respondGoogleFailure(request: *http.Server.Request, failure: anyerror) !bool 
 
 fn respondCodeStorageFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
-        error.InvalidCodeStorageAccountPayload, error.InvalidCredentialStorePayload, error.InvalidSandboxAccountPayload, error.InvalidMessagingAccountPayload, error.SecretProviderRequired, error.SandboxProviderRequired, error.SandboxCredentialRequired, error.SandboxAccountRequired, error.MessagingProviderRequired, error.MessagingCredentialRequired, error.MessagingModelRequired, error.CodeStorageOrganizationRequired, error.CodeStoragePrivateKeyRequired, error.InvalidCodeStorageOrganization, error.InvalidCodeStoragePrivateKey, error.InvalidSecretProvider, error.CodeStorageAccountRequired => .bad_request,
+        error.InvalidCodeStorageAccountPayload, error.InvalidCredentialStorePayload, error.InvalidSandboxAccountPayload, error.InvalidMessagingAccountPayload, error.SecretProviderRequired, error.SandboxProviderRequired, error.SandboxCredentialRequired, error.SandboxAccountRequired, error.MessagingProviderRequired, error.MessagingCredentialRequired, error.MessagingModelRequired, error.DiscordApplicationIdRequired, error.DiscordPublicKeyRequired, error.CodeStorageOrganizationRequired, error.CodeStoragePrivateKeyRequired, error.InvalidCodeStorageOrganization, error.InvalidCodeStoragePrivateKey, error.InvalidSecretProvider, error.CodeStorageAccountRequired => .bad_request,
         error.CodeStorageAccountNotFound, error.SandboxAccountNotFound, error.MessagingAccountNotFound => .not_found,
         error.SecretSpecUnavailable, error.SecretStoreWriteFailed, error.SecretStoreReadFailed, error.SecretStoreDeleteFailed => .service_unavailable,
         error.ConnectorNodeRequired => .conflict,
@@ -2520,13 +2532,15 @@ fn respondCodeStorageFailure(request: *http.Server.Request, failure: anyerror) !
         error.SecretProviderRequired => "Choose a SecretSpec credential store",
         error.InvalidSandboxAccountPayload => "Invalid sandbox account request",
         error.InvalidMessagingAccountPayload => "Invalid messaging account request",
-        error.SandboxProviderRequired => "Choose Modal or Daytona",
+        error.SandboxProviderRequired => "Choose Daytona",
         error.SandboxCredentialRequired => "Enter the credentials required by this sandbox provider",
         error.SandboxAccountRequired => "Choose a sandbox account",
         error.SandboxAccountNotFound => "Sandbox account not found",
         error.MessagingProviderRequired => "Choose Telegram or Discord",
         error.MessagingCredentialRequired => "Enter the bot token",
         error.MessagingModelRequired => "Choose the Chat model used for messages",
+        error.DiscordApplicationIdRequired => "Enter the Discord application ID",
+        error.DiscordPublicKeyRequired => "Enter the Discord interaction public key",
         error.MessagingAccountNotFound => "Messaging account not found",
         error.DiscordCommandRegistrationFailed => "Discord rejected the bot token or slash command registration",
         error.CodeStorageOrganizationRequired, error.InvalidCodeStorageOrganization => "Enter the lowercase Code.Storage organization identifier",
@@ -2553,7 +2567,7 @@ fn respondMessagingFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.PairingNotFound => .not_found,
         error.PairingLocked => .locked,
         error.PairingExpired, error.PairingCodeInvalid => .forbidden,
-        error.InvalidPairingPayload, error.PairingIdRequired, error.PairingCodeRequired, error.InvalidDiscordInteraction, error.DiscordPublicKeyRequired => .bad_request,
+        error.InvalidPairingPayload, error.InvalidMessagingDefaults, error.MessagingModelRequired, error.PairingIdRequired, error.PairingCodeRequired, error.InvalidDiscordInteraction, error.DiscordPublicKeyRequired => .bad_request,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
@@ -2563,6 +2577,8 @@ fn respondMessagingFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.PairingExpired => "Pairing request expired",
         error.PairingCodeInvalid => "Pairing code is invalid",
         error.InvalidPairingPayload => "Invalid pairing approval request",
+        error.InvalidMessagingDefaults => "Invalid messaging defaults",
+        error.MessagingModelRequired => "Choose a messaging model in Settings",
         error.PairingIdRequired => "pairingId is required",
         error.PairingCodeRequired => "code is required",
         error.InvalidDiscordInteraction => "Invalid Discord interaction",
