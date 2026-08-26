@@ -20,6 +20,7 @@ import { collectLeaves } from "@/features/agent/workspace/layout";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 import type { AgentHarness } from "@/features/agent/runtime/types";
 import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
+import { openWorkbenchResource } from "@/features/workbench/controller-state";
 
 export type WorkspacePaneRenderContext = {
   paneId: PaneId;
@@ -262,9 +263,17 @@ const WorkspacePane = memo(function WorkspacePane({
         onUpdateSession={handles.updateSession}
         onRenameSession={(tabId, title) => handles.renameTab(view.paneId, tabId, title)}
         onClose={view.canClose ? () => handles.closePane(view.paneId) : undefined}
-        onForkSession={() => handles.splitTabIntoNewPane(view.paneId, view.pane.sessionId)}
         terminalOwner={chatWorkspace ? null : terminalOwnerFor(view.project, view.session)}
-        onOpenTerminal={chatWorkspace ? undefined : () => tools.setComputerTab("terminal")}
+        onOpenTerminal={
+          chatWorkspace
+            ? undefined
+            : () =>
+                openWorkbenchResource({
+                  kind: "terminal",
+                  resourceId: crypto.randomUUID(),
+                  title: "Terminal",
+                })
+        }
         rightPanelOpen={tools.computer.open}
         onToggleRightPanel={tools.toggleComputerOpen}
         onRegisterHandle={(handle) => handles.registerPaneHandle(view.paneId, handle)}

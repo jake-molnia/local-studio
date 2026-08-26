@@ -55,13 +55,12 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
-function controllerTaskId(
-  taskIds: ReadonlySet<string>,
+function taskIdentity(
   focusedSession: { id: string; threadId: string | null } | null | undefined,
   requestedSessionId: string | null,
 ): string | null {
-  for (const candidate of [focusedSession?.threadId, focusedSession?.id, requestedSessionId]) {
-    if (candidate && taskIds.has(candidate)) return candidate;
+  for (const candidate of [focusedSession?.id, requestedSessionId]) {
+    if (candidate) return candidate;
   }
   return null;
 }
@@ -120,8 +119,7 @@ function ProjectWorkbenchTabStrip() {
   const draggedTabRef = useRef<string | null>(null);
   const tabElementsRef = useRef(new Map<string, HTMLButtonElement>());
   const projectNames = new Map(projects.projects.map((project) => [project.id, project.name]));
-  const taskIds = new Set(projection.tasks.map((task) => task.id));
-  const taskId = controllerTaskId(taskIds, focusedSession, requestedSessionId);
+  const taskId = taskIdentity(focusedSession, requestedSessionId);
   const navigationTask = focusedSession ? taskTab(focusedSession) : emptyTaskTab(currentProjectId);
   const taskState = taskId ? projection.tasks.find((task) => task.id === taskId) : undefined;
   const controllerWorkbench =
@@ -135,16 +133,50 @@ function ProjectWorkbenchTabStrip() {
   const activeScope = navigationTask;
   const projectName = projectNames.get(activeScope.projectId ?? "workspace") ?? "Workspace";
   const threadTitle = focusedSession?.title || taskState?.title || activeScope.groupTitle;
+  const activeControllerTab = controllerTabs.find((tab) => tab.id === activeTabId);
 
   useMountSubscription(() => {
-    if (!taskId || projection.selectedTaskId === taskId) return;
+    if (!taskId || !focusedSession) return;
+    if (!taskState) {
+      void Effect.runPromise(
+        dispatchWorkbenchCommand({
+          kind: "ensure_task",
+          taskId,
+          ...(currentProjectId ? { projectId: currentProjectId } : {}),
+          title: focusedSession.title.trim() || "New task",
+        }),
+      );
+      return;
+    }
+    if (projection.selectedTaskId === taskId) return;
     void Effect.runPromise(
       dispatchWorkbenchCommand({
         kind: "select_task",
         taskId,
       }),
     );
-  }, [navigationKey, projection.selectedTaskId, taskId]);
+  }, [
+    currentProjectId,
+    focusedSession?.id,
+    navigationKey,
+    projection.selectedTaskId,
+    taskId,
+    taskState,
+  ]);
+
+  useMountSubscription(() => {
+    const mainChat = activeControllerTab?.kind === "chat" && !activeControllerTab.closable;
+    const tool = activeControllerTab && !mainChat ? KIND_TOOL[activeControllerTab.kind] : undefined;
+    if (!tool) {
+      tools.setComputerOpen(false);
+      return;
+    }
+    if (activeControllerTab?.kind === "file") {
+      tools.showFileResource(activeControllerTab.resourceId);
+      return;
+    }
+    tools.setComputerTab(tool);
+  }, [activeControllerTab?.id, activeControllerTab?.kind, activeControllerTab?.closable, taskId]);
 
   const activateTab = (tab: RenderedWorkbenchTab, origin: "pointer" | "keyboard" = "pointer") => {
     if (origin === "pointer") clearKeyboardTabFocus();
@@ -160,7 +192,6 @@ function ProjectWorkbenchTabStrip() {
       );
     }
     if (tab.kind === "task") {
-      tools.setComputerOpen(false);
       const session = sessionForTab(tab, openSessions);
       if (session && !session.focused) {
         workspaceCommands().focusSession(session.paneId, session.id, { replaceWorkspace: true });
@@ -168,48 +199,51 @@ function ProjectWorkbenchTabStrip() {
       if (tab.href && (!session || !session.focused)) router.push(hrefWithOpenNonce(tab.href));
       return;
     }
-    if (!tab.tool) return;
+    if (!tab.tool || !taskId || !controllerTab) return;
     const session = sessionForTab(tab, openSessions);
     if (session && !session.focused) {
       workspaceCommands().focusSession(session.paneId, session.id, { replaceWorkspace: true });
       if (tab.href) router.replace(hrefWithOpenNonce(tab.href));
     }
-    tools.setComputerTab(tab.tool);
   };
 
   const openTool = (tool: ComputerTab) => {
-    if (!taskId) {
-      tools.setComputerTab(tool);
-      return;
-    }
+    if (!taskId || !focusedSession) return;
     const kind = TOOL_KIND[tool];
     const unique = tool === "terminal" || tool === "side-chat";
     const resourceId = unique ? crypto.randomUUID() : tool;
     const tabId = `${kind}:${taskId}:${resourceId}`;
     void Effect.runPromise(
-      dispatchWorkbenchCommand({
-        kind: "open_tab",
-        taskId,
-        tabId,
-        resourceKind: kind,
-        resourceId,
-        title:
-          tool === "side-chat"
-            ? "Side chat"
-            : tool === "files"
-              ? "Files"
-              : tool[0]!.toUpperCase() + tool.slice(1),
-        closable: true,
+      Effect.gen(function* () {
+        if (!taskState) {
+          yield* dispatchWorkbenchCommand({
+            kind: "ensure_task",
+            taskId,
+            ...(currentProjectId ? { projectId: currentProjectId } : {}),
+            title: focusedSession.title.trim() || "New task",
+          });
+        }
+        yield* dispatchWorkbenchCommand({
+          kind: "open_tab",
+          taskId,
+          tabId,
+          resourceKind: kind,
+          resourceId,
+          title:
+            tool === "side-chat"
+              ? "Side chat"
+              : tool === "files"
+                ? "Files"
+                : tool[0]!.toUpperCase() + tool.slice(1),
+          closable: true,
+        });
       }),
     );
-    tools.setComputerTab(tool);
   };
 
   const closeTab = (tabId: string) => {
     const controllerTab = controllerTabsById.get(tabId);
     if (!taskId || !controllerTab?.closable) return;
-    const tool = KIND_TOOL[controllerTab.kind];
-    if (tool) tools.closeComputerTab(tool);
     void Effect.runPromise(
       dispatchWorkbenchCommand({
         kind: "close_tab",

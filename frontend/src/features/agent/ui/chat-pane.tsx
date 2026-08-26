@@ -137,7 +137,6 @@ function ChatTranscript({
   setStickToBottom,
   running,
   cwd,
-  onForkSession,
   loadEarlierHistory,
 }: {
   composerOnly: boolean;
@@ -148,7 +147,6 @@ function ChatTranscript({
   setStickToBottom: (value: boolean) => void;
   running: boolean;
   cwd: string;
-  onForkSession?: () => void;
   loadEarlierHistory: () => Promise<void>;
 }) {
   const viewKey = activeTab?.piSessionId ?? activeTab?.id ?? null;
@@ -168,7 +166,6 @@ function ChatTranscript({
           cwd={cwd || null}
           viewKey={viewKey}
           viewAlias={viewAlias}
-          onForkSession={onForkSession}
           hasEarlier={activeTab?.historyCursor != null}
           onLoadEarlier={loadEarlierHistory}
         />
@@ -205,7 +202,6 @@ type Props = {
   onUpdateSession: UpdateSession;
   onRenameSession: (tabId: string, title: string) => void;
   onClose?: () => void;
-  onForkSession?: () => void;
   onOpenTerminal?: () => void;
   terminalOwner?: TerminalOwner | null;
   rightPanelOpen: boolean;
@@ -258,7 +254,6 @@ export function ChatPane({
   onUpdateSession,
   onRenameSession,
   onClose,
-  onForkSession,
   onOpenTerminal,
   terminalOwner = null,
   rightPanelOpen,
@@ -509,7 +504,6 @@ export function ChatPane({
           // rather than on whichever tab the page happens to open with.
           openIntegrations: () => router.push("/customize#connectors"),
           ...(openTerminalAction ? { openTerminal: openTerminalAction } : {}),
-          ...(onForkSession ? { forkSession: onForkSession } : {}),
           ...(canExport ? { exportSession } : {}),
           goal: goalAction,
           enterGoalMode: () => setGoalModeOn(true),
@@ -528,7 +522,6 @@ export function ChatPane({
       compactSession,
       goalAction,
       exportSession,
-      onForkSession,
       onToggleBrowserTool,
       openTerminalAction,
       router,
@@ -672,7 +665,6 @@ export function ChatPane({
         setStickToBottom={setStickToBottom}
         running={Boolean(running)}
         cwd={workspaceCwd}
-        onForkSession={onForkSession}
         loadEarlierHistory={loadEarlierHistory}
       />
       <div className={terminalView && !chatWorkspace ? "hidden" : "contents"}>

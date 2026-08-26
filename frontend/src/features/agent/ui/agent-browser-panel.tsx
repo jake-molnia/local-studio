@@ -21,6 +21,7 @@ import { ComputerTabPanel, type SideChatTabsUpdater } from "@/features/agent/ui/
 import { PersistentTerminals } from "@/features/agent/ui/persistent-terminals";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import { useWorkbenchProjection } from "@/features/workbench/controller-state";
 
 type AgentBrowserPanelHandles = Pick<
   WorkspaceHandles,
@@ -42,10 +43,12 @@ function createSideChatSession(
   activeProject: Project | null,
   focusedSession: Session | null,
   activeModelId: string,
+  resourceId?: string,
 ): Session {
   const tab = makeFreshTab();
   return {
     ...tab,
+    ...(resourceId ? { id: resourceId } : {}),
     title: "Side chat",
     cwd: focusedSession?.cwd ?? activeProject?.path,
     projectId: focusedSession?.projectId ?? activeProject?.id,
@@ -81,19 +84,25 @@ export function AgentBrowserPanel({
   modelsLoading,
 }: AgentBrowserPanelProps) {
   const tools = useTools();
+  const projection = useWorkbenchProjection();
   const { closeComputerTab, registerComputerTabCloseHandler } = tools;
   const workspaceToolsEnabled =
     activeProject?.id !== "chats" &&
     focusedSession?.projectId !== "chats" &&
     focusedSession?.executionKind !== "chat";
+  const activeWorkbenchTab = projection.workbench?.tabs.find(
+    (tab) => tab.id === projection.workbench?.activeTabId,
+  );
+  const sideChatResource =
+    activeWorkbenchTab?.kind === "chat" && activeWorkbenchTab.closable
+      ? activeWorkbenchTab.resourceId
+      : undefined;
   const sideChatScope =
-    focusedSession?.piSessionId ??
-    focusedSession?.id ??
-    `project:${activeProject?.id ?? "workspace"}`;
+    sideChatResource ?? focusedSession?.id ?? `project:${activeProject?.id ?? "workspace"}`;
   const [sideChatSeeds, setSideChatSeeds] = useState<Record<string, Session>>({});
   const fallbackSideChatSeed = useMemo(
-    () => createSideChatSession(activeProject, focusedSession, activeModelId),
-    [activeModelId, activeProject, focusedSession, sideChatScope],
+    () => createSideChatSession(activeProject, focusedSession, activeModelId, sideChatResource),
+    [activeModelId, activeProject, focusedSession, sideChatResource],
   );
   const sideChatSeed = sideChatSeeds[sideChatScope] ?? fallbackSideChatSeed;
   useMountSubscription(() => {
@@ -104,8 +113,15 @@ export function AgentBrowserPanel({
   const sideChatSession =
     sessions.find((session) => session.id === sideChatSeed.id) ?? sideChatSeed;
   const terminalOwner = useMemo(
-    () => (workspaceToolsEnabled ? terminalOwnerFor(activeProject, focusedSession) : null),
-    [activeProject, focusedSession, workspaceToolsEnabled],
+    () =>
+      workspaceToolsEnabled
+        ? terminalOwnerFor(
+            activeProject,
+            focusedSession,
+            activeWorkbenchTab?.kind === "terminal" ? activeWorkbenchTab.resourceId : null,
+          )
+        : null,
+    [activeProject, activeWorkbenchTab, focusedSession, workspaceToolsEnabled],
   );
   const terminalState = usePersistentTerminalOwners(
     tools.computer.open && tools.computer.tab === "terminal",
@@ -159,9 +175,22 @@ export function AgentBrowserPanel({
     handles.removeDetachedSession(sideChatSeed.id);
     setSideChatSeeds((current) => ({
       ...current,
-      [sideChatScope]: createSideChatSession(activeProject, focusedSession, activeModelId),
+      [sideChatScope]: createSideChatSession(
+        activeProject,
+        focusedSession,
+        activeModelId,
+        sideChatResource,
+      ),
     }));
-  }, [activeModelId, activeProject, focusedSession, handles, sideChatScope, sideChatSeed.id]);
+  }, [
+    activeModelId,
+    activeProject,
+    focusedSession,
+    handles,
+    sideChatResource,
+    sideChatScope,
+    sideChatSeed.id,
+  ]);
   const closeSideChat = useCallback(() => closeComputerTab("side-chat"), [closeComputerTab]);
   const closeTerminalTab = useCallback(() => {
     for (const owner of visibleTerminalState.owners) closePersistedTerminalOwner(owner.mountKey);

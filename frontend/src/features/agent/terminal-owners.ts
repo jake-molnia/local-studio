@@ -33,9 +33,10 @@ export function mergeTerminalKeys(a: readonly string[], b: readonly string[]): s
 export function terminalOwnerFor(
   project: Project | null,
   session: Session | null,
+  resourceId?: string | null,
 ): TerminalOwner | null {
   if (session) {
-    const mountKey = `session:${session.id}`;
+    const mountKey = resourceId ? `session:${session.id}:${resourceId}` : `session:${session.id}`;
     return {
       mountKey,
       matchKeys: uniqueTerminalKeys([
@@ -51,7 +52,7 @@ export function terminalOwnerFor(
     };
   }
   if (!project) return null;
-  const mountKey = `project:${project.id}`;
+  const mountKey = resourceId ? `project:${project.id}:${resourceId}` : `project:${project.id}`;
   return {
     mountKey,
     matchKeys: [mountKey],

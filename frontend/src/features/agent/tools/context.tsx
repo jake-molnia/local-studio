@@ -39,14 +39,12 @@ import {
   uniqueComputerTabs,
   writeBrowserBackend,
   writeBrowserEnabled,
-  writeComputerTab,
-  writeComputerTabs,
   writeComputerWidth,
 } from "@/features/agent/tools/persistence";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import { openWorkbenchResource } from "@/features/workbench/controller-state";
 import {
   browserSessionView,
-  computerSessionView,
   patchSessionView,
   readSessionView,
   type SessionViewIdentity,
@@ -73,6 +71,7 @@ type ToolsActions = {
   setComputerWidth: (width: number) => void;
   setActiveComputerSession: (identity: SessionViewIdentity | null) => void;
   requestFileOpen: (path: string) => void;
+  showFileResource: (path: string) => void;
   requestContextAttach: (request: { label: string; path?: string; content: string }) => void;
   /**
    * Replace the entire selection for a session. Pass `null` to clear it (used
@@ -188,12 +187,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
   const updateComputer = useCallback<Dispatch<SetStateAction<ComputerState>>>((update) => {
     setComputer((current) => {
       const next = typeof update === "function" ? update(current) : update;
-      if (next === current) return current;
-      const identity = activeComputerSessionRef.current;
-      if (identity) {
-        patchSessionView(window.localStorage, identity, { computer: computerSessionView(next) });
-      }
-      return next;
+      return next === current ? current : next;
     });
   }, []);
   const updateBrowser = useCallback<Dispatch<SetStateAction<BrowserState>>>((update) => {
@@ -288,12 +282,10 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     (tab: ComputerTab) => {
       updateComputer((current) => {
         const tabs = uniqueComputerTabs([...current.tabs, tab]);
-        writeComputerTabs(tabs);
         return current.tab === tab && current.tabs === tabs
           ? current
           : { ...current, open: true, tab, tabs };
       });
-      writeComputerTab(tab);
       if (tab === "browser") {
         updateBrowser((current) => {
           if (current.enabled) return current;
@@ -313,8 +305,6 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     (tab: ComputerTab) => {
       updateComputer((current) => {
         const tabs = uniqueComputerTabs([...current.tabs, tab]);
-        writeComputerTabs(tabs);
-        writeComputerTab(tab);
         return current.tab === tab && current.tabs === tabs ? current : { ...current, tab, tabs };
       });
       if (tab === "browser") {
@@ -334,8 +324,6 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       updateComputer((current) => {
         const tabs = uniqueComputerTabs(current.tabs.filter((item) => item !== tab));
         const activeTab = current.tab === tab ? (tabs[tabs.length - 1] ?? "files") : current.tab;
-        writeComputerTabs(tabs);
-        writeComputerTab(activeTab);
         return { ...current, open: tabs.length ? current.open : false, tab: activeTab, tabs };
       });
     },
@@ -369,14 +357,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     const restored = identity ? readSessionView(window.localStorage, identity) : null;
     activeComputerSessionRef.current = identity;
     setActiveComputerSessionKey(identity?.key ?? null);
-    setComputer((current) => {
-      if (previous) {
-        patchSessionView(window.localStorage, previous, { computer: computerSessionView(current) });
-      }
-      return restored?.computer
-        ? { ...current, ...restored.computer }
-        : { ...current, open: false, tab: "files", tabs: [] };
-    });
+    setComputer((current) => ({ ...current, open: false, tab: "files", tabs: [] }));
     setBrowser((current) => {
       if (previous) {
         patchSessionView(window.localStorage, previous, { browser: browserSessionView(current) });
@@ -385,12 +366,11 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const requestFileOpen = useCallback(
+  const showFileResource = useCallback(
     (path: string) => {
       const clean = path.trim();
       if (!clean) return;
       updateComputer((current) => ({ ...current, open: true, tab: "files" }));
-      writeComputerTab("files");
       setFileOpenRequest((current) => ({
         id: (current?.id ?? 0) + 1,
         path: clean,
@@ -398,6 +378,16 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
     },
     [updateComputer],
   );
+
+  const requestFileOpen = useCallback((path: string) => {
+    const clean = path.trim();
+    if (!clean) return;
+    openWorkbenchResource({
+      kind: "file",
+      resourceId: clean,
+      title: clean.split("/").at(-1) || "File",
+    });
+  }, []);
 
   const requestContextAttach = useCallback(
     (request: { label: string; path?: string; content: string }) => {
@@ -480,6 +470,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       setComputerWidth,
       setActiveComputerSession,
       requestFileOpen,
+      showFileResource,
       requestContextAttach,
       setSelection,
       hydrateSelections,
@@ -500,6 +491,7 @@ export function ToolsProvider({ children }: { children: ReactNode }) {
       setComputerWidth,
       setActiveComputerSession,
       requestFileOpen,
+      showFileResource,
       requestContextAttach,
       setSelection,
       hydrateSelections,

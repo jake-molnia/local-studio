@@ -26,7 +26,6 @@ type TimelineProps = {
   messages: ChatMessage[];
   running: boolean;
   cwd: string | null;
-  onForkSession?: () => void;
   emptyPrompt?: boolean;
   stickToBottom?: boolean;
   onStickToBottomChange?: (value: boolean) => void;
@@ -43,30 +42,19 @@ const MemoMessage = memo(
     live,
     running,
     cwd,
-    onForkSession,
   }: {
     message: ChatMessage;
     live: boolean;
     running: boolean;
     cwd: string | null;
-    onForkSession?: () => void;
   }) {
-    return (
-      <MessageView
-        message={message}
-        live={live}
-        running={running}
-        cwd={cwd}
-        onForkSession={onForkSession}
-      />
-    );
+    return <MessageView message={message} live={live} running={running} cwd={cwd} />;
   },
   (prev, next) =>
     prev.message === next.message &&
     prev.live === next.live &&
     prev.running === next.running &&
-    prev.cwd === next.cwd &&
-    prev.onForkSession === next.onForkSession,
+    prev.cwd === next.cwd,
 );
 
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
@@ -95,7 +83,6 @@ export function Timeline({
   messages,
   running,
   cwd,
-  onForkSession,
   emptyPrompt = false,
   stickToBottom = true,
   onStickToBottomChange,
@@ -129,17 +116,11 @@ export function Timeline({
           data-timeline-message-id={message.id}
           className={`agent-thread-shell mx-auto ${isGrouped ? "pt-1.5" : "pt-3 sm:pt-4"} ${isLast ? "pb-3" : ""}`}
         >
-          <MemoMessage
-            message={message}
-            live={isLast && running}
-            running={running}
-            cwd={cwd}
-            onForkSession={onForkSession}
-          />
+          <MemoMessage message={message} live={isLast && running} running={running} cwd={cwd} />
         </div>
       );
     },
-    [cwd, onForkSession, running, visibleMessages],
+    [cwd, running, visibleMessages],
   );
 
   const listHeader = useMemo(
@@ -616,21 +597,11 @@ function MessageView({
   live = false,
   running = false,
   cwd = null,
-  onForkSession,
 }: {
   message: ChatMessage;
   live?: boolean;
   running?: boolean;
   cwd?: string | null;
-  onForkSession?: () => void;
 }) {
-  return (
-    <SessionPaneBlockRouter
-      message={message}
-      live={live}
-      running={running}
-      cwd={cwd}
-      onForkSession={onForkSession}
-    />
-  );
+  return <SessionPaneBlockRouter message={message} live={live} running={running} cwd={cwd} />;
 }

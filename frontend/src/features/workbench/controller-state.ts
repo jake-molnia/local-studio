@@ -8,6 +8,7 @@ import {
   WorkbenchProjectionSchema,
   type WorkbenchCommand,
   type WorkbenchProjection,
+  type WorkbenchResourceKind,
 } from "@local-studio/contracts/workbench";
 
 const initialProjection: WorkbenchProjection = {
@@ -119,6 +120,26 @@ export function setWorkbenchSidebar(input: {
     dispatchWorkbenchCommand({
       kind: "set_sidebar",
       ...input,
+    }),
+  );
+}
+
+export function openWorkbenchResource(input: {
+  kind: WorkbenchResourceKind;
+  resourceId: string;
+  title: string;
+}): void {
+  const taskId = projection.selectedTaskId;
+  if (!taskId) return;
+  void Effect.runPromise(
+    dispatchWorkbenchCommand({
+      kind: "open_tab",
+      taskId,
+      tabId: `${input.kind}:${taskId}:${input.resourceId}`,
+      resourceKind: input.kind,
+      resourceId: input.resourceId,
+      title: input.title,
+      closable: true,
     }),
   );
 }

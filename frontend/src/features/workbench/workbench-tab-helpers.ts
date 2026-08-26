@@ -41,7 +41,7 @@ export function resolveWorkbenchNavigation(
     : null;
   const wantsNewTask = searchParams.get("new") === "1";
   const focusedSession =
-    wantsNewTask || (requestedSessionId && !requestedSession)
+    requestedSessionId && !requestedSession
       ? null
       : (requestedSession ??
         openSessions.find((session) => session.focused) ??
