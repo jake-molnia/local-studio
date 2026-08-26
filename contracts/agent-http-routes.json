@@ -756,6 +756,12 @@
     },
     {
       "method": "POST",
+      "path": "/internal/harness/v1/fx-gateway",
+      "ownership": "worker",
+      "streaming": "always"
+    },
+    {
+      "method": "POST",
       "path": "/internal/harness/v1/abort",
       "ownership": "worker",
       "streaming": "never"

@@ -32,6 +32,7 @@ const provider_service = @import("../providers/service.zig");
 const provider_catalog = @import("../providers/catalog.zig");
 const provider_routing = @import("../providers/routing.zig");
 const provider_gateway = @import("../providers/gateway.zig");
+const anthropic_gateway = @import("../providers/anthropic_gateway.zig");
 const openai_protocol = @import("../providers/openai_protocol.zig");
 const head_providers = @import("../providers/head.zig");
 const codex_gateway = @import("../providers/codex_gateway.zig");
@@ -1189,6 +1190,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/internal/harness/v1/fx-gateway")) {
+        const model_id_value = request_tools.header(request, "ai-language-model-id") orelse return respondHarnessFailure(request, error.ModelIdRequired);
+        const model_id = try allocator.dupe(u8, model_id_value);
+        defer allocator.free(model_id);
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        harness.serveFxGateway(client, model_id, document, request) catch |failure| return respondHarnessFailure(request, failure);
+        return false;
+    }
     if (std.mem.eql(u8, route.path, "/internal/harness/v1/sessions")) {
         const response = try harness.sessionsPayload();
         defer allocator.free(response);
@@ -1692,6 +1702,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return try serveHeadInference(allocator, io, configuration, studio, head_provider_state, client, database, worker_pool, request);
     }
     if (mode == .head and std.mem.eql(u8, route.path, "/v1/responses")) {
+        return try serveHeadInference(allocator, io, configuration, studio, head_provider_state, client, database, worker_pool, request);
+    }
+    if (mode == .head and std.mem.eql(u8, route.path, "/v1/messages")) {
         return try serveHeadInference(allocator, io, configuration, studio, head_provider_state, client, database, worker_pool, request);
     }
     if (mode != .head and std.mem.eql(u8, route.path, "/v1/chat/completions")) {
@@ -2285,7 +2298,7 @@ fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool
     const status: http.Status = switch (failure) {
         error.RemoteHarnessRequired, error.HarnessNodeRequired, error.SessionNodeMismatch, error.SessionHarnessMismatch, error.SessionNotActive, error.ModelChangeRequiresNewSession, error.QueueMutationNotSupported, error.HarnessCommandRejected, error.HarnessDriverUnavailable => .conflict,
         error.SessionNotFound => .not_found,
-        error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidNativeSessionId, error.NativeSessionIdRequired, error.InvalidTranscriptCursor, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute => .bad_request,
+        error.InvalidTurnPayload, error.InvalidCompactPayload, error.InvalidExtensionUiPayload, error.InvalidSessionPayload, error.InvalidSessionId, error.InvalidNativeSessionId, error.NativeSessionIdRequired, error.InvalidTranscriptCursor, error.InvalidTurnMode, error.ModelIdRequired, error.MessageRequired, error.SessionIdRequired, error.RequestIdRequired, error.CwdMustBeAbsolute, error.HarnessModelUnsupported => .bad_request,
         error.FileNotFound, error.AssignedHarnessUnavailable, error.HarnessNodeUnavailable, error.HarnessUnavailable => .service_unavailable,
         else => .internal_server_error,
     };
@@ -2297,6 +2310,7 @@ fn respondHarnessFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.SessionHarnessMismatch => "The session is pinned to a different harness",
         error.HarnessDriverUnavailable => "The requested harness driver is not available on this node",
         error.HarnessUnavailable => "The requested harness installation is unavailable or unsupported",
+        error.HarnessModelUnsupported => "Claude Code currently requires an OpenRouter model",
         error.SessionNotActive => "Runtime session is no longer active",
         error.SessionNotFound => "Runtime session not found",
         error.ModelChangeRequiresNewSession => "Changing models requires a new harness session",
@@ -3029,6 +3043,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
 
     const codex_prefix = "openai-codex/";
     if (std.mem.startsWith(u8, model_id, codex_prefix)) {
+        if (std.mem.startsWith(u8, captured.target, "/v1/messages")) return respondDownloadError(request, .bad_request, "Anthropic Messages requires an OpenRouter model");
         const upstream_model = model_id[codex_prefix.len..];
         if (!try head_providers.isCodexModel(allocator, upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Head");
@@ -3048,6 +3063,10 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         const rewritten = try provider_routing.rewriteModel(allocator, &parsed, upstream_model);
         defer allocator.free(rewritten);
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
+        if (std.mem.startsWith(u8, captured.target, "/v1/messages")) {
+            anthropic_gateway.serveOpenRouter(allocator, client, credential.access, rewritten, requested_stream, request) catch return false;
+            return false;
+        }
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
         const sample = provider_gateway.serve(allocator, client, "https://openrouter.ai/api", credential.access, public_protocol, .chat_completions, rewritten, requested_stream, request) catch return false;
         persistInferenceUsage(io, database, model_id, "openrouter", sample, requested_stream);
@@ -3055,6 +3074,7 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
     }
     const cursor_prefix = "cursor/";
     if (std.mem.startsWith(u8, model_id, cursor_prefix)) {
+        if (std.mem.startsWith(u8, captured.target, "/v1/messages")) return respondDownloadError(request, .bad_request, "Anthropic Messages requires an OpenRouter model");
         const upstream_model = model_id[cursor_prefix.len..];
         if (!try head_providers.isProviderModel(allocator, "cursor", upstream_model)) return try respondModelNotRunning(allocator, request, null, model_id);
         if (!cursor_gateway.configured(allocator, io, configuration)) return respondDownloadError(request, .unauthorized, "Cursor is not connected on this Head");

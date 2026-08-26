@@ -10,7 +10,7 @@ pub const Route = struct {
     streaming: Streaming,
 };
 
-pub const route_count: usize = 261;
+pub const route_count: usize = 262;
 
 pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/docs", .ownership = .shared, .streaming = .never },
@@ -98,7 +98,7 @@ pub const routes = [_]Route{
     .{ .method = .POST, .path = "/v1/chat/completions", .ownership = .head, .streaming = .conditional },
     .{ .method = .POST, .path = "/v1/count-tokens", .ownership = .proxied, .streaming = .never },
     .{ .method = .GET, .path = "/v1/huggingface/models", .ownership = .proxied, .streaming = .never },
-    .{ .method = .POST, .path = "/v1/messages", .ownership = .proxied, .streaming = .conditional },
+    .{ .method = .POST, .path = "/v1/messages", .ownership = .head, .streaming = .conditional },
     .{ .method = .GET, .path = "/v1/metrics/vllm", .ownership = .proxied, .streaming = .never },
     .{ .method = .GET, .path = "/v1/models", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/v1/models/:modelId", .ownership = .head, .streaming = .never },
@@ -265,6 +265,7 @@ pub const routes = [_]Route{
     .{ .method = .POST, .path = "/internal/node/v1/browser/viewport", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/node/v1/browser/:verb", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/harness/v1/turn", .ownership = .worker, .streaming = .never },
+    .{ .method = .POST, .path = "/internal/harness/v1/fx-gateway", .ownership = .worker, .streaming = .always },
     .{ .method = .POST, .path = "/internal/harness/v1/abort", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/harness/v1/compact", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/harness/v1/extension-ui", .ownership = .worker, .streaming = .never },
