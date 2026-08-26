@@ -2,6 +2,9 @@
 
 let
   bunVersion = "1.3.14";
+  opencodeVersion = "0.0.0-beta-18286";
+  claudeVersion = "2.1.232";
+  fxVersion = "0.0.6";
   bunSources = {
     aarch64-darwin = pkgs.fetchurl {
       url = "https://github.com/oven-sh/bun/releases/download/bun-v${bunVersion}/bun-darwin-aarch64.zip";
@@ -17,6 +20,93 @@ let
     };
   };
   system = pkgs.stdenv.hostPlatform.system;
+  opencodeSources = {
+    aarch64-darwin = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@opencode-ai/cli-darwin-arm64/-/cli-darwin-arm64-${opencodeVersion}.tgz";
+      hash = "sha256-I2rbaFBcoFdwpwC6118Tw9ri+EWi8J5QfToAEf73qLs=";
+    };
+    x86_64-darwin = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@opencode-ai/cli-darwin-x64/-/cli-darwin-x64-${opencodeVersion}.tgz";
+      hash = "sha256-CrQgWFZtwTmdNXYn5hi7UliGyTFBZt30rBsMecBfqxI=";
+    };
+    aarch64-linux = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@opencode-ai/cli-linux-arm64/-/cli-linux-arm64-${opencodeVersion}.tgz";
+      hash = "sha256-5hl2b0xxO5DI770SrfBo64JQjLKtxLIP62UqYNnATfk=";
+    };
+    x86_64-linux = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@opencode-ai/cli-linux-x64/-/cli-linux-x64-${opencodeVersion}.tgz";
+      hash = "sha256-XlyYHmBbuowUWpXy3GqBno9jOnHpvDw40cm5hsWSjVU=";
+    };
+  };
+  claudeSources = {
+    aarch64-darwin = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/-/claude-code-darwin-arm64-${claudeVersion}.tgz";
+      hash = "sha256-WknorImLj3R4gpjxyP9cXKz3K+kVYTtBdxG4H4rdoo8=";
+    };
+    x86_64-darwin = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-x64/-/claude-code-darwin-x64-${claudeVersion}.tgz";
+      hash = "sha256-FQKcyKBeKPRDqT26SyyABMWTR549wzTID+8ZpJdDzq8=";
+    };
+    aarch64-linux = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-${claudeVersion}.tgz";
+      hash = "sha256-lzIhif88iE6G0ropgdIcmHTKeCYai/9lpO9vZz75j6Y=";
+    };
+    x86_64-linux = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-${claudeVersion}.tgz";
+      hash = "sha256-yw6vqRnfPPxP8d4q4+J/8hovEUmlqtCPeFDECk/UD44=";
+    };
+  };
+  fxSources = {
+    aarch64-darwin = pkgs.fetchurl {
+      url = "https://releases.fx.sh/v${fxVersion}/fx-macos-aarch64.tar.gz";
+      hash = "sha256-n8GNXDQpraslTMK2JslnnoZr4mSW4J1764dU9sHFhsk=";
+    };
+    x86_64-darwin = pkgs.fetchurl {
+      url = "https://releases.fx.sh/v${fxVersion}/fx-macos-x86_64.tar.gz";
+      hash = "sha256-7vDya/QZ0w4Hv8TDROU3TdFw0McR+ZZcsLCK/HTk4/w=";
+    };
+    aarch64-linux = pkgs.fetchurl {
+      url = "https://releases.fx.sh/v${fxVersion}/fx-linux-aarch64.tar.gz";
+      hash = "sha256-Df1TIkxezt5gG7jOZJ+E+rbbBaOa+81bOeYJGDP2xNc=";
+    };
+    x86_64-linux = pkgs.fetchurl {
+      url = "https://releases.fx.sh/v${fxVersion}/fx-linux-x86_64.tar.gz";
+      hash = "sha256-Eg+pkt+Mr5guF8qenjlmx5Cw0VBIBRHq9ROS5moPC4Q=";
+    };
+  };
+  opencode = pkgs.stdenvNoCC.mkDerivation {
+    pname = "opencode2";
+    version = opencodeVersion;
+    src = opencodeSources.${system} or (throw "OpenCode ${opencodeVersion} is unavailable for ${system}");
+    sourceRoot = "package";
+    installPhase = ''
+      runHook preInstall
+      install -Dm755 bin/opencode2 $out/bin/opencode2
+      runHook postInstall
+    '';
+  };
+  claude = pkgs.stdenvNoCC.mkDerivation {
+    pname = "claude-code";
+    version = claudeVersion;
+    src = claudeSources.${system} or (throw "Claude Code ${claudeVersion} is unavailable for ${system}");
+    sourceRoot = "package";
+    installPhase = ''
+      runHook preInstall
+      install -Dm755 claude $out/bin/claude
+      runHook postInstall
+    '';
+  };
+  fx = pkgs.stdenvNoCC.mkDerivation {
+    pname = "fx-agent";
+    version = fxVersion;
+    src = fxSources.${system} or (throw "FX ${fxVersion} is unavailable for ${system}");
+    sourceRoot = ".";
+    installPhase = ''
+      runHook preInstall
+      install -Dm755 fx $out/bin/fx
+      runHook postInstall
+    '';
+  };
   controllerPort = 8082;
   localNodePort = 8083;
   frontendPort = 3100;
@@ -63,8 +153,11 @@ let
 in
 {
   packages = [
+    claude
     pkgs.curl
     pkgs.git
+    opencode
+    fx
   ];
 
   languages.javascript = {
@@ -159,9 +252,12 @@ in
     after = [ "devenv:processes:head-node@ready" ];
     env = {
       LOCAL_STUDIO_CONTROLLER_MODE = "worker";
+      LOCAL_STUDIO_CLAUDE_BIN = "${claude}/bin/claude";
       LOCAL_STUDIO_DATA_DIR = localNodeDataDir;
+      LOCAL_STUDIO_FX_BIN = "${fx}/bin/fx";
       LOCAL_STUDIO_FRONTEND_BASE = frontendUrl;
       LOCAL_STUDIO_MODELS_DIR = modelsDir;
+      LOCAL_STUDIO_OPENCODE_BIN = "${opencode}/bin/opencode2";
       LOCAL_STUDIO_PORT = toString localNodePort;
     };
     restart.on = "never";
