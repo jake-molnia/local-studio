@@ -14,6 +14,20 @@ export type Project = {
   exists: boolean;
   hasGit: boolean;
   branch: string | null;
+  accountId?: string;
+  organization?: string;
+  repository?: string;
+  repositoryUrl?: string;
+  defaultBranch: string;
+};
+
+export type RepositoryOption = {
+  accountId: string;
+  accountLabel: string;
+  organization: string;
+  name: string;
+  url: string;
+  defaultBranch: string;
 };
 
 export type GitSummary = {

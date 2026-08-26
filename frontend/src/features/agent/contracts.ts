@@ -34,7 +34,6 @@ import {
 
 export type GitRef = { name: string; current: boolean; remote: boolean };
 export type GitBranch = { name: string; current: boolean; remote: boolean };
-export type GitWorktree = { path: string; branch: string | null; current: boolean };
 export type GitStatusEntry = { code: string; path: string };
 
 export type GitState = {

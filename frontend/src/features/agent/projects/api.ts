@@ -1,6 +1,30 @@
 import { safeJson } from "@/features/agent/safe-json";
-import type { GitAction, GitBranch, GitState, GitWorktree } from "@/features/agent/contracts";
-import type { GitSummary, Project } from "@/features/agent/projects/types";
+import { Schema } from "effect";
+import type { GitAction, GitBranch, GitState } from "@/features/agent/contracts";
+import type { GitSummary, Project, RepositoryOption } from "@/features/agent/projects/types";
+
+const RepositoryOptionSchema = Schema.Struct({
+  accountId: Schema.String,
+  accountLabel: Schema.String,
+  organization: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  defaultBranch: Schema.String,
+});
+
+const RepositoriesPayloadSchema = Schema.Struct({
+  repositories: Schema.Array(RepositoryOptionSchema),
+  accounts: Schema.Number,
+  defaultAccountId: Schema.optional(Schema.String),
+});
+
+const PreparedWorkspaceSchema = Schema.Struct({
+  path: Schema.String,
+  ref: Schema.String,
+  detached: Schema.Boolean,
+});
+
+const ProjectRefsSchema = Schema.Struct({ refs: Schema.Array(Schema.String) });
 
 type DesktopBridge = {
   openDirectory?: () => Promise<string | null>;
@@ -37,6 +61,74 @@ export async function addProjectFromPath(path: string): Promise<Project> {
     throw new Error(payload.error || "Failed to add project");
   }
   return payload.project;
+}
+
+export async function listRepositoryOptions(): Promise<{
+  repositories: readonly RepositoryOption[];
+  accounts: number;
+  defaultAccountId?: string;
+}> {
+  const response = await fetch("/api/agent/projects/repositories", { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) throw new Error("Failed to load repositories");
+  return Schema.decodeUnknownSync(RepositoriesPayloadSchema)(payload);
+}
+
+export async function createRepositoryProject(
+  accountId: string,
+  repository: string,
+): Promise<Project> {
+  const response = await fetch("/api/agent/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ create: true, accountId, repository }),
+  });
+  const payload = (await response.json()) as { project?: Project; error?: string };
+  if (!response.ok || !payload.project)
+    throw new Error(payload.error || "Failed to create project");
+  return payload.project;
+}
+
+export async function addRepositoryProject(repository: RepositoryOption): Promise<Project> {
+  const response = await fetch("/api/agent/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      accountId: repository.accountId,
+      repository: repository.name,
+      repositoryUrl: repository.url,
+      defaultBranch: repository.defaultBranch,
+    }),
+  });
+  const payload = (await response.json()) as { project?: Project; error?: string };
+  if (!response.ok || !payload.project) throw new Error(payload.error || "Failed to add project");
+  return payload.project;
+}
+
+export async function prepareTaskWorkspace(input: {
+  projectId: string;
+  sessionId: string;
+  ref: string;
+  branch?: string;
+}): Promise<{ path: string; ref: string; detached: boolean }> {
+  const response = await fetch("/api/agent/projects/workspace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error("Failed to prepare task workspace");
+  return Schema.decodeUnknownSync(PreparedWorkspaceSchema)(payload);
+}
+
+export async function listProjectRefs(projectId: string): Promise<readonly string[]> {
+  const response = await fetch(
+    `/api/agent/projects/refs?projectId=${encodeURIComponent(projectId)}`,
+    { cache: "no-store" },
+  );
+  const payload = await response.json();
+  if (!response.ok) throw new Error("Failed to load branches");
+  return Schema.decodeUnknownSync(ProjectRefsSchema)(payload).refs;
 }
 
 export async function removeProject(id: string): Promise<void> {
@@ -84,15 +176,6 @@ export async function listBranches(cwd: string): Promise<GitBranch[]> {
   return payload.branches ?? [];
 }
 
-export async function listWorktrees(cwd: string): Promise<GitWorktree[]> {
-  const response = await fetch(`/api/agent/git/worktrees?cwd=${encodeURIComponent(cwd)}`, {
-    cache: "no-store",
-  });
-  const payload = await safeJson<{ worktrees?: GitWorktree[]; error?: string }>(response);
-  if (!response.ok) throw new Error(payload.error || "Failed to list worktrees");
-  return payload.worktrees ?? [];
-}
-
 export async function runGitAction(cwd: string, action: GitAction): Promise<void> {
   const response = await fetch(`/api/agent/git?cwd=${encodeURIComponent(cwd)}`, {
     method: "POST",
@@ -111,12 +194,4 @@ export async function switchBranch(cwd: string, branch: string): Promise<void> {
 
 export async function createBranch(cwd: string, branch: string): Promise<void> {
   await runGitAction(cwd, { action: "create_branch", branch });
-}
-
-export async function addWorktree(cwd: string, branch: string, path: string): Promise<void> {
-  await runGitAction(cwd, { action: "add_worktree", branch, path });
-}
-
-export async function removeWorktree(cwd: string, path: string): Promise<void> {
-  await runGitAction(cwd, { action: "remove_worktree", path });
 }

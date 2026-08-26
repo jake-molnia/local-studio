@@ -28,6 +28,7 @@ import {
   settleTurn,
 } from "@/features/agent/runtime/session-status";
 import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
+import { prepareTaskWorkspace } from "@/features/agent/projects/api";
 
 const EMPTY_SKILLS: ComposerSkillRef[] = [];
 const EMPTY_PROMPT_TEMPLATES: ComposerPromptTemplateRef[] = [];
@@ -188,6 +189,29 @@ function startPromptCommand(
   args: SubmitArgs,
 ): Promise<void> {
   const program = Effect.gen(function* () {
+    if (
+      context.selected.executionKind === "project" &&
+      context.selected.managedProject &&
+      !context.selected.cwd
+    ) {
+      const workspace = yield* Effect.tryPromise({
+        try: () =>
+          prepareTaskWorkspace({
+            projectId: context.selected.projectId ?? "",
+            sessionId: context.sessionId,
+            ref: context.selected.baseRef || "main",
+            ...(context.selected.branchName ? { branch: context.selected.branchName } : {}),
+          }),
+        catch: (error) => ({ _tag: "WorkspaceFailed" as const, error }),
+      });
+      context.selected.cwd = workspace.path;
+      context.selected.detached = workspace.detached;
+      deps.updateSession(context.sessionId, (session) => ({
+        ...session,
+        cwd: workspace.path,
+        detached: workspace.detached,
+      }));
+    }
     const result = yield* Effect.tryPromise({
       try: () => api.submitTurnCommand(promptTurnRequest(deps, context, args)),
       catch: (error) => ({ _tag: "SubmitFailed" as const, error }),
@@ -269,6 +293,10 @@ function promptTurnRequest(
     kind: context.selected.executionKind ?? deps.executionKind,
     harness: context.selected.harness,
     projectId: context.selected.projectId,
+    placement:
+      context.selected.executionKind === "project" ? context.selected.placement : undefined,
+    sandboxAccountId:
+      context.selected.executionKind === "project" ? context.selected.sandboxAccountId : undefined,
     modelId: deps.modelId,
     modelRouteId: context.selected.modelRouteId || deps.modelRouteId,
     thinkingLevel: deps.thinkingLevel,

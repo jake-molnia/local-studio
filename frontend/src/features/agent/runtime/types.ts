@@ -49,6 +49,10 @@ export type Session = {
   harness?: AgentHarness;
   projectId?: string;
   cwd?: string;
+  managedProject?: boolean;
+  baseRef?: string;
+  branchName?: string;
+  detached?: boolean;
   modelId?: string;
   modelRouteId?: string;
   thinkingLevel?: AgentThinkingLevel;

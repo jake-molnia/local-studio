@@ -42,6 +42,11 @@ function projectsFromController(): Project[] {
     exists: true,
     hasGit: false,
     branch: null,
+    accountId: project.accountId,
+    organization: project.organization,
+    repository: project.repository,
+    repositoryUrl: project.repositoryUrl,
+    defaultBranch: project.defaultBranch,
   }));
 }
 

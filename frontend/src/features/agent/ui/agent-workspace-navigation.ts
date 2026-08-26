@@ -60,7 +60,10 @@ export function workspaceNavigationAction(
     ...makeFreshTab(),
     executionKind: isChatsProject(project) ? ("chat" as const) : ("project" as const),
     projectId: project?.id,
-    cwd: isChatsProject(project) ? undefined : project?.path,
+    cwd: isChatsProject(project) || project?.repository ? undefined : project?.path,
+    managedProject: Boolean(project?.repository),
+    baseRef: project?.defaultBranch,
+    detached: Boolean(project?.repository),
   };
   return {
     type: "urlNavRequested",
