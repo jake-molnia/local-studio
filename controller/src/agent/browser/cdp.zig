@@ -22,6 +22,12 @@ pub const Client = struct {
         _ = try Io.Dir.cwd().createDirPathStatus(io, profile_dir, @enumFromInt(0o700));
         const profile_arg = try std.fmt.allocPrint(allocator, "--user-data-dir={s}", .{profile_dir});
         defer allocator.free(profile_arg);
+        const port_file = try std.fs.path.join(allocator, &.{ profile_dir, "DevToolsActivePort" });
+        defer allocator.free(port_file);
+        Io.Dir.cwd().deleteFile(io, port_file) catch |failure| switch (failure) {
+            error.FileNotFound => {},
+            else => return failure,
+        };
         var argv: std.ArrayList([]const u8) = .empty;
         defer argv.deinit(allocator);
         try argv.appendSlice(allocator, &.{ executable, "--headless=new", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-component-update", "--disable-sync", profile_arg });
@@ -34,8 +40,6 @@ pub const Client = struct {
             .pgid = 0,
         });
         errdefer if (child.id != null) child.kill(io);
-        const port_file = try std.fs.path.join(allocator, &.{ profile_dir, "DevToolsActivePort" });
-        defer allocator.free(port_file);
         var document: ?[]u8 = null;
         for (0..100) |_| {
             document = Io.Dir.cwd().readFileAlloc(io, port_file, allocator, .limited(4096)) catch null;
