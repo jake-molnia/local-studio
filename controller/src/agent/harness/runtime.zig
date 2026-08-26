@@ -403,7 +403,10 @@ pub const Manager = struct {
     }
 
     pub fn turnPayload(manager: *Manager, document: []const u8) ![]u8 {
-        return manager.turnPayloadAt(document, 0, null);
+        var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidTurnPayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidTurnPayload;
+        return manager.turnPayloadAt(document, optionalUnsigned(parsed.value.object, "initialEventSeq") orelse 0, null);
     }
 
     pub fn turnPayloadAt(manager: *Manager, document: []const u8, initial_event_seq: u64, native_session_id: ?[]const u8) ![]u8 {
@@ -1010,7 +1013,7 @@ pub const Manager = struct {
         }
         const harness_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", harness_kind.name() });
         defer manager.allocator.free(harness_dir);
-        const session_dir = if (harness_kind == .opencode)
+        const session_dir = if (harness_kind == .opencode or harness_kind == .fx)
             try std.fs.path.join(manager.allocator, &.{ harness_dir, session_id })
         else
             try manager.allocator.dupe(u8, harness_dir);
@@ -1039,8 +1042,8 @@ pub const Manager = struct {
             else => return error.HarnessDriverUnavailable,
         };
         if (harness_kind == .fx) {
-            try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
             try manager.configureFx(&model_route, model_id);
+            try model_route.environment.put("HOME", session_dir);
         }
         if (harness_kind == .opencode) try manager.configureOpenCode(&model_route, session_dir, model_id);
         var child = try std.process.spawn(manager.io, .{
@@ -1628,6 +1631,12 @@ fn optionalString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {
 fn optionalBool(object: std.json.ObjectMap, name: []const u8) ?bool {
     const value = object.get(name) orelse return null;
     return if (value == .bool) value.bool else null;
+}
+
+fn optionalUnsigned(object: std.json.ObjectMap, name: []const u8) ?u64 {
+    const value = object.get(name) orelse return null;
+    if (value != .integer or value.integer < 0) return null;
+    return @intCast(value.integer);
 }
 
 fn requiredString(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

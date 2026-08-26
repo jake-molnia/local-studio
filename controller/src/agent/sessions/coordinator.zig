@@ -154,7 +154,12 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         null;
     var detached_document: ?[]u8 = null;
     defer if (detached_document) |value| allocator.free(value);
-    if (native_session_id != null and resume_native_session_id == null) {
+    if (mode == .head) {
+        const storage = parsed.arena.allocator();
+        try parsed.value.object.put(storage, "nativeSessionId", if (resume_native_session_id) |value| .{ .string = value } else .null);
+        try parsed.value.object.put(storage, "initialEventSeq", .{ .integer = @intCast(if (existing) |session| session.event_cursor else 0) });
+        detached_document = try serialize(allocator, parsed.value);
+    } else if (native_session_id != null and resume_native_session_id == null) {
         if (parsed.value.object.getPtr("nativeSessionId")) |value| value.* = .null;
         if (parsed.value.object.getPtr("piSessionId")) |value| value.* = .null;
         detached_document = try serialize(allocator, parsed.value);
