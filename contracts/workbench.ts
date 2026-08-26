@@ -26,6 +26,7 @@ export const WorkbenchResourceKindSchema = Schema.Union([
 export type WorkbenchResourceKind = typeof WorkbenchResourceKindSchema.Type;
 
 export const WorkbenchCommandKindSchema = Schema.Union([
+  Schema.Literal("ensure_task"),
   Schema.Literal("select_project"),
   Schema.Literal("select_task"),
   Schema.Literal("move_project"),

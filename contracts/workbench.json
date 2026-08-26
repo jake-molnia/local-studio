@@ -16,6 +16,7 @@
     "WorkbenchCommandKind": {
       "kind": "enum",
       "values": [
+        "ensure_task",
         "select_project",
         "select_task",
         "move_project",

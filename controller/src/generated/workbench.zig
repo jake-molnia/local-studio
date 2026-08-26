@@ -6,7 +6,7 @@ pub const TaskConnectionState = enum { connected, disconnected, archived };
 
 pub const WorkbenchResourceKind = enum { chat, terminal, file, browser, diff, explorer };
 
-pub const WorkbenchCommandKind = enum { select_project, select_task, move_project, move_pinned, pin_project, pin_task, rename_task, archive_task, open_tab, select_tab, move_tab, close_tab, set_sidebar, set_lifecycle_mode, set_remote_cache_limit };
+pub const WorkbenchCommandKind = enum { ensure_task, select_project, select_task, move_project, move_pinned, pin_project, pin_task, rename_task, archive_task, open_tab, select_tab, move_tab, close_tab, set_sidebar, set_lifecycle_mode, set_remote_cache_limit };
 
 pub const WorkbenchPreferences = struct {
     lifecycleMode: ControllerLifecycleMode,

@@ -43,6 +43,7 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\);
         \\CREATE TABLE IF NOT EXISTS workbench_tasks (
         \\  task_id TEXT PRIMARY KEY,
+        \\  project_id TEXT,
         \\  title TEXT NOT NULL,
         \\  owner_controller_id TEXT NOT NULL,
         \\  connection_state TEXT NOT NULL DEFAULT 'connected' CHECK (connection_state IN ('connected', 'disconnected', 'archived')),
@@ -83,13 +84,14 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\UPDATE workbench_views SET selected_project_id = 'chats' WHERE view_id = 'primary' AND selected_project_id IS NULL;
     );
     try ensureColumn(database, "workbench_tasks", "title", "ALTER TABLE workbench_tasks ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+    try ensureColumn(database, "workbench_tasks", "project_id", "ALTER TABLE workbench_tasks ADD COLUMN project_id TEXT");
     try ensureColumn(database, "workbench_devices", "sidebar_section_order", "ALTER TABLE workbench_devices ADD COLUMN sidebar_section_order TEXT NOT NULL DEFAULT '[\"projects\",\"chats\"]'");
     try database.execute("UPDATE workbench_tasks SET title = task_id WHERE title = ''");
     try database.executeScript(
         \\INSERT OR IGNORE INTO workbench_project_ranks (profile_id, project_id, rank)
         \\SELECT 'default', project_id, rowid * 1024 FROM agent_projects;
-        \\INSERT OR IGNORE INTO workbench_tasks (task_id, title, owner_controller_id, connection_state, rank)
-        \\SELECT session_id, session_id, node_id, CASE WHEN status = 'archived' THEN 'archived' ELSE 'connected' END, rowid * 1024
+        \\INSERT OR IGNORE INTO workbench_tasks (task_id, project_id, title, owner_controller_id, connection_state, rank)
+        \\SELECT session_id, project_id, session_id, node_id, CASE WHEN status = 'archived' THEN 'archived' ELSE 'connected' END, rowid * 1024
         \\FROM agent_sessions
         \\WHERE project_id IS NULL OR project_id != '__local_studio_thread_title__';
         \\INSERT OR IGNORE INTO workbench_tabs (tab_id, task_id, resource_kind, title, resource_id, rank, closable)
@@ -107,8 +109,8 @@ pub fn reconcile(database: *sqlite.Database) !void {
     try database.executeScript(
         \\INSERT OR IGNORE INTO workbench_project_ranks (profile_id, project_id, rank)
         \\SELECT 'default', project_id, rowid * 1024 FROM agent_projects;
-        \\INSERT OR IGNORE INTO workbench_tasks (task_id, title, owner_controller_id, connection_state, rank)
-        \\SELECT session_id, session_id, node_id, CASE WHEN status = 'archived' THEN 'archived' ELSE 'connected' END, rowid * 1024
+        \\INSERT OR IGNORE INTO workbench_tasks (task_id, project_id, title, owner_controller_id, connection_state, rank)
+        \\SELECT session_id, project_id, session_id, node_id, CASE WHEN status = 'archived' THEN 'archived' ELSE 'connected' END, rowid * 1024
         \\FROM agent_sessions
         \\WHERE project_id IS NULL OR project_id != '__local_studio_thread_title__';
         \\INSERT OR IGNORE INTO workbench_tabs (tab_id, task_id, resource_kind, title, resource_id, rank, closable)
@@ -122,6 +124,17 @@ pub fn reconcile(database: *sqlite.Database) !void {
         \\UPDATE workbench_tasks
         \\SET connection_state = 'archived'
         \\WHERE task_id IN (SELECT session_id FROM agent_sessions WHERE status = 'archived');
+        \\UPDATE workbench_views
+        \\SET selected_project_id = 'chats', selected_task_id = NULL
+        \\WHERE view_id = 'primary'
+        \\  AND selected_project_id IS NOT NULL
+        \\  AND selected_project_id != 'chats'
+        \\  AND NOT EXISTS (SELECT 1 FROM agent_projects WHERE project_id = selected_project_id);
+        \\UPDATE workbench_views
+        \\SET selected_task_id = NULL
+        \\WHERE view_id = 'primary'
+        \\  AND selected_task_id IS NOT NULL
+        \\  AND NOT EXISTS (SELECT 1 FROM workbench_tasks WHERE task_id = selected_task_id AND connection_state = 'connected');
     );
 }
 

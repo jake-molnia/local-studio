@@ -122,7 +122,7 @@ fn writeProjects(writer: *Io.Writer, database: *sqlite.Database) !void {
 fn writeTasks(writer: *Io.Writer, database: *sqlite.Database) !void {
     try writer.writeAll(",\"tasks\":[");
     var statement = try database.prepare(
-        \\SELECT task.task_id, session.project_id, task.title, task.owner_controller_id,
+        \\SELECT task.task_id, COALESCE(task.project_id, session.project_id), task.title, task.owner_controller_id,
         \\       task.connection_state, task.pinned, task.rank
         \\FROM workbench_tasks AS task
         \\LEFT JOIN agent_sessions AS session ON session.session_id = task.task_id
@@ -184,6 +184,7 @@ fn writeTaskWorkbench(writer: *Io.Writer, database: *sqlite.Database, task_id: [
 }
 
 fn applyCommand(database: *sqlite.Database, kind: []const u8, object: std.json.ObjectMap) !void {
+    if (std.mem.eql(u8, kind, "ensure_task")) return ensureTask(database, object);
     if (std.mem.eql(u8, kind, "select_project")) return selectProject(database, optionalString(object, "projectId"));
     if (std.mem.eql(u8, kind, "select_task")) return selectTask(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired);
     if (std.mem.eql(u8, kind, "move_project")) return moveProject(database, requiredString(object, "projectId") orelse return error.WorkbenchProjectIdRequired, optionalString(object, "targetId"));
@@ -202,6 +203,35 @@ fn applyCommand(database: *sqlite.Database, kind: []const u8, object: std.json.O
     return error.UnknownWorkbenchCommand;
 }
 
+fn ensureTask(database: *sqlite.Database, object: std.json.ObjectMap) !void {
+    const task_id = requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired;
+    const title = requiredString(object, "title") orelse return error.WorkbenchTabTitleRequired;
+    const project_id = optionalString(object, "projectId");
+    var task = try database.prepare(
+        \\INSERT INTO workbench_tasks (task_id, project_id, title, owner_controller_id, connection_state, rank)
+        \\VALUES (?, ?, ?, 'local', 'connected', COALESCE((SELECT MAX(rank) + 1024 FROM workbench_tasks), 0))
+        \\ON CONFLICT(task_id) DO UPDATE SET
+        \\  project_id = COALESCE(excluded.project_id, workbench_tasks.project_id),
+        \\  title = CASE WHEN workbench_tasks.title = workbench_tasks.task_id THEN excluded.title ELSE workbench_tasks.title END
+    );
+    defer task.deinit();
+    try task.bindText(1, task_id);
+    if (project_id) |value| try task.bindText(2, value) else try task.bindNull(2);
+    try task.bindText(3, title);
+    if (try task.step() != .done) return error.DatabaseUnexpectedRow;
+    var tab = try database.prepare("INSERT OR IGNORE INTO workbench_tabs (tab_id, task_id, resource_kind, title, resource_id, rank, closable) VALUES ('chat:' || ?, ?, 'chat', 'Chat', ?, 0, 0)");
+    defer tab.deinit();
+    try tab.bindText(1, task_id);
+    try tab.bindText(2, task_id);
+    try tab.bindText(3, task_id);
+    if (try tab.step() != .done) return error.DatabaseUnexpectedRow;
+    var selection = try database.prepare("UPDATE workbench_tasks SET active_tab_id = COALESCE(active_tab_id, 'chat:' || task_id), revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?");
+    defer selection.deinit();
+    try selection.bindText(1, task_id);
+    if (try selection.step() != .done) return error.DatabaseUnexpectedRow;
+    try selectTask(database, task_id);
+}
+
 fn selectProject(database: *sqlite.Database, project_id: ?[]const u8) !void {
     var statement = try database.prepare("UPDATE workbench_views SET selected_project_id = ?, selected_task_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE view_id = 'primary'");
     defer statement.deinit();
@@ -218,13 +248,14 @@ fn selectTask(database: *sqlite.Database, task_id: []const u8) !void {
     var statement = try database.prepare(
         \\UPDATE workbench_views
         \\SET selected_task_id = ?,
-        \\    selected_project_id = (SELECT project_id FROM agent_sessions WHERE session_id = ?),
+        \\    selected_project_id = (SELECT COALESCE(project_id, (SELECT project_id FROM agent_sessions WHERE session_id = ?)) FROM workbench_tasks WHERE task_id = ?),
         \\    updated_at = CURRENT_TIMESTAMP
         \\WHERE view_id = 'primary'
     );
     defer statement.deinit();
     try statement.bindText(1, task_id);
     try statement.bindText(2, task_id);
+    try statement.bindText(3, task_id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
@@ -338,18 +369,47 @@ fn moveTab(database: *sqlite.Database, task_id: []const u8, tab_id: []const u8, 
     try statement.bindText(2, task_id);
     try statement.bindText(3, tab_id);
     if (try statement.step() != .done or database.changes() == 0) return error.WorkbenchTabNotFound;
+    var normalize = try database.prepare(
+        \\WITH ordered AS (
+        \\  SELECT tab_id, (ROW_NUMBER() OVER (ORDER BY rank, tab_id) - 1) * 1024 AS next_rank
+        \\  FROM workbench_tabs
+        \\  WHERE task_id = ?
+        \\)
+        \\UPDATE workbench_tabs
+        \\SET rank = (SELECT next_rank FROM ordered WHERE ordered.tab_id = workbench_tabs.tab_id)
+        \\WHERE task_id = ?
+    );
+    defer normalize.deinit();
+    try normalize.bindText(1, task_id);
+    try normalize.bindText(2, task_id);
+    if (try normalize.step() != .done) return error.DatabaseUnexpectedRow;
     try bumpTask(database, task_id);
 }
 
 fn closeTab(database: *sqlite.Database, task_id: []const u8, tab_id: []const u8) !void {
+    var neighbor = try database.prepare(
+        \\SELECT candidate.tab_id
+        \\FROM workbench_tabs AS candidate
+        \\JOIN workbench_tabs AS closing ON closing.task_id = candidate.task_id
+        \\WHERE closing.task_id = ? AND closing.tab_id = ? AND candidate.tab_id != closing.tab_id
+        \\ORDER BY
+        \\  CASE WHEN candidate.rank > closing.rank THEN 0 ELSE 1 END,
+        \\  CASE WHEN candidate.rank > closing.rank THEN candidate.rank ELSE -candidate.rank END,
+        \\  candidate.tab_id
+        \\LIMIT 1
+    );
+    defer neighbor.deinit();
+    try neighbor.bindText(1, task_id);
+    try neighbor.bindText(2, tab_id);
+    const next_tab_id = if (try neighbor.step() == .row) neighbor.columnText(0) else null;
     var statement = try database.prepare("DELETE FROM workbench_tabs WHERE task_id = ? AND tab_id = ? AND closable = 1");
     defer statement.deinit();
     try statement.bindText(1, task_id);
     try statement.bindText(2, tab_id);
     if (try statement.step() != .done or database.changes() == 0) return error.WorkbenchTabNotClosable;
-    var active = try database.prepare("UPDATE workbench_tasks SET active_tab_id = (SELECT tab_id FROM workbench_tabs WHERE task_id = ? ORDER BY rank, tab_id LIMIT 1), revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND active_tab_id = ?");
+    var active = try database.prepare("UPDATE workbench_tasks SET active_tab_id = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND active_tab_id = ?");
     defer active.deinit();
-    try active.bindText(1, task_id);
+    if (next_tab_id) |value| try active.bindText(1, value) else try active.bindNull(1);
     try active.bindText(2, task_id);
     try active.bindText(3, tab_id);
     if (try active.step() != .done) return error.DatabaseUnexpectedRow;
