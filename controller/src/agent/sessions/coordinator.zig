@@ -140,6 +140,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const session_id = optionalString(object, "sessionId") orelse "default";
     const model_id = optionalString(object, "modelId") orelse return error.ModelIdRequired;
     const message = optionalString(object, "message") orelse return error.MessageRequired;
+    const display_message = optionalString(object, "displayMessage") orelse message;
     const project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
     const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
@@ -180,10 +181,13 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
         try parsed.value.object.put(storage, "nativeSessionId", if (resume_native_session_id) |value| .{ .string = value } else .null);
         try parsed.value.object.put(storage, "initialEventSeq", .{ .integer = @intCast(if (existing) |session| session.event_cursor else 0) });
         detached_document = try serialize(allocator, parsed.value);
-    } else if (native_session_id != null and resume_native_session_id == null) {
-        if (parsed.value.object.getPtr("nativeSessionId")) |value| value.* = .null;
-        if (parsed.value.object.getPtr("piSessionId")) |value| value.* = .null;
-        detached_document = try serialize(allocator, parsed.value);
+    } else {
+        if (is_chat) try parsed.value.object.put(parsed.arena.allocator(), "harness", .{ .string = "chat" });
+        if (native_session_id != null and resume_native_session_id == null) {
+            if (parsed.value.object.getPtr("nativeSessionId")) |value| value.* = .null;
+            if (parsed.value.object.getPtr("piSessionId")) |value| value.* = .null;
+        }
+        if (is_chat or (native_session_id != null and resume_native_session_id == null)) detached_document = try serialize(allocator, parsed.value);
     }
     const dispatch_document = detached_document orelse routed_document;
     if (!is_chat and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
@@ -245,7 +249,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const command_id = commandId(io);
     try lockedEnqueue(io, database, command_id[0..], session_id, command_kind, routed_document);
     if (std.mem.eql(u8, command_kind, "prompt")) {
-        const transcript = try userTranscriptDocument(allocator, message);
+        const transcript = try userTranscriptDocument(allocator, display_message);
         defer allocator.free(transcript);
         const source_key = try std.fmt.allocPrint(allocator, "command:{s}", .{command_id[0..]});
         defer allocator.free(source_key);

@@ -420,13 +420,13 @@ pub const Manager = struct {
     }
 
     pub fn turnPayloadAt(manager: *Manager, document: []const u8, initial_event_seq: u64, native_session_id: ?[]const u8) ![]u8 {
-        if (manager.mode == .head) return error.RemoteHarnessRequired;
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidTurnPayload;
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidTurnPayload;
         const object = parsed.value.object;
         const harness = optionalString(object, "harness") orelse "pi";
         const harness_kind: Harness = if (std.mem.eql(u8, harness, "pi")) .pi else if (std.mem.eql(u8, harness, "chat")) .chat else if (std.mem.eql(u8, harness, "fx")) .fx else if (std.mem.eql(u8, harness, "opencode")) .opencode else if (std.mem.eql(u8, harness, "codex")) .codex else if (std.mem.eql(u8, harness, "claude")) .claude else return error.HarnessDriverUnavailable;
+        if (manager.mode == .head and harness_kind != .chat) return error.RemoteHarnessRequired;
         if (harness_kind == .pi and !manager.piIsAvailable()) return error.HarnessUnavailable;
         if ((harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode or harness_kind == .claude) and !manager.model_route.available()) return error.HarnessUnavailable;
         if (harness_kind == .fx and !manager.fx.available()) return error.HarnessUnavailable;

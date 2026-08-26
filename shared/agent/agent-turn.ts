@@ -75,6 +75,7 @@ export type AgentTurnRequest = {
   modelRouteId?: string;
   thinkingLevel?: AgentThinkingLevel;
   message: string;
+  displayMessage?: string;
   images: AgentImageInput[];
   cwd?: string;
   piSessionId: string | null;
@@ -130,6 +131,8 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
   if (!body) return { ok: false, error: "Invalid JSON body" };
   const message = stringField(body, "message", true);
   if (!message.ok) return message;
+  const displayMessage = stringField(body, "displayMessage");
+  if (!displayMessage.ok) return displayMessage;
   const modelId = stringField(body, "modelId", true);
   if (!modelId.ok) return modelId;
   const modelRouteId = stringField(body, "modelRouteId");
@@ -181,6 +184,7 @@ export function parseAgentTurnRequest(input: unknown): ParseResult<AgentTurnRequ
       ...(modelRouteId.value ? { modelRouteId: modelRouteId.value } : {}),
       ...(thinkingLevel ? { thinkingLevel } : {}),
       message: message.value!,
+      ...(displayMessage.value ? { displayMessage: displayMessage.value } : {}),
       images: images.value,
       cwd: cwd.value,
       piSessionId: piSessionId.value ?? null,

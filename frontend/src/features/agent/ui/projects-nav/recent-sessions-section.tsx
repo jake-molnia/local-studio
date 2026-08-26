@@ -17,6 +17,7 @@ import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { Folder } from "@/ui/icons";
 import type { SessionPrefs } from "@/features/agent/messages/prefs";
 import type { AggregatedSession } from "@shared/agent/session-summary";
+import { sessionTitleFromUserPrompt } from "@shared/agent/session-title";
 
 const RECENT_INITIAL_LIMIT = 10;
 const RECENT_PAGE_SIZE = 25;
@@ -47,7 +48,7 @@ function dayLabel(iso: string): string {
 function rowTitle(session: AggregatedSession, prefs: SessionPrefs): string {
   return (
     cleanSessionTitle(prefs[session.id]?.title) ||
-    cleanSessionTitle(session.firstUserMessage) ||
+    sessionTitleFromUserPrompt(session.firstUserMessage) ||
     `Session ${session.id.slice(0, 8)}`
   );
 }
@@ -55,7 +56,7 @@ function rowTitle(session: AggregatedSession, prefs: SessionPrefs): string {
 /** The last prompt, trimmed to a preview. Returns "" when the prompt is the
  *  same text the title already shows, so the row does not say it twice. */
 function rowPreview(session: AggregatedSession, title: string): string {
-  const prompt = cleanSessionTitle(session.lastUserPromptText ?? "");
+  const prompt = sessionTitleFromUserPrompt(session.lastUserPromptText);
   if (!prompt || prompt === title) return "";
   return prompt.length > PREVIEW_CHARS ? `${prompt.slice(0, PREVIEW_CHARS).trimEnd()}…` : prompt;
 }

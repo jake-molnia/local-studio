@@ -31,6 +31,7 @@ import {
 import { PinButton, SidebarRail } from "./nav-chrome";
 import { SessionNavRow } from "./session-nav-row";
 import type { ActiveAgentSession, SessionSummary } from "./types";
+import { sessionTitleFromUserPrompt } from "@shared/agent/session-title";
 
 const SESSIONS_INITIAL_LIMIT = 10;
 const SESSIONS_PAGE_SIZE = 25;
@@ -359,8 +360,8 @@ export function ActiveSessionRow({
   onReorderDrop?: (event: DragEvent) => void;
   card?: boolean;
 }) {
-  const label =
-    cleanSessionTitle(pref.title) || cleanSessionTitle(session.title) || "Current session";
+  const sessionRuntimeTitle = sessionTitleFromUserPrompt(session.title);
+  const label = cleanSessionTitle(pref.title) || sessionRuntimeTitle || "Current session";
   const isFocused = session.focused === true;
   const rowClass = `${card ? "sidebar-virtual-card min-h-[52px] border border-(--border)/55 bg-(--surface-2)/35 px-2 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "sidebar-virtual-row h-[var(--sidebar-row-height)] pl-2 pr-0"} group relative flex items-center rounded-[var(--sidebar-row-radius)] transition-[color,background-color,opacity,border-color,box-shadow] duration-[var(--motion-fast)] ${dragging ? "opacity-45" : ""} ${isFocused ? "border-(--accent)/25 bg-(--hover) text-(--fg)" : "hover:bg-(--hover)"}`;
 
@@ -368,7 +369,7 @@ export function ActiveSessionRow({
     <SessionNavRow
       pref={pref}
       label={label}
-      initialDraft={cleanSessionTitle(pref.title) || cleanSessionTitle(session.title)}
+      initialDraft={cleanSessionTitle(pref.title) || sessionRuntimeTitle}
       rowClass={rowClass}
       href={`/agent?project=${encodeURIComponent(project.id)}${
         session.threadId ? `&session=${encodeURIComponent(session.threadId)}&replace=1` : ""
@@ -399,7 +400,7 @@ export function ActiveSessionRow({
         workspaceCommands().renameSession(
           session.paneId,
           session.id,
-          cleanSessionTitle(trimmed) || cleanSessionTitle(session.title) || label,
+          cleanSessionTitle(trimmed) || sessionRuntimeTitle || label,
         )
       }
       onRememberTitle={() => {
@@ -413,7 +414,7 @@ export function ActiveSessionRow({
           cwd: session.cwd,
           paneId: session.paneId,
           tabId: session.id,
-          title: session.title,
+          title: sessionRuntimeTitle || session.title,
         });
         onReorderDragStart?.();
       }}

@@ -193,9 +193,7 @@ function startPromptCommand(
       catch: (error) => ({ _tag: "SubmitFailed" as const, error }),
     });
     const canonicalSessionId =
-      result.nativeSessionId ||
-      result.piSessionId ||
-      (result.harness === "fx" ? result.runtimeSessionId : null);
+      result.nativeSessionId || result.piSessionId || result.runtimeSessionId || context.runtime;
     deps.updateSession(context.sessionId, (session) => ({
       ...session,
       piSessionId: canonicalSessionId || session.piSessionId,
@@ -276,6 +274,7 @@ function promptTurnRequest(
     thinkingLevel: deps.thinkingLevel,
     toolAccess: deps.toolAccess,
     message: args.prompt,
+    displayMessage: args.displayText,
     images: args.images,
     cwd:
       context.selected.executionKind === "chat"

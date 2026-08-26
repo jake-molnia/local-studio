@@ -264,6 +264,7 @@ export type SubmitTurnArgs = {
   thinkingLevel?: import("@/features/agent/contracts").AgentThinkingLevel;
   toolAccess: AgentToolAccess;
   message: string;
+  displayMessage?: string;
   images?: AgentImageInput[];
   cwd?: string;
   piSessionId?: string | null;
