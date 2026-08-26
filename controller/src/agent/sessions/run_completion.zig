@@ -12,6 +12,7 @@ pub const Result = struct {
     native_session: ?[]u8,
     summary: []u8,
     failure: ?[]u8,
+    outbound_action: bool,
 
     pub fn deinit(result: *Result) void {
         if (result.native_session) |value| result.allocator.free(value);
@@ -19,6 +20,11 @@ pub const Result = struct {
         if (result.failure) |value| result.allocator.free(value);
         result.* = undefined;
     }
+};
+
+pub const Heartbeat = struct {
+    context: *anyopaque,
+    send: *const fn (*anyopaque) anyerror!void,
 };
 
 pub fn acceptedEventCursor(allocator: std.mem.Allocator, document: []const u8) u64 {
@@ -31,12 +37,17 @@ pub fn acceptedEventCursor(allocator: std.mem.Allocator, document: []const u8) u
 }
 
 pub fn wait(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, after: u64, max_summary: usize) !Result {
+    return waitWithHeartbeat(allocator, io, mode, client, database, harness, session_id, after, max_summary, null);
+}
+
+pub fn waitWithHeartbeat(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, after: u64, max_summary: usize, heartbeat: ?Heartbeat) !Result {
     var cursor = after;
     var native_session: ?[]u8 = null;
     errdefer if (native_session) |value| allocator.free(value);
     var attempts: usize = 0;
     while (attempts < 14_400) : (attempts += 1) {
         try io.sleep(.fromMilliseconds(250), .awake);
+        if (heartbeat) |pulse| if (attempts % 16 == 0) pulse.send(pulse.context) catch {};
         const payload = try agent_coordinator.statusPayload(allocator, io, mode, client, database, harness, session_id, cursor);
         defer allocator.free(payload);
         var status = std.json.parseFromSlice(std.json.Value, allocator, payload, .{}) catch return error.InvalidHarnessResponse;
@@ -52,6 +63,7 @@ pub fn wait(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *ht
             .native_session = native_session,
             .summary = try allocator.dupe(u8, ""),
             .failure = try allocator.dupe(u8, failure),
+            .outbound_action = false,
         };
         var settled = false;
         if (status.value.object.get("events")) |events| if (events == .array) for (events.array.items) |event| {
@@ -84,11 +96,13 @@ fn lastAssistantResult(allocator: std.mem.Allocator, document: []const u8, max_s
     var summary = try allocator.dupe(u8, "");
     errdefer allocator.free(summary);
     var failure: ?[]u8 = null;
+    var outbound_action = false;
     errdefer if (failure) |value| allocator.free(value);
     for (entries.array.items) |entry| {
         if (entry != .object or !std.mem.eql(u8, stringField(entry.object, "type") orelse "", "message")) continue;
         const message = entry.object.get("message") orelse continue;
         if (message != .object or !std.mem.eql(u8, stringField(message.object, "role") orelse "", "assistant")) continue;
+        if (std.mem.eql(u8, stringField(message.object, "outboundAction") orelse "", "telegram_reaction")) outbound_action = true;
         const text = try messageText(allocator, message.object.get("content"));
         defer allocator.free(text);
         const trimmed = std.mem.trim(u8, text, " \t\r\n");
@@ -102,9 +116,9 @@ fn lastAssistantResult(allocator: std.mem.Allocator, document: []const u8, max_s
             failure = try allocator.dupe(u8, value);
         }
     }
-    if (summary.len == 0 and failure == null) failure = try allocator.dupe(u8, "Run completed without an assistant response.");
+    if (summary.len == 0 and failure == null and !outbound_action) failure = try allocator.dupe(u8, "Run completed without an assistant response.");
     const native = if (stringField(parsed.value.object, "nativeSessionId")) |value| try allocator.dupe(u8, value) else null;
-    return .{ .allocator = allocator, .native_session = native, .summary = summary, .failure = failure };
+    return .{ .allocator = allocator, .native_session = native, .summary = summary, .failure = failure, .outbound_action = outbound_action };
 }
 
 fn messageText(allocator: std.mem.Allocator, content: ?std.json.Value) ![]u8 {

@@ -39,7 +39,7 @@ pub fn handle(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, ba
     if (id == null) return allocator.dupe(u8, "");
     if (std.mem.eql(u8, method, "server/discover")) return discoverResponse(allocator, id.?);
     if (std.mem.eql(u8, method, "initialize")) return initializeResponse(allocator, id.?, object.get("params"));
-    if (std.mem.eql(u8, method, "tools/list")) return toolsResponse(allocator, io, client, base_url, api_key, model_id, id.?);
+    if (std.mem.eql(u8, method, "tools/list")) return toolsResponse(allocator, io, client, base_url, api_key, model_id, session_id, id.?);
     if (std.mem.eql(u8, method, "tools/call")) return callResponse(allocator, io, client, base_url, api_key, model_id, session_id, id.?, object.get("params"));
     return rpcError(allocator, id.?, -32601, "unknown method");
 }
@@ -65,7 +65,7 @@ fn initializeResponse(allocator: std.mem.Allocator, id: std.json.Value, params: 
     return output.toOwnedSlice();
 }
 
-fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, id: std.json.Value) ![]u8 {
+fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, model_id: []const u8, session_id: []const u8, id: std.json.Value) ![]u8 {
     const connector_tools = connectorToolFragment(allocator, io, client, base_url, api_key, model_id) catch null;
     defer if (connector_tools) |value| allocator.free(value);
     var output: Io.Writer.Allocating = .init(allocator);
@@ -73,6 +73,7 @@ fn toolsResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client,
     try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try std.json.Stringify.value(id, .{}, &output.writer);
     try output.writer.writeAll(",\"result\":{\"tools\":[{\"name\":\"browser_navigate\",\"description\":\"Open a URL in the isolated Local Studio browser\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"],\"additionalProperties\":false}},{\"name\":\"browser_observe\",\"description\":\"List semantic interactive elements on the current page\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"name\":\"browser_click\",\"description\":\"Click an element selected with CSS\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"selector\":{\"type\":\"string\"}},\"required\":[\"selector\"],\"additionalProperties\":false}},{\"name\":\"browser_type\",\"description\":\"Enter text into an input selected with CSS\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"selector\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}},\"required\":[\"selector\",\"text\"],\"additionalProperties\":false}},{\"name\":\"browser_get_text\",\"description\":\"Read visible page text\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"name\":\"browser_get_html\",\"description\":\"Read current page HTML\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"name\":\"browser_get_url\",\"description\":\"Return the current page URL\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"name\":\"browser_screenshot\",\"description\":\"Capture the current page as PNG data\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"name\":\"browser_network\",\"description\":\"Read recent browser resource requests\",\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}");
+    if (std.mem.startsWith(u8, session_id, "message:telegram:")) try output.writer.writeAll(",{\"name\":\"messaging_react\",\"description\":\"React to the current Telegram message when a reaction is a better response than text. Calling this completes the turn without sending a text reply.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"emoji\":{\"type\":\"string\",\"description\":\"A Telegram-supported reaction emoji\"}},\"required\":[\"emoji\"],\"additionalProperties\":false}}");
     if (connector_tools) |value| try output.writer.writeAll(value);
     try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
@@ -121,6 +122,7 @@ fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, 
     const params = params_value orelse return error.McpParamsRequired;
     if (params != .object) return error.McpParamsRequired;
     const namespaced = stringField(params.object, "name") orelse return error.McpToolRequired;
+    if (std.mem.eql(u8, namespaced, "messaging_react")) return messagingCallResponse(allocator, io, client, base_url, api_key, session_id, id, params.object.get("arguments"));
     const separator = std.mem.indexOf(u8, namespaced, "__");
     const browser_tool = std.mem.startsWith(u8, namespaced, "browser_");
     if (!browser_tool and (separator == null or separator.? == 0 or separator.? + 2 >= namespaced.len)) return error.InvalidMcpToolName;
@@ -156,6 +158,33 @@ fn callResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, 
     try output.writer.writeAll(",\"result\":");
     try std.json.Stringify.value(result, .{}, &output.writer);
     try output.writer.writeByte('}');
+    return output.toOwnedSlice();
+}
+
+fn messagingCallResponse(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, base_url: []const u8, api_key: ?[]const u8, session_id: []const u8, id: std.json.Value, arguments_value: ?std.json.Value) ![]u8 {
+    const arguments = arguments_value orelse return error.InvalidMcpArguments;
+    if (arguments != .object) return error.InvalidMcpArguments;
+    const emoji = stringField(arguments.object, "emoji") orelse return error.InvalidMcpArguments;
+    var body: Io.Writer.Allocating = .init(allocator);
+    defer body.deinit();
+    try body.writer.writeAll("{\"sessionId\":");
+    try std.json.Stringify.value(session_id, .{}, &body.writer);
+    try body.writer.writeAll(",\"emoji\":");
+    try std.json.Stringify.value(emoji, .{}, &body.writer);
+    try body.writer.writeByte('}');
+    const url = try std.fmt.allocPrint(allocator, "{s}/internal/node/v1/messaging/react", .{base_url});
+    defer allocator.free(url);
+    const called = try request(allocator, io, client, url, api_key, .POST, body.writer.buffered());
+    defer allocator.free(called);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, called, .{}) catch return error.InvalidConnectorResponse;
+    defer parsed.deinit();
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try std.json.Stringify.value(id, .{}, &output.writer);
+    try output.writer.writeAll(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Reaction sent\"}],\"structuredContent\":");
+    try std.json.Stringify.value(parsed.value, .{}, &output.writer);
+    try output.writer.writeAll("}}");
     return output.toOwnedSlice();
 }
 

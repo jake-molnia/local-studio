@@ -39,6 +39,7 @@ pub const Catalog = struct {
 pub const Result = struct {
     text: []u8,
     is_error: bool,
+    outbound_action: bool = false,
 
     pub fn deinit(result: *Result, allocator: std.mem.Allocator) void {
         allocator.free(result.text);
@@ -99,7 +100,8 @@ pub fn call(allocator: std.mem.Allocator, io: std.Io, client: *std.http.Client, 
     if (parsed.value.object.get("error")) |tool_error| return .{ .text = try boundedJson(allocator, tool_error), .is_error = true };
     const result = parsed.value.object.get("result") orelse return failure(allocator, "Tool returned no result");
     const is_error = result == .object and (boolField(result.object, "isError") orelse false);
-    return .{ .text = try resultText(allocator, result), .is_error = is_error };
+    const outbound_action = if (result == .object) if (result.object.get("structuredContent")) |structured| structured == .object and std.mem.eql(u8, stringField(structured.object, "outboundAction") orelse "", "telegram_reaction") else false else false;
+    return .{ .text = try resultText(allocator, result), .is_error = is_error, .outbound_action = outbound_action };
 }
 
 pub fn origin(url: []const u8) []const u8 {

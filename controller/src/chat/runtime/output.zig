@@ -59,6 +59,15 @@ pub const Output = struct {
         try output.sink.emit(document.writer.buffered());
     }
 
+    pub fn writeOutboundAction(output: *Output, action: []const u8) !void {
+        var document: std.Io.Writer.Allocating = .init(output.allocator);
+        defer document.deinit();
+        try document.writer.writeAll("{\"type\":\"message\",\"message\":{\"role\":\"assistant\",\"content\":[],\"outboundAction\":");
+        try std.json.Stringify.value(action, .{}, &document.writer);
+        try document.writer.writeAll("}}");
+        try output.sink.emit(document.writer.buffered());
+    }
+
     pub fn writeToolCall(output: *Output, call: protocol.ToolCall) !void {
         var document: std.Io.Writer.Allocating = .init(output.allocator);
         defer document.deinit();

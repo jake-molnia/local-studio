@@ -81,6 +81,14 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, client: *std.http.Client, c
                 tools_runtime.Result{ .text = try allocator.dupe(u8, "Tool arguments were not valid JSON"), .is_error = true };
             defer tool_result.deinit(allocator);
             try output.writeToolResult(call.id, tool_result.text, tool_result.is_error);
+            if (tool_result.outbound_action and !tool_result.is_error) {
+                try store.append(.assistant, "Reacted to the user's Telegram message.");
+                keep_user = true;
+                try store.save();
+                try output.writeOutboundAction("telegram_reaction");
+                try sink.emit("{\"type\":\"agent_settled\"}");
+                return;
+            }
             try messages.append(allocator, .{
                 .role = .tool,
                 .content = try turn_allocator.dupe(u8, tool_result.text),
