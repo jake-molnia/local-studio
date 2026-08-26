@@ -235,7 +235,20 @@ fn proxyAttempt(client: *http.Client, upstream: []const u8, request: *http.Serve
     try downstream_response.flush();
     var response_read_buffer: [16 * 1024]u8 = undefined;
     const upstream_body = upstream_response.reader(&response_read_buffer);
-    const bytes_forwarded = try upstream_body.streamRemaining(&downstream_response.writer);
+    var bytes_forwarded: u64 = 0;
+    var response_chunk: [16 * 1024]u8 = undefined;
+    while (true) {
+        var response_buffers = [_][]u8{response_chunk[0..]};
+        const count = upstream_body.readVec(&response_buffers) catch |err| switch (err) {
+            error.EndOfStream => break,
+            error.ReadFailed => return error.ReadFailed,
+        };
+        if (count == 0) continue;
+        try downstream_response.writer.writeAll(response_chunk[0..count]);
+        try downstream_response.writer.flush();
+        try downstream_response.flush();
+        bytes_forwarded += count;
+    }
     if (upstream_response.head.content_length) |content_length| {
         if (bytes_forwarded != content_length) return error.UpstreamBodyTruncated;
     }

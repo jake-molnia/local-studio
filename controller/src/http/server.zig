@@ -325,21 +325,27 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/workbench")) {
-        const response = workbench.projectionPayload(allocator, io, database) catch |failure| return respondWorkbenchFailure(request, failure);
+        const view_id_value = try request_tools.queryParameter(allocator, request.head.target, "viewId");
+        defer if (view_id_value) |value| allocator.free(value);
+        const response = workbench.projectionPayload(allocator, io, database, view_id_value orelse "primary") catch |failure| return respondWorkbenchFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/workbench/commands")) {
+        const view_id_value = try request_tools.queryParameter(allocator, request.head.target, "viewId");
+        defer if (view_id_value) |value| allocator.free(value);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = workbench.commandPayload(allocator, io, database, document) catch |failure| return respondWorkbenchFailure(request, failure);
+        const response = workbench.commandPayload(allocator, io, database, view_id_value orelse "primary", document) catch |failure| return respondWorkbenchFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/workbench/events")) {
-        serveWorkbenchEvents(allocator, io, database, request) catch return false;
+        const view_id_value = try request_tools.queryParameter(allocator, request.head.target, "viewId");
+        defer if (view_id_value) |value| allocator.free(value);
+        serveWorkbenchEvents(allocator, io, database, view_id_value orelse "primary", request) catch return false;
         return false;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/harnesses")) {
@@ -2886,7 +2892,7 @@ fn respondWorkbenchFailure(request: *http.Server.Request, failure: anyerror) !bo
     const status: http.Status = switch (failure) {
         error.WorkbenchTaskNotFound, error.WorkbenchProjectNotFound, error.WorkbenchTabNotFound => .not_found,
         error.WorkbenchTaskUnavailable, error.WorkbenchTabNotClosable => .conflict,
-        error.InvalidWorkbenchCommand, error.WorkbenchCommandIdRequired, error.WorkbenchActorIdRequired, error.WorkbenchCommandKindRequired, error.WorkbenchTaskIdRequired, error.WorkbenchProjectIdRequired, error.WorkbenchTargetIdRequired, error.WorkbenchPinnedRequired, error.WorkbenchTabIdRequired, error.WorkbenchResourceKindRequired, error.WorkbenchResourceIdRequired, error.WorkbenchTabTitleRequired, error.WorkbenchLifecycleModeRequired, error.WorkbenchCacheLimitRequired, error.WorkbenchSidebarValueRequired, error.InvalidWorkbenchResourceKind, error.InvalidWorkbenchSidebarWidth, error.InvalidWorkbenchSidebarOrder, error.InvalidWorkbenchLifecycleMode, error.InvalidWorkbenchCacheLimit, error.UnknownWorkbenchCommand => .bad_request,
+        error.InvalidWorkbenchCommand, error.InvalidWorkbenchViewId, error.WorkbenchCommandIdRequired, error.WorkbenchActorIdRequired, error.WorkbenchCommandKindRequired, error.WorkbenchTaskIdRequired, error.WorkbenchProjectIdRequired, error.WorkbenchTargetIdRequired, error.WorkbenchPinnedRequired, error.WorkbenchTabIdRequired, error.WorkbenchResourceKindRequired, error.WorkbenchResourceIdRequired, error.WorkbenchTabTitleRequired, error.WorkbenchLifecycleModeRequired, error.WorkbenchCacheLimitRequired, error.WorkbenchSidebarValueRequired, error.InvalidWorkbenchResourceKind, error.InvalidWorkbenchSidebarWidth, error.InvalidWorkbenchSidebarOrder, error.InvalidWorkbenchLifecycleMode, error.InvalidWorkbenchCacheLimit, error.UnknownWorkbenchCommand => .bad_request,
         else => .internal_server_error,
     };
     return respondDownloadError(request, status, @errorName(failure));
@@ -3863,7 +3869,7 @@ fn serveSessionListChanged(allocator: std.mem.Allocator, io: Io, database: *sqli
     }
 }
 
-fn serveWorkbenchEvents(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, request: *http.Server.Request) !void {
+fn serveWorkbenchEvents(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, view_id: []const u8, request: *http.Server.Request) !void {
     var stream_buffer: [4096]u8 = undefined;
     var body = try request.respondStreaming(&stream_buffer, .{
         .respond_options = .{
@@ -3877,7 +3883,7 @@ fn serveWorkbenchEvents(allocator: std.mem.Allocator, io: Io, database: *sqlite.
     });
     var current_generation = workbench.generation();
     var heartbeat: usize = 0;
-    const initial = try workbench.eventPayload(allocator, io, database);
+    const initial = try workbench.eventPayload(allocator, io, database, view_id);
     defer allocator.free(initial);
     try body.writer.writeAll("event: workbench\ndata: ");
     try body.writer.writeAll(initial);
@@ -3891,7 +3897,7 @@ fn serveWorkbenchEvents(allocator: std.mem.Allocator, io: Io, database: *sqlite.
         if (next_generation != current_generation) {
             current_generation = next_generation;
             heartbeat = 0;
-            const event = try workbench.eventPayload(allocator, io, database);
+            const event = try workbench.eventPayload(allocator, io, database, view_id);
             defer allocator.free(event);
             try body.writer.writeAll("event: workbench\ndata: ");
             try body.writer.writeAll(event);

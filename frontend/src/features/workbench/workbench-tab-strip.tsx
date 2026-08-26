@@ -401,6 +401,7 @@ function ProjectWorkbenchTabStrip() {
           <WorkbenchLauncher
             onOpenTool={(tool) => {
               openTool(tool);
+              setLauncherOpen(false);
             }}
             onDismiss={() => {
               setLauncherOpen(false);

@@ -461,10 +461,28 @@ async function bootPty({
   const dataSub = term.onData((data) => {
     void pty.write(id, data);
   });
+  let lastCols = cols;
+  let lastRows = rows;
+  let lastWidth = element.clientWidth;
+  let lastHeight = element.clientHeight;
   refs.applyResize = () => {
-    if (refs.disposed || !element.isConnected) return;
+    if (
+      refs.disposed ||
+      !element.isConnected ||
+      element.clientWidth === 0 ||
+      element.clientHeight === 0
+    )
+      return;
+    const width = element.clientWidth;
+    const height = element.clientHeight;
+    if (width === lastWidth && height === lastHeight) return;
+    lastWidth = width;
+    lastHeight = height;
     try {
       fit.fit();
+      if (term.cols === lastCols && term.rows === lastRows) return;
+      lastCols = term.cols;
+      lastRows = term.rows;
       void pty.resize(id, term.cols, term.rows);
     } catch {}
   };

@@ -33,6 +33,27 @@ const listeners = new Set<() => void>();
 let projection = initialProjection;
 let source: EventSource | null = null;
 let started = false;
+let rendererViewId: string | null = null;
+
+function workbenchViewId(): string {
+  if (rendererViewId) return rendererViewId;
+  if (typeof window === "undefined") return "primary";
+  const storageKey = "local-studio.workbench.view-id";
+  try {
+    const stored = window.sessionStorage.getItem(storageKey)?.trim();
+    if (stored) return (rendererViewId = stored);
+    const created = `view-${crypto.randomUUID()}`;
+    window.sessionStorage.setItem(storageKey, created);
+    return (rendererViewId = created);
+  } catch {
+    return (rendererViewId = `view-${crypto.randomUUID()}`);
+  }
+}
+
+function workbenchUrl(path: string): string {
+  const params = new URLSearchParams({ viewId: workbenchViewId() });
+  return `${path}?${params.toString()}`;
+}
 
 function publish(next: WorkbenchProjection): void {
   if (next.revision < projection.revision) return;
@@ -43,7 +64,7 @@ function publish(next: WorkbenchProjection): void {
 
 const loadProjection = Effect.tryPromise({
   try: async () => {
-    const response = await fetch("/api/proxy/api/workbench", { cache: "no-store" });
+    const response = await fetch(workbenchUrl("/api/proxy/api/workbench"), { cache: "no-store" });
     if (!response.ok) throw new Error(`Workbench request failed with HTTP ${response.status}`);
     return decodeProjection(await response.json());
   },
@@ -58,7 +79,7 @@ const start = Effect.sync(() => {
   if (started || typeof window === "undefined") return;
   started = true;
   void Effect.runPromise(refreshWorkbench()).catch(() => undefined);
-  source = new EventSource("/api/proxy/api/workbench/events");
+  source = new EventSource(workbenchUrl("/api/proxy/api/workbench/events"));
   source.addEventListener("workbench", (event) => {
     if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
     try {
@@ -92,13 +113,13 @@ export function dispatchWorkbenchCommand(
 ): Effect.Effect<WorkbenchProjection, Error> {
   return Effect.tryPromise({
     try: async () => {
-      const response = await fetch("/api/proxy/api/workbench/commands", {
+      const response = await fetch(workbenchUrl("/api/proxy/api/workbench/commands"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...command,
           commandId: crypto.randomUUID(),
-          actorId: "local-ui",
+          actorId: workbenchViewId(),
         }),
       });
       if (!response.ok) throw new Error(`Workbench command failed with HTTP ${response.status}`);

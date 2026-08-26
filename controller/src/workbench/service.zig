@@ -6,14 +6,17 @@ const store = @import("store.zig");
 
 const Io = std.Io;
 
-pub fn projectionPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) ![]u8 {
+pub fn projectionPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, view_id: []const u8) ![]u8 {
+    if (!validViewId(view_id)) return error.InvalidWorkbenchViewId;
     try database.lock(io);
     defer database.unlock(io);
+    try store.ensureView(database, view_id);
     try store.reconcile(database);
-    return projectionLocked(allocator, database);
+    return projectionLocked(allocator, database, view_id);
 }
 
-pub fn commandPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, document: []const u8) ![]u8 {
+pub fn commandPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, view_id: []const u8, document: []const u8) ![]u8 {
+    if (!validViewId(view_id)) return error.InvalidWorkbenchViewId;
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidWorkbenchCommand;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidWorkbenchCommand;
@@ -23,28 +26,31 @@ pub fn commandPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Da
     const kind = requiredString(object, "kind") orelse return error.WorkbenchCommandKindRequired;
     try database.lock(io);
     defer database.unlock(io);
+    try store.ensureView(database, view_id);
     try store.reconcile(database);
     if (!try store.commandExists(database, command_id)) {
         var transaction = try database.begin();
         defer transaction.deinit();
-        try applyCommand(database, kind, object);
+        try applyCommand(database, view_id, kind, object);
         const next_revision = try store.bumpRevision(database);
         try store.recordCommand(database, command_id, actor_id, kind, document, next_revision);
         try transaction.commit();
         change.notify();
     }
-    return projectionLocked(allocator, database);
+    return projectionLocked(allocator, database, view_id);
 }
 
 pub fn generation() u64 {
     return change.current();
 }
 
-pub fn eventPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) ![]u8 {
+pub fn eventPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, view_id: []const u8) ![]u8 {
+    if (!validViewId(view_id)) return error.InvalidWorkbenchViewId;
     try database.lock(io);
     defer database.unlock(io);
+    try store.ensureView(database, view_id);
     try store.reconcile(database);
-    const projection = try projectionLocked(allocator, database);
+    const projection = try projectionLocked(allocator, database, view_id);
     defer allocator.free(projection);
     var command = try database.prepare("SELECT command_id FROM workbench_commands ORDER BY revision DESC LIMIT 1");
     defer command.deinit();
@@ -59,7 +65,7 @@ pub fn eventPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Data
     return output.toOwnedSlice();
 }
 
-fn projectionLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
+fn projectionLocked(allocator: std.mem.Allocator, database: *sqlite.Database, view_id: []const u8) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     var profile = try database.prepare(
@@ -68,14 +74,17 @@ fn projectionLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![
         \\       view.selected_project_id, view.selected_task_id
         \\FROM workbench_profiles AS profile
         \\JOIN workbench_devices AS device ON device.profile_id = profile.profile_id AND device.device_id = 'local'
-        \\JOIN workbench_views AS view ON view.device_id = device.device_id AND view.view_id = 'primary'
+        \\JOIN workbench_views AS view ON view.device_id = device.device_id
         \\WHERE profile.profile_id = 'default'
+        \\  AND view.view_id = ?
     );
     defer profile.deinit();
+    try profile.bindText(1, view_id);
     if (try profile.step() != .row) return error.WorkbenchProfileNotFound;
     const selected_project_id = profile.columnText(6);
     const selected_task_id = profile.columnText(7);
-    try output.writer.print("{{\"revision\":{d},\"profileId\":\"default\",\"deviceId\":\"local\",\"viewId\":\"primary\"", .{@as(u64, @intCast(@max(profile.columnInt(0), 0)))});
+    try output.writer.print("{{\"revision\":{d},\"profileId\":\"default\",\"deviceId\":\"local\",\"viewId\":", .{@as(u64, @intCast(@max(profile.columnInt(0), 0)))});
+    try std.json.Stringify.value(view_id, .{}, &output.writer);
     if (selected_project_id) |value| {
         try output.writer.writeAll(",\"selectedProjectId\":");
         try std.json.Stringify.value(value, .{}, &output.writer);
@@ -91,7 +100,7 @@ fn projectionLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![
     try output.writer.writeByte('}');
     try writeProjects(&output.writer, database);
     try writeTasks(&output.writer, database);
-    if (selected_task_id) |task_id| try writeTaskWorkbench(&output.writer, database, task_id);
+    if (selected_task_id) |task_id| try writeTaskWorkbench(&output.writer, database, view_id, task_id);
     try output.writer.writeByte('}');
     return output.toOwnedSlice();
 }
@@ -149,10 +158,16 @@ fn writeTasks(writer: *Io.Writer, database: *sqlite.Database) !void {
     try writer.writeByte(']');
 }
 
-fn writeTaskWorkbench(writer: *Io.Writer, database: *sqlite.Database, task_id: []const u8) !void {
-    var task = try database.prepare("SELECT revision, active_tab_id FROM workbench_tasks WHERE task_id = ?");
+fn writeTaskWorkbench(writer: *Io.Writer, database: *sqlite.Database, view_id: []const u8, task_id: []const u8) !void {
+    var task = try database.prepare(
+        \\SELECT task.revision, COALESCE(cursor.active_tab_id, task.active_tab_id)
+        \\FROM workbench_tasks AS task
+        \\LEFT JOIN workbench_view_tasks AS cursor ON cursor.task_id = task.task_id AND cursor.view_id = ?
+        \\WHERE task.task_id = ?
+    );
     defer task.deinit();
-    try task.bindText(1, task_id);
+    try task.bindText(1, view_id);
+    try task.bindText(2, task_id);
     if (try task.step() != .row) return;
     try writer.writeAll(",\"workbench\":{\"taskId\":");
     try std.json.Stringify.value(task_id, .{}, writer);
@@ -183,18 +198,18 @@ fn writeTaskWorkbench(writer: *Io.Writer, database: *sqlite.Database, task_id: [
     try writer.writeAll("]}");
 }
 
-fn applyCommand(database: *sqlite.Database, kind: []const u8, object: std.json.ObjectMap) !void {
-    if (std.mem.eql(u8, kind, "ensure_task")) return ensureTask(database, object);
-    if (std.mem.eql(u8, kind, "select_project")) return selectProject(database, optionalString(object, "projectId"));
-    if (std.mem.eql(u8, kind, "select_task")) return selectTask(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired);
+fn applyCommand(database: *sqlite.Database, view_id: []const u8, kind: []const u8, object: std.json.ObjectMap) !void {
+    if (std.mem.eql(u8, kind, "ensure_task")) return ensureTask(database, view_id, object);
+    if (std.mem.eql(u8, kind, "select_project")) return selectProject(database, view_id, optionalString(object, "projectId"));
+    if (std.mem.eql(u8, kind, "select_task")) return selectTask(database, view_id, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired);
     if (std.mem.eql(u8, kind, "move_project")) return moveProject(database, requiredString(object, "projectId") orelse return error.WorkbenchProjectIdRequired, optionalString(object, "targetId"));
     if (std.mem.eql(u8, kind, "move_pinned")) return movePinned(database, requiredString(object, "projectId") orelse return error.WorkbenchProjectIdRequired, requiredString(object, "targetId") orelse return error.WorkbenchTargetIdRequired);
     if (std.mem.eql(u8, kind, "pin_project")) return pinProject(database, requiredString(object, "projectId") orelse return error.WorkbenchProjectIdRequired, optionalBool(object, "pinned") orelse return error.WorkbenchPinnedRequired);
     if (std.mem.eql(u8, kind, "pin_task")) return pinTask(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, optionalBool(object, "pinned") orelse return error.WorkbenchPinnedRequired);
     if (std.mem.eql(u8, kind, "rename_task")) return renameTask(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, requiredString(object, "title") orelse return error.WorkbenchTabTitleRequired);
     if (std.mem.eql(u8, kind, "archive_task")) return archiveTask(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired);
-    if (std.mem.eql(u8, kind, "open_tab")) return openTab(database, object);
-    if (std.mem.eql(u8, kind, "select_tab")) return selectTab(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, requiredString(object, "tabId") orelse return error.WorkbenchTabIdRequired);
+    if (std.mem.eql(u8, kind, "open_tab")) return openTab(database, view_id, object);
+    if (std.mem.eql(u8, kind, "select_tab")) return selectTab(database, view_id, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, requiredString(object, "tabId") orelse return error.WorkbenchTabIdRequired);
     if (std.mem.eql(u8, kind, "move_tab")) return moveTab(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, requiredString(object, "tabId") orelse return error.WorkbenchTabIdRequired, optionalString(object, "targetId"));
     if (std.mem.eql(u8, kind, "close_tab")) return closeTab(database, requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired, requiredString(object, "tabId") orelse return error.WorkbenchTabIdRequired);
     if (std.mem.eql(u8, kind, "set_sidebar")) return setSidebar(database, object);
@@ -203,7 +218,7 @@ fn applyCommand(database: *sqlite.Database, kind: []const u8, object: std.json.O
     return error.UnknownWorkbenchCommand;
 }
 
-fn ensureTask(database: *sqlite.Database, object: std.json.ObjectMap) !void {
+fn ensureTask(database: *sqlite.Database, view_id: []const u8, object: std.json.ObjectMap) !void {
     const task_id = requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired;
     const title = requiredString(object, "title") orelse return error.WorkbenchTabTitleRequired;
     const project_id = optionalString(object, "projectId");
@@ -229,33 +244,43 @@ fn ensureTask(database: *sqlite.Database, object: std.json.ObjectMap) !void {
     defer selection.deinit();
     try selection.bindText(1, task_id);
     if (try selection.step() != .done) return error.DatabaseUnexpectedRow;
-    try selectTask(database, task_id);
+    try selectTask(database, view_id, task_id);
 }
 
-fn selectProject(database: *sqlite.Database, project_id: ?[]const u8) !void {
-    var statement = try database.prepare("UPDATE workbench_views SET selected_project_id = ?, selected_task_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE view_id = 'primary'");
+fn selectProject(database: *sqlite.Database, view_id: []const u8, project_id: ?[]const u8) !void {
+    var statement = try database.prepare("UPDATE workbench_views SET selected_project_id = ?, selected_task_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE view_id = ?");
     defer statement.deinit();
     if (project_id) |value| try statement.bindText(1, value) else try statement.bindNull(1);
+    try statement.bindText(2, view_id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
-fn selectTask(database: *sqlite.Database, task_id: []const u8) !void {
+fn selectTask(database: *sqlite.Database, view_id: []const u8, task_id: []const u8) !void {
     var available = try database.prepare("SELECT connection_state FROM workbench_tasks WHERE task_id = ?");
     defer available.deinit();
     try available.bindText(1, task_id);
     if (try available.step() != .row) return error.WorkbenchTaskNotFound;
     if (!std.mem.eql(u8, available.columnText(0) orelse return error.InvalidWorkbenchTask, "connected")) return error.WorkbenchTaskUnavailable;
+    var cursor = try database.prepare(
+        \\INSERT OR IGNORE INTO workbench_view_tasks (view_id, task_id, active_tab_id)
+        \\SELECT ?, task_id, active_tab_id FROM workbench_tasks WHERE task_id = ?
+    );
+    defer cursor.deinit();
+    try cursor.bindText(1, view_id);
+    try cursor.bindText(2, task_id);
+    if (try cursor.step() != .done) return error.DatabaseUnexpectedRow;
     var statement = try database.prepare(
         \\UPDATE workbench_views
         \\SET selected_task_id = ?,
         \\    selected_project_id = (SELECT COALESCE(project_id, (SELECT project_id FROM agent_sessions WHERE session_id = ?)) FROM workbench_tasks WHERE task_id = ?),
         \\    updated_at = CURRENT_TIMESTAMP
-        \\WHERE view_id = 'primary'
+        \\WHERE view_id = ?
     );
     defer statement.deinit();
     try statement.bindText(1, task_id);
     try statement.bindText(2, task_id);
     try statement.bindText(3, task_id);
+    try statement.bindText(4, view_id);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
@@ -323,7 +348,7 @@ fn archiveTask(database: *sqlite.Database, task_id: []const u8) !void {
     if (try session.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
-fn openTab(database: *sqlite.Database, object: std.json.ObjectMap) !void {
+fn openTab(database: *sqlite.Database, view_id: []const u8, object: std.json.ObjectMap) !void {
     const task_id = requiredString(object, "taskId") orelse return error.WorkbenchTaskIdRequired;
     const tab_id = requiredString(object, "tabId") orelse return error.WorkbenchTabIdRequired;
     const resource_kind = requiredString(object, "resourceKind") orelse return error.WorkbenchResourceKindRequired;
@@ -344,17 +369,24 @@ fn openTab(database: *sqlite.Database, object: std.json.ObjectMap) !void {
     try statement.bindText(6, task_id);
     try statement.bindInt(7, if (optionalBool(object, "closable") orelse true) 1 else 0);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
-    try selectTab(database, task_id, tab_id);
+    try selectTab(database, view_id, task_id, tab_id);
 }
 
-fn selectTab(database: *sqlite.Database, task_id: []const u8, tab_id: []const u8) !void {
-    var statement = try database.prepare("UPDATE workbench_tasks SET active_tab_id = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND EXISTS (SELECT 1 FROM workbench_tabs WHERE tab_id = ? AND task_id = ?)");
+fn selectTab(database: *sqlite.Database, view_id: []const u8, task_id: []const u8, tab_id: []const u8) !void {
+    var statement = try database.prepare(
+        \\INSERT INTO workbench_view_tasks (view_id, task_id, active_tab_id, updated_at)
+        \\SELECT ?, ?, ?, CURRENT_TIMESTAMP
+        \\WHERE EXISTS (SELECT 1 FROM workbench_tabs WHERE tab_id = ? AND task_id = ?)
+        \\ON CONFLICT(view_id, task_id) DO UPDATE SET active_tab_id = excluded.active_tab_id, updated_at = CURRENT_TIMESTAMP
+    );
     defer statement.deinit();
-    try statement.bindText(1, tab_id);
+    try statement.bindText(1, view_id);
     try statement.bindText(2, task_id);
     try statement.bindText(3, tab_id);
-    try statement.bindText(4, task_id);
+    try statement.bindText(4, tab_id);
+    try statement.bindText(5, task_id);
     if (try statement.step() != .done or database.changes() == 0) return error.WorkbenchTabNotFound;
+    try bumpTask(database, task_id);
 }
 
 fn moveTab(database: *sqlite.Database, task_id: []const u8, tab_id: []const u8, target_id: ?[]const u8) !void {
@@ -407,12 +439,17 @@ fn closeTab(database: *sqlite.Database, task_id: []const u8, tab_id: []const u8)
     try statement.bindText(1, task_id);
     try statement.bindText(2, tab_id);
     if (try statement.step() != .done or database.changes() == 0) return error.WorkbenchTabNotClosable;
-    var active = try database.prepare("UPDATE workbench_tasks SET active_tab_id = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND active_tab_id = ?");
-    defer active.deinit();
-    if (next_tab_id) |value| try active.bindText(1, value) else try active.bindNull(1);
-    try active.bindText(2, task_id);
-    try active.bindText(3, tab_id);
-    if (try active.step() != .done) return error.DatabaseUnexpectedRow;
+    var cursors = try database.prepare("UPDATE workbench_view_tasks SET active_tab_id = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND active_tab_id = ?");
+    defer cursors.deinit();
+    if (next_tab_id) |value| try cursors.bindText(1, value) else try cursors.bindNull(1);
+    try cursors.bindText(2, task_id);
+    try cursors.bindText(3, tab_id);
+    if (try cursors.step() != .done) return error.DatabaseUnexpectedRow;
+    var legacy = try database.prepare("UPDATE workbench_tasks SET active_tab_id = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?");
+    defer legacy.deinit();
+    if (next_tab_id) |value| try legacy.bindText(1, value) else try legacy.bindNull(1);
+    try legacy.bindText(2, task_id);
+    if (try legacy.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
 fn setSidebar(database: *sqlite.Database, object: std.json.ObjectMap) !void {
@@ -467,6 +504,12 @@ fn bumpTask(database: *sqlite.Database, task_id: []const u8) !void {
 fn validResourceKind(value: []const u8) bool {
     _ = contract.contract_version;
     return std.mem.eql(u8, value, "chat") or std.mem.eql(u8, value, "terminal") or std.mem.eql(u8, value, "file") or std.mem.eql(u8, value, "browser") or std.mem.eql(u8, value, "diff") or std.mem.eql(u8, value, "explorer");
+}
+
+fn validViewId(value: []const u8) bool {
+    if (value.len == 0 or value.len > 128) return false;
+    for (value) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-' and byte != '.' and byte != ':') return false;
+    return true;
 }
 
 fn requiredString(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {

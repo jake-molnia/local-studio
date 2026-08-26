@@ -53,6 +53,13 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\  active_tab_id TEXT,
         \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         \\);
+        \\CREATE TABLE IF NOT EXISTS workbench_view_tasks (
+        \\  view_id TEXT NOT NULL REFERENCES workbench_views(view_id) ON DELETE CASCADE,
+        \\  task_id TEXT NOT NULL REFERENCES workbench_tasks(task_id) ON DELETE CASCADE,
+        \\  active_tab_id TEXT,
+        \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \\  PRIMARY KEY(view_id, task_id)
+        \\);
         \\CREATE TABLE IF NOT EXISTS workbench_tabs (
         \\  tab_id TEXT PRIMARY KEY,
         \\  task_id TEXT NOT NULL REFERENCES workbench_tasks(task_id) ON DELETE CASCADE,
@@ -102,7 +109,16 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\SET active_tab_id = 'chat:' || task_id
         \\WHERE active_tab_id IS NULL
         \\  AND EXISTS (SELECT 1 FROM workbench_tabs WHERE tab_id = 'chat:' || workbench_tasks.task_id);
+        \\INSERT OR IGNORE INTO workbench_view_tasks (view_id, task_id, active_tab_id)
+        \\SELECT 'primary', task_id, active_tab_id FROM workbench_tasks;
     );
+}
+
+pub fn ensureView(database: *sqlite.Database, view_id: []const u8) !void {
+    var statement = try database.prepare("INSERT OR IGNORE INTO workbench_views (view_id, device_id, selected_project_id) VALUES (?, 'local', 'chats')");
+    defer statement.deinit();
+    try statement.bindText(1, view_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
 pub fn reconcile(database: *sqlite.Database) !void {
@@ -126,15 +142,16 @@ pub fn reconcile(database: *sqlite.Database) !void {
         \\WHERE task_id IN (SELECT session_id FROM agent_sessions WHERE status = 'archived');
         \\UPDATE workbench_views
         \\SET selected_project_id = 'chats', selected_task_id = NULL
-        \\WHERE view_id = 'primary'
-        \\  AND selected_project_id IS NOT NULL
+        \\WHERE selected_project_id IS NOT NULL
         \\  AND selected_project_id != 'chats'
         \\  AND NOT EXISTS (SELECT 1 FROM agent_projects WHERE project_id = selected_project_id);
         \\UPDATE workbench_views
         \\SET selected_task_id = NULL
-        \\WHERE view_id = 'primary'
-        \\  AND selected_task_id IS NOT NULL
+        \\WHERE selected_task_id IS NOT NULL
         \\  AND NOT EXISTS (SELECT 1 FROM workbench_tasks WHERE task_id = selected_task_id AND connection_state = 'connected');
+        \\DELETE FROM workbench_view_tasks
+        \\WHERE active_tab_id IS NOT NULL
+        \\  AND NOT EXISTS (SELECT 1 FROM workbench_tabs WHERE tab_id = active_tab_id AND task_id = workbench_view_tasks.task_id);
     );
 }
 
