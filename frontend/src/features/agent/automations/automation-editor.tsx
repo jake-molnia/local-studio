@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { AppContentColumn, Button, FormField, Input, Select, Textarea } from "@/ui";
+import {
+  AppContentColumn,
+  Button,
+  FormField,
+  Input,
+  SegmentedControl,
+  Select,
+  Textarea,
+} from "@/ui";
 import { Clock, Pause, Play, Plus, Trash2, X } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import type { Automation, AutomationSchedule } from "@shared/agent/automation";
@@ -9,6 +17,7 @@ import { AGENT_HARNESSES } from "@shared/agent/harness-id";
 import type { AutomationModel } from "./automation-api";
 import { AutomationRunHistory } from "./automation-run-history";
 import { useSandboxAccounts } from "@/features/agent/ui/use-sandbox-accounts";
+import { AgentModelPicker } from "@/features/agent/ui/agent-model-picker";
 import {
   NEW_AUTOMATION_DRAFT,
   draftFromAutomation,
@@ -168,127 +177,107 @@ export function AutomationEditor({
               <ScheduleEditor schedule={draft.schedule} onChange={updateSchedule} />
             </div>
 
-            <div className="grid gap-4 border-t border-(--ui-separator) pt-5 sm:grid-cols-2">
-              <FormField label="Runtime" required>
-                <Select
-                  value={draft.executionKind}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      executionKind: event.target.value === "project" ? "project" : "chat",
-                    }))
-                  }
-                >
-                  <option value="chat">Chat</option>
-                  <option value="project">Project task</option>
-                </Select>
-              </FormField>
-              <FormField label="Model" required>
-                <Select
-                  value={draft.modelId}
-                  onChange={(event) => {
-                    const model = models.find((candidate) => candidate.id === event.target.value);
-                    const readyRoute = model?.routes.find((route) => route.status === "ready");
-                    setDraft((current) => ({
-                      ...current,
-                      modelId: event.target.value,
-                      modelRouteId: model?.defaultRouteId ?? readyRoute?.id ?? "",
-                    }));
-                  }}
-                >
-                  {models.length === 0 ? <option value="">No models available</option> : null}
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
-              <FormField label="Route" required>
-                <Select
-                  value={draft.modelRouteId}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, modelRouteId: event.target.value }))
-                  }
-                >
-                  {(models.find((model) => model.id === draft.modelId)?.routes ?? [])
-                    .filter((route) => route.status === "ready")
-                    .map((route) => (
-                      <option key={route.id} value={route.id}>
-                        {route.label}
-                      </option>
-                    ))}
-                </Select>
-              </FormField>
-              {draft.executionKind === "project" ? (
-                <>
-                  <FormField label="Harness" required>
-                    <Select
-                      value={draft.harness}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          harness: event.target.value as AutomationDraft["harness"],
-                        }))
+            <div className="space-y-4 border-t border-(--ui-separator) pt-5">
+              <div className="grid items-end gap-4 sm:grid-cols-2">
+                <FormField label="Runtime" required>
+                  <SegmentedControl
+                    className="w-fit"
+                    value={draft.executionKind}
+                    onChange={(executionKind) =>
+                      setDraft((current) => ({ ...current, executionKind }))
+                    }
+                    items={[
+                      { id: "chat", label: "Chat" },
+                      { id: "project", label: "Project task" },
+                    ]}
+                  />
+                </FormField>
+                <FormField label="Model" required>
+                  <div className="flex min-h-7 items-center">
+                    <AgentModelPicker
+                      modelsOnly
+                      models={[...models]}
+                      selectedModel={draft.modelId}
+                      selectedRoute={draft.modelRouteId}
+                      loading={models.length === 0}
+                      onSelect={(modelId, modelRouteId) =>
+                        setDraft((current) => ({ ...current, modelId, modelRouteId }))
                       }
-                    >
-                      {AGENT_HARNESSES.map((harness) => (
-                        <option key={harness} value={harness}>
-                          {harness}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="Working directory" required>
-                    <Input
-                      value={draft.cwd}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, cwd: event.target.value }))
-                      }
-                      placeholder="/path/to/project"
                     />
-                  </FormField>
-                  <FormField label="Placement" required>
-                    <Select
-                      value={draft.placement}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          placement: event.target.value === "daytona" ? "daytona" : "local",
-                          sandboxAccountId:
-                            event.target.value === "daytona"
-                              ? current.sandboxAccountId || daytonaAccounts[0]?.id || ""
-                              : "",
-                        }))
-                      }
-                    >
-                      <option value="local">Local</option>
-                      <option value="daytona" disabled={daytonaAccounts.length === 0}>
-                        Daytona
-                      </option>
-                    </Select>
-                  </FormField>
-                  {draft.placement === "daytona" ? (
-                    <FormField label="Daytona account" required>
+                  </div>
+                </FormField>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {draft.executionKind === "project" ? (
+                  <>
+                    <FormField label="Harness" required>
                       <Select
-                        value={draft.sandboxAccountId}
+                        value={draft.harness}
                         onChange={(event) =>
                           setDraft((current) => ({
                             ...current,
-                            sandboxAccountId: event.target.value,
+                            harness: event.target.value as AutomationDraft["harness"],
                           }))
                         }
                       >
-                        {daytonaAccounts.map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.label}
+                        {AGENT_HARNESSES.map((harness) => (
+                          <option key={harness} value={harness}>
+                            {harness}
                           </option>
                         ))}
                       </Select>
                     </FormField>
-                  ) : null}
-                </>
-              ) : null}
+                    <FormField label="Working directory" required>
+                      <Input
+                        value={draft.cwd}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, cwd: event.target.value }))
+                        }
+                        placeholder="/path/to/project"
+                      />
+                    </FormField>
+                    <FormField label="Placement" required>
+                      <Select
+                        value={draft.placement}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            placement: event.target.value === "daytona" ? "daytona" : "local",
+                            sandboxAccountId:
+                              event.target.value === "daytona"
+                                ? current.sandboxAccountId || daytonaAccounts[0]?.id || ""
+                                : "",
+                          }))
+                        }
+                      >
+                        <option value="local">Local</option>
+                        <option value="daytona" disabled={daytonaAccounts.length === 0}>
+                          Daytona
+                        </option>
+                      </Select>
+                    </FormField>
+                    {draft.placement === "daytona" ? (
+                      <FormField label="Daytona account" required>
+                        <Select
+                          value={draft.sandboxAccountId}
+                          onChange={(event) =>
+                            setDraft((current) => ({
+                              ...current,
+                              sandboxAccountId: event.target.value,
+                            }))
+                          }
+                        >
+                          {daytonaAccounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormField>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
 
             {!creating && automation?.runs.length ? (

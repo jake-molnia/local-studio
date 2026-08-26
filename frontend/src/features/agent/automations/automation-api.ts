@@ -5,7 +5,8 @@ import {
   type Automation,
 } from "@shared/agent/automation";
 import type { AutomationDraft } from "./automation-model";
-import { ModelCatalogResponseSchema, type ModelOffer } from "@local-studio/contracts/model-catalog";
+import { ModelCatalogResponseSchema } from "@local-studio/contracts/model-catalog";
+import { agentModelsFromCatalog, type CatalogAgentModel } from "@/features/agent/models";
 
 const RunResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
@@ -16,7 +17,7 @@ const DeleteResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
 });
 
-export type AutomationModel = ModelOffer;
+export type AutomationModel = CatalogAgentModel;
 
 async function errorMessage(response: Response): Promise<string> {
   const fallback = `Request failed with HTTP ${response.status}`;
@@ -61,7 +62,7 @@ export function listAutomations(): Effect.Effect<Automation[], Error> {
 export function listAutomationModels(): Effect.Effect<AutomationModel[], Error> {
   return Effect.map(
     requestJson("/api/agent/models", Schema.decodeUnknownSync(ModelCatalogResponseSchema)),
-    ({ models }) => models.filter((model) => model.available),
+    (catalog) => agentModelsFromCatalog(catalog).filter((model) => model.available),
   );
 }
 

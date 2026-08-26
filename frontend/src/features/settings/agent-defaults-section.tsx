@@ -271,9 +271,11 @@ export function AgentDefaultsSection() {
             selectedRoute={messagingChoice?.routeId}
             loading={models.length === 0}
             onSelect={(modelId, routeId) => {
-              void Effect.runPromise(saveMessagingDefault(modelId, routeId)).then(
-                setMessagingDefault,
-              );
+              void Effect.runPromise(
+                saveMessagingDefault(modelId, routeId).pipe(
+                  Effect.catch(() => Effect.succeed(messagingDefault)),
+                ),
+              ).then(setMessagingDefault);
             }}
           />
         }
