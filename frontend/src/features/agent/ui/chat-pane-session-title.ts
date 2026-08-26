@@ -74,9 +74,9 @@ export function useChatPaneSessionTitle({
       // running turn's nav effect never re-fires. Side-chat pane excluded.
       if (typeof window !== "undefined" && paneId !== "computer-side-chat" && piSessionId) {
         const params = new URLSearchParams(window.location.search);
-        if (params.get("new") !== null && params.get("session") !== piSessionId) {
+        if (params.get("new") !== null && params.get("session") !== activeTabId) {
           params.delete("new");
-          params.set("session", piSessionId);
+          params.set("session", activeTabId);
           window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
         }
       }

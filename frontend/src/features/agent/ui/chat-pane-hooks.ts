@@ -74,11 +74,11 @@ export function useChatPaneRuntimeHandle({
     if (!piSessionId || messages.length > 0 || status !== "idle") return;
     if (replayedRef.current.has(activeTabId)) return;
     replayedRef.current.add(activeTabId);
-    void engine.loadAndReplay(piSessionId, activeTabId);
+    void engine.loadAndReplay(activeTab.id, activeTabId);
   }, [activeTab, activeTabId, isFocused, engine]);
   const loadAndReplay = useCallback(
-    (piSessionId: string) =>
-      activeTabId ? engine.loadAndReplay(piSessionId, activeTabId) : Promise.resolve(),
+    (sessionId: string) =>
+      activeTabId ? engine.loadAndReplay(sessionId, activeTabId) : Promise.resolve(),
     [activeTabId, engine],
   );
   const compactSession = useCallback(() => {

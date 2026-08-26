@@ -1,6 +1,10 @@
 import { Effect } from "effect";
 import { cleanSessionTitle } from "@/features/agent/messages/helpers";
-import { findPaneByPiSessionId, paneSessionId } from "@/features/agent/runtime/selectors";
+import {
+  findPaneByPiSessionId,
+  findPaneBySessionId,
+  paneSessionId,
+} from "@/features/agent/runtime/selectors";
 import type { Session, SessionId } from "@/features/agent/runtime/types";
 import {
   markSessionActivitySeen,
@@ -189,7 +193,7 @@ function openSessionSnapshot(
   const usedSkills = usedSkillsForSession(tab);
   return {
     id: tab.id,
-    threadId: tab.piSessionId,
+    threadId: tab.id,
     projectId: tab.projectId ?? "",
     cwd: tab.cwd ?? "",
     paneId,
@@ -278,13 +282,13 @@ function publishWorkspaceSessions(
 }
 
 function queueLocatedReplay(
-  piSessionId: string | null | undefined,
+  sessionId: string | null | undefined,
   state: WorkspaceState,
   deps: WorkspaceEffectDeps,
 ): void {
-  if (!piSessionId) return;
-  const located = findPaneByPiSessionId(state, piSessionId);
-  if (located) deps.queueReplay(located.paneId, piSessionId);
+  if (!sessionId) return;
+  const located = findPaneBySessionId(state, sessionId) ?? findPaneByPiSessionId(state, sessionId);
+  if (located) deps.queueReplay(located.paneId, sessionId);
 }
 
 function queueReplayEffects(
@@ -304,7 +308,7 @@ function queueReplayEffects(
       }
       return;
     case "urlNavRequested":
-      if (action.sessionId && !findPaneByPiSessionId(prevState, action.sessionId)) {
+      if (action.sessionId && !findPaneBySessionId(prevState, action.sessionId)) {
         queueLocatedReplay(action.sessionId, nextState, deps);
       }
       return;

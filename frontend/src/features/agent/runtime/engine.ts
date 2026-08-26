@@ -68,7 +68,7 @@ export type SessionEngine = {
     piSessionId?: string | null,
   ) => Promise<api.RuntimeStatus | null>;
   abortTurn: (sessionId: SessionId) => Promise<api.AbortSessionResult>;
-  loadAndReplay: (piSessionId: string, sessionId: SessionId) => Promise<void>;
+  loadAndReplay: (canonicalSessionId: string, sessionId: SessionId) => Promise<void>;
   /** Fetch and prepend the previous page of older history (tail paging). */
   loadEarlier: (sessionId: SessionId) => Promise<void>;
   compact: (sessionId: SessionId) => Promise<void>;
@@ -259,7 +259,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
   );
 
   const loadAndReplay = useCallback(
-    (piSessionId: string, sessionId: SessionId) => {
+    (canonicalSessionId: string, sessionId: SessionId) => {
       if (inFlightReplays.has(sessionId)) return Promise.resolve();
       inFlightReplays.add(sessionId);
       return Effect.runPromise(
@@ -277,11 +277,11 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           const [replayResult, runtimeStatus] = yield* Effect.all(
             [
               Effect.tryPromise({
-                try: () => api.loadCanonicalSession(piSessionId, cwd),
+                try: () => api.loadCanonicalSession(canonicalSessionId, cwd),
                 catch: (error) => error,
               }).pipe(Effect.result),
               Effect.tryPromise({
-                try: () => api.loadRuntimeStatus(runtimeId, piSessionId),
+                try: () => api.loadRuntimeStatus(runtimeId),
                 catch: () => null,
               }),
             ],
@@ -289,7 +289,12 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           );
           if (replayResult._tag === "Success") {
             const { events, cursor, meta } = replayResult.success;
-            const runtimeActive = runtimeCanHydrateCanonicalSession(runtimeStatus, piSessionId);
+            const nativeSessionId =
+              meta?.piSessionId ??
+              runtimeStatus?.nativeSessionId ??
+              runtimeStatus?.piSessionId ??
+              null;
+            const runtimeActive = runtimeCanHydrateCanonicalSession(runtimeStatus, nativeSessionId);
             const replayEvents = mergeCanonicalAndRuntimeEvents(
               events,
               runtimeActive ? runtimeStatus?.events : [],
@@ -301,11 +306,14 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               modelId: replayModelId,
               tokenStats,
             } = foldSessionEvents(replayEvents);
-            const replaySeq = replayCursorAfterRuntimeHydration(runtimeStatus, piSessionId);
+            const replaySeq = replayCursorAfterRuntimeHydration(
+              runtimeStatus,
+              nativeSessionId ?? "",
+            );
             updateSession(sessionId, (session) => ({
               ...session,
               messages,
-              piSessionId,
+              piSessionId: nativeSessionId,
               cwd: session.cwd || cwd,
               // Head-scan meta carries the real session model/title; the fold's
               // own title would be the tail slice's first user message, not the
@@ -341,7 +349,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
             // session idle (which would drop the live stream — reconcile only
             // subscribes for live statuses): keep the seeded history, mark it running,
             // and reset the cursor so the reattached SSE replays the runtime backlog.
-            if (runtimeCanHydrateCanonicalSession(runtimeStatus, piSessionId)) {
+            if (runtimeCanHydrateCanonicalSession(runtimeStatus, null)) {
               updateSession(sessionId, (session) => ({
                 ...session,
                 contextUsage: api.runtimeContextUsage(runtimeStatus, session.contextUsage),
@@ -381,11 +389,10 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       if (!session || !session.piSessionId || !cwd || cursor == null) return Promise.resolve();
       if (loadingEarlierRef.current.has(sessionId)) return Promise.resolve();
       loadingEarlierRef.current.add(sessionId);
-      const piSessionId = session.piSessionId;
       return Effect.runPromise(
         Effect.gen(function* () {
           const result = yield* Effect.tryPromise({
-            try: () => api.loadCanonicalSession(piSessionId, cwd, { before: cursor }),
+            try: () => api.loadCanonicalSession(session.id, cwd, { before: cursor }),
             catch: (error) => error,
           }).pipe(Effect.result);
           if (result._tag !== "Success") return;
@@ -432,10 +439,9 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               }),
             catch: (error) => error,
           });
-          const nextSessionId = result.status?.piSessionId || session.piSessionId;
-          if (nextSessionId) {
+          if (result.status?.piSessionId || session.piSessionId) {
             yield* Effect.tryPromise({
-              try: () => loadAndReplay(nextSessionId, sessionId),
+              try: () => loadAndReplay(session.id, sessionId),
               catch: (error) => error,
             });
           }
