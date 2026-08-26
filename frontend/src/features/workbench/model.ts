@@ -16,8 +16,6 @@ export type RenderedWorkbenchTab = {
   status?: string;
 };
 
-export type WorkbenchTab = RenderedWorkbenchTab;
-
 export const COMPUTER_TAB_TITLES: Record<ComputerTab, string> = {
   "side-chat": "Side chat",
   browser: "Browser",

@@ -10,7 +10,7 @@ import { CHATS_PROJECT_ID } from "@/features/agent/projects/types";
 import { useComputerTools, useToolsActions } from "@/features/agent/tools/context";
 import { workspaceCommands } from "@/features/agent/workspace/commands";
 import { hrefWithOpenNonce } from "@/features/agent/ui/projects-nav/helpers";
-import { emptyTaskTab, taskTab, type WorkbenchTab } from "@/features/workbench/model";
+import { emptyTaskTab, taskTab, type RenderedWorkbenchTab } from "@/features/workbench/model";
 import {
   WorkbenchLauncher,
   WorkbenchProjectTabList,
@@ -68,9 +68,9 @@ function controllerTaskId(
 
 function legacyTab(
   tab: ControllerTab,
-  scope: WorkbenchTab,
+  scope: RenderedWorkbenchTab,
   status: string | undefined,
-): WorkbenchTab {
+): RenderedWorkbenchTab {
   const mainChat = tab.kind === "chat" && !tab.closable;
   const tool = mainChat ? undefined : KIND_TOOL[tab.kind];
   return {
@@ -146,7 +146,7 @@ function ProjectWorkbenchTabStrip() {
     );
   }, [navigationKey, projection.selectedTaskId, taskId]);
 
-  const activateTab = (tab: WorkbenchTab, origin: "pointer" | "keyboard" = "pointer") => {
+  const activateTab = (tab: RenderedWorkbenchTab, origin: "pointer" | "keyboard" = "pointer") => {
     if (origin === "pointer") clearKeyboardTabFocus();
     setLauncherOpen(false);
     const controllerTab = controllerTabsById.get(tab.id);
