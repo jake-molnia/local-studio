@@ -15,7 +15,7 @@ import {
 } from "@/ui/icon-registry";
 import { isWorkingStatus } from "@/features/agent/runtime/session-status";
 import type { ComputerTab } from "@/features/agent/tools/types";
-import { COMPUTER_TAB_TITLES, type WorkbenchTab } from "@/features/workbench/model";
+import { COMPUTER_TAB_TITLES, type RenderedWorkbenchTab } from "@/features/workbench/model";
 import { handleLauncherKeyDown, projectInitial } from "@/features/workbench/workbench-tab-helpers";
 import { POPOVER_SURFACE_CLASS } from "@/ui/popover";
 import { cx } from "@/ui/utils";
@@ -30,7 +30,7 @@ const TOOL_ICONS: Record<ComputerTab, WorkbenchIcon> = {
   terminal: TerminalSquare,
 };
 
-function tabIcon(tab: WorkbenchTab): WorkbenchIcon {
+function tabIcon(tab: RenderedWorkbenchTab): WorkbenchIcon {
   return tab.kind === "task" ? ChatIcon : TOOL_ICONS[tab.tool ?? "side-chat"];
 }
 
@@ -54,9 +54,9 @@ export function WorkbenchProjectTabList({
   projectName: string;
   threadTitle: string;
   sidebarCollapsed?: boolean;
-  orderedTabs: readonly WorkbenchTab[];
+  orderedTabs: readonly RenderedWorkbenchTab[];
   activeId: string | null;
-  onActivate: (tab: WorkbenchTab) => void;
+  onActivate: (tab: RenderedWorkbenchTab) => void;
   onClose: (tabId: string) => void;
   onFocusTab: (index: number) => void;
   onDragStart: (tabId: string) => void;
@@ -142,7 +142,7 @@ export function WorkbenchTabButton({
   dropPosition,
   register,
 }: {
-  tab: WorkbenchTab;
+  tab: RenderedWorkbenchTab;
   active: boolean;
   ariaLabel: string;
   projectName: string;
