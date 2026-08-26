@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { ErrorBox, Button } from "@/ui";
+import { ErrorBox, Button, Input, Select } from "@/ui";
+import { Schema } from "effect";
+import {
+  CodeStorageAccountsResponseSchema,
+  type CodeStorageAccountEntry,
+} from "@shared/agent/code-storage-account-contract";
 import type { GitAction, GitState } from "@/features/agent/contracts";
 import { safeJson } from "@/features/agent/safe-json";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -26,6 +31,12 @@ export function GitDiffPanel({ cwd }: { cwd: string | null }) {
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [commitMessage, setCommitMessage] = useState("");
   const [viewMode, setViewMode] = useState<DiffViewMode>("unified");
+  const [mirrorOpen, setMirrorOpen] = useState(false);
+  const [mirrorAccounts, setMirrorAccounts] = useState<CodeStorageAccountEntry[]>([]);
+  const [mirrorAccountId, setMirrorAccountId] = useState("");
+  const [mirrorRepository, setMirrorRepository] = useState("");
+  const [mirrorStatus, setMirrorStatus] = useState("");
+  const [mirroring, setMirroring] = useState(false);
 
   const load = useCallback(async () => {
     if (!cwd) {
@@ -93,6 +104,45 @@ export function GitDiffPanel({ cwd }: { cwd: string | null }) {
   }, [load]);
   const files = useMemo(() => parseUnifiedDiff(payload?.diff ?? ""), [payload?.diff]);
 
+  const openMirror = useCallback(async () => {
+    setMirrorOpen(true);
+    setMirrorStatus("");
+    try {
+      const response = await fetch("/api/agent/accounts/code-storage", { cache: "no-store" });
+      const decoded = Schema.decodeUnknownSync(CodeStorageAccountsResponseSchema)(
+        await response.json(),
+      );
+      setMirrorAccounts([...decoded.accounts]);
+      setMirrorAccountId((current) => current || decoded.accounts[0]?.id || "");
+    } catch {
+      setMirrorStatus("Connect a code.storage account in Settings first.");
+    }
+  }, []);
+
+  const mirror = useCallback(async () => {
+    if (!cwd || !mirrorAccountId || !mirrorRepository.trim()) return;
+    setMirroring(true);
+    setMirrorStatus("");
+    try {
+      const response = await fetch("/api/agent/git/mirror", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: mirrorAccountId,
+          repository: mirrorRepository.trim(),
+          cwd,
+        }),
+      });
+      const result = await safeJson<{ error?: string; checkpointRef?: string }>(response);
+      if (!response.ok) throw new Error(result.error || "Mirror failed");
+      setMirrorStatus(`Mirrored with checkpoint ${result.checkpointRef ?? "created"}.`);
+    } catch (error) {
+      setMirrorStatus(error instanceof Error ? error.message : "Mirror failed");
+    } finally {
+      setMirroring(false);
+    }
+  }, [cwd, mirrorAccountId, mirrorRepository]);
+
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-(--color-panel)">
       <GitPanelHeader cwd={cwd} payload={payload} />
@@ -103,6 +153,45 @@ export function GitDiffPanel({ cwd }: { cwd: string | null }) {
         onCommitMessage={setCommitMessage}
         onRun={run}
       />
+      {payload?.isRepo ? (
+        <div className="border-b border-(--border)/70 bg-(--color-panel) px-2 py-1.5 text-[length:var(--fs-xs)]">
+          {!mirrorOpen ? (
+            <Button variant="ghost" size="sm" onClick={() => void openMirror()}>
+              Mirror to code.storage
+            </Button>
+          ) : (
+            <div className="grid gap-1.5 sm:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_auto]">
+              <Select
+                value={mirrorAccountId}
+                onChange={(event) => setMirrorAccountId(event.target.value)}
+                aria-label="code.storage account"
+              >
+                {mirrorAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.label}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                value={mirrorRepository}
+                onChange={(event) => setMirrorRepository(event.target.value)}
+                placeholder="repository name"
+                aria-label="code.storage repository"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={mirroring}
+                disabled={!mirrorAccountId || !mirrorRepository.trim()}
+                onClick={() => void mirror()}
+              >
+                Mirror
+              </Button>
+              {mirrorStatus ? <p className="sm:col-span-3 text-(--dim)">{mirrorStatus}</p> : null}
+            </div>
+          )}
+        </div>
+      ) : null}
       <PrSection
         pr={prPayload?.pr ?? null}
         merging={merging}

@@ -6,6 +6,68 @@ const max_line_bytes = 1024 * 1024;
 const max_response_bytes = 8 * 1024 * 1024;
 const max_git_output_bytes = 2 * 1024 * 1024;
 
+pub const MirrorResult = struct {
+    allocator: std.mem.Allocator,
+    checkpoint_ref: []u8,
+    checkpoint_sha: []u8,
+    repository_url: []u8,
+
+    pub fn deinit(result: *MirrorResult) void {
+        result.allocator.free(result.checkpoint_ref);
+        result.allocator.free(result.checkpoint_sha);
+        result.allocator.free(result.repository_url);
+        result.* = undefined;
+    }
+};
+
+pub fn mirrorRepository(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8, path: []const u8, session_id: []const u8) !MirrorResult {
+    try auth.validateRepository(repository);
+    if (!std.fs.path.isAbsolute(path)) return error.CodeStoragePathMustBeAbsolute;
+    const token = try auth.mint(allocator, io, organization, account_id, private_key, repository, &.{ "git:read", "git:write" });
+    defer allocator.free(token);
+    const remote = try std.fmt.allocPrint(allocator, "https://t:{s}@{s}.code.storage/{s}.git", .{ token, organization, repository });
+    defer allocator.free(remote);
+    const repository_url = try std.fmt.allocPrint(allocator, "https://{s}.code.storage/{s}.git", .{ organization, repository });
+    errdefer allocator.free(repository_url);
+    const head = try gitOutput(allocator, io, environment, path, &.{ "rev-parse", "--verify", "HEAD" }, null);
+    defer allocator.free(head);
+    var random: [8]u8 = undefined;
+    io.random(&random);
+    const suffix = std.fmt.bytesToHex(random, .lower);
+    const index_name = try std.fmt.allocPrint(allocator, "local-studio-checkpoint-index-{s}", .{suffix[0..]});
+    defer allocator.free(index_name);
+    const index_value = try gitOutput(allocator, io, environment, path, &.{ "rev-parse", "--git-path", index_name }, null);
+    defer allocator.free(index_value);
+    const index_path_value = std.mem.trim(u8, index_value, " \t\r\n");
+    const index_path = if (std.fs.path.isAbsolute(index_path_value)) try allocator.dupe(u8, index_path_value) else try std.fs.path.join(allocator, &.{ path, index_path_value });
+    defer allocator.free(index_path);
+    defer Io.Dir.cwd().deleteFile(io, index_path) catch {};
+    var index_environment = try environment.clone(allocator);
+    defer index_environment.deinit();
+    try index_environment.put("GIT_INDEX_FILE", index_path);
+    try gitRequired(allocator, io, &index_environment, path, &.{ "read-tree", "HEAD" });
+    try gitRequired(allocator, io, &index_environment, path, &.{ "add", "-A", "--", "." });
+    const tree_value = try gitOutput(allocator, io, &index_environment, path, &.{"write-tree"}, null);
+    defer allocator.free(tree_value);
+    const tree = std.mem.trim(u8, tree_value, " \t\r\n");
+    const commit_value = try gitOutput(allocator, io, environment, path, &.{ "commit-tree", tree, "-p", std.mem.trim(u8, head, " \t\r\n"), "-m", "Local Studio remote handoff checkpoint" }, null);
+    defer allocator.free(commit_value);
+    const checkpoint_sha = try allocator.dupe(u8, std.mem.trim(u8, commit_value, " \t\r\n"));
+    errdefer allocator.free(checkpoint_sha);
+    var session_digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(session_id, &session_digest, .{});
+    const session_hex = std.fmt.bytesToHex(session_digest, .lower);
+    const checkpoint_ref = try std.fmt.allocPrint(allocator, "refs/local-studio/checkpoints/{s}/{s}", .{ session_hex[0..16], suffix[0..] });
+    errdefer allocator.free(checkpoint_ref);
+    try gitRequired(allocator, io, environment, path, &.{ "update-ref", checkpoint_ref, checkpoint_sha });
+    try gitRequired(allocator, io, environment, path, &.{ "push", remote, "--all" });
+    try gitRequired(allocator, io, environment, path, &.{ "push", remote, "--tags" });
+    const checkpoint_refspec = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ checkpoint_ref, checkpoint_ref });
+    defer allocator.free(checkpoint_refspec);
+    try gitRequired(allocator, io, environment, path, &.{ "push", remote, checkpoint_refspec });
+    return .{ .allocator = allocator, .checkpoint_ref = checkpoint_ref, .checkpoint_sha = checkpoint_sha, .repository_url = repository_url };
+}
+
 pub fn run(init: std.process.Init) !void {
     const organization = init.environ_map.get("CODE_STORAGE_ORGANIZATION") orelse return error.CodeStorageOrganizationRequired;
     const private_key = init.environ_map.get("CODE_STORAGE_PRIVATE_KEY") orelse return error.CodeStoragePrivateKeyRequired;
@@ -192,6 +254,37 @@ fn runGit(allocator: std.mem.Allocator, io: Io, operation: []const u8, organizat
         return error.CodeStorageGitFailed;
     }
     return redacted;
+}
+
+fn gitOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, args: []const []const u8, stdin: ?[]const u8) ![]u8 {
+    _ = stdin;
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.append(allocator, "git");
+    try argv.appendSlice(allocator, args);
+    const result = try std.process.run(allocator, io, .{
+        .argv = argv.items,
+        .cwd = .{ .path = path },
+        .environ_map = environment,
+        .stdout_limit = .limited(max_git_output_bytes),
+        .stderr_limit = .limited(max_git_output_bytes),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(600) } },
+    });
+    defer allocator.free(result.stderr);
+    const ok = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!ok) {
+        allocator.free(result.stdout);
+        return error.CodeStorageGitFailed;
+    }
+    return result.stdout;
+}
+
+fn gitRequired(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, args: []const []const u8) !void {
+    const output = try gitOutput(allocator, io, environment, path, args, null);
+    allocator.free(output);
 }
 
 fn toolResult(allocator: std.mem.Allocator, id: std.json.Value, text: []const u8, is_error: bool) ![]u8 {
