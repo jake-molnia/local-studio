@@ -20,6 +20,11 @@ import {
   type SandboxAccountEntry,
   type SandboxProvider,
 } from "@shared/agent/sandbox-account-contract";
+import {
+  MessagingAccountsResponseSchema,
+  type MessagingAccount,
+  type MessagingProvider,
+} from "@shared/agent/messaging-account-contract";
 import { Alert } from "@/ui";
 import { ResourceLogo } from "@/ui/resource-logo";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -41,12 +46,19 @@ import { CodeStorageAccountModal } from "./code-storage-accounts-section";
 import { GoogleAccountModal } from "./google-account-modal";
 import { connectedGoogleAccounts, requestJson } from "./google-account-model";
 import { SandboxAccountModal } from "./sandboxes-section";
+import { MessagingAccountModal } from "./messaging-accounts-section";
+import { MessagingAccessSection } from "./messaging-access-section";
 
 const COLUMNS = ["Account", "Access", "State"] as const;
 const decodeGoogle = Schema.decodeUnknownSync(GoogleAccountResponseSchema);
 const decodeCodeStorage = Schema.decodeUnknownSync(CodeStorageAccountsResponseSchema);
 const decodeSandboxes = Schema.decodeUnknownSync(SandboxAccountsResponseSchema);
-type AccountProviderId = GoogleWorkspacePluginId | "code-storage" | SandboxProvider;
+const decodeMessaging = Schema.decodeUnknownSync(MessagingAccountsResponseSchema);
+type AccountProviderId =
+  | GoogleWorkspacePluginId
+  | "code-storage"
+  | SandboxProvider
+  | MessagingProvider;
 type ProviderRow = {
   id: AccountProviderId;
   label: string;
@@ -62,6 +74,7 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
   const [google, setGoogle] = useState<GoogleAccountView | null>(null);
   const [repositories, setRepositories] = useState<readonly CodeStorageAccountEntry[]>([]);
   const [sandboxes, setSandboxes] = useState<readonly SandboxAccountEntry[]>([]);
+  const [messaging, setMessaging] = useState<readonly MessagingAccount[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [openProvider, setOpenProvider] = useState<AccountProviderId | null>(null);
@@ -71,11 +84,13 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
       requestJson("/api/agent/accounts/google", decodeGoogle, { cache: "no-store" }),
       requestJson("/api/agent/accounts/code-storage", decodeCodeStorage, { cache: "no-store" }),
       requestJson("/api/agent/accounts/sandboxes", decodeSandboxes, { cache: "no-store" }),
+      requestJson("/api/agent/accounts/messaging", decodeMessaging, { cache: "no-store" }),
     ])
-      .then(([googleResult, repositoryResult, sandboxResult]) => {
+      .then(([googleResult, repositoryResult, sandboxResult, messagingResult]) => {
         setGoogle(googleResult.account);
         setRepositories(repositoryResult.accounts);
         setSandboxes(sandboxResult.accounts);
+        setMessaging(messagingResult.accounts);
         setError("");
       })
       .catch((loadError: unknown) =>
@@ -133,14 +148,30 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
         summary: accounts.length
           ? accounts.map((account) => account.label).join(", ")
           : "Sandbox provider",
-        access: "Login stored; runtime pending",
+        access: id === "daytona" ? "Isolated project workers" : "Login stored",
         status: accounts.length ? `${accounts.length} connected` : "Not connected",
         tone: accounts.length ? "ok" : "dim",
         action: accounts.length ? "Manage" : "Connect",
       };
     });
-    return [...googleRows, repositoryRow, ...sandboxRows];
-  }, [google, repositories, sandboxes]);
+    const messagingRows = (["telegram", "discord"] as const).map((id): ProviderRow => {
+      const accounts = messaging.filter((account) => account.provider === id);
+      const label = id === "telegram" ? "Telegram" : "Discord";
+      return {
+        id,
+        label,
+        company: label,
+        summary: accounts.length
+          ? accounts.map((account) => account.label).join(", ")
+          : `${label} bot`,
+        access: "Approved direct messages · Chat only",
+        status: accounts.length ? `${accounts.length} connected` : "Not connected",
+        tone: accounts.length ? "ok" : "dim",
+        action: accounts.length ? "Manage" : "Connect",
+      };
+    });
+    return [...googleRows, repositoryRow, ...sandboxRows, ...messagingRows];
+  }, [google, messaging, repositories, sandboxes]);
   const visibleRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return query
@@ -215,6 +246,7 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
           </TableFrame>
         )}
       </TableSection>
+      <MessagingAccessSection />
       {openProvider &&
       GOOGLE_WORKSPACE_PLUGIN_IDS.includes(openProvider as GoogleWorkspacePluginId) ? (
         <GoogleAccountModal
@@ -237,6 +269,14 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
           accounts={sandboxes}
           onClose={() => setOpenProvider(null)}
           onChanged={setSandboxes}
+        />
+      ) : null}
+      {openProvider === "telegram" || openProvider === "discord" ? (
+        <MessagingAccountModal
+          provider={openProvider}
+          accounts={messaging}
+          onClose={() => setOpenProvider(null)}
+          onChanged={setMessaging}
         />
       ) : null}
     </>

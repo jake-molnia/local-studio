@@ -10,6 +10,7 @@ pub const Account = struct {
     subject: []u8,
     label: []u8,
     credential_kind: []u8,
+    configuration_json: []u8,
     secret_provider: []u8,
     secret_ref: []u8,
     connected_at: []u8,
@@ -20,6 +21,7 @@ pub const Account = struct {
         account.allocator.free(account.subject);
         account.allocator.free(account.label);
         account.allocator.free(account.credential_kind);
+        account.allocator.free(account.configuration_json);
         account.allocator.free(account.secret_provider);
         account.allocator.free(account.secret_ref);
         account.allocator.free(account.connected_at);
@@ -77,6 +79,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8) !Sto
             .subject = try dupeField(allocator, object, "subject"),
             .label = try dupeField(allocator, object, "label"),
             .credential_kind = try dupeField(allocator, object, "credentialKind"),
+            .configuration_json = if (object.get("configuration")) |configuration| try stringifyField(allocator, configuration) else try allocator.dupe(u8, "{}"),
             .secret_provider = try dupeField(allocator, object, "secretProvider"),
             .secret_ref = try dupeField(allocator, object, "secretRef"),
             .connected_at = try dupeField(allocator, object, "connectedAt"),
@@ -105,6 +108,8 @@ pub fn save(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, stor
         try std.json.Stringify.value(account.label, .{}, &output.writer);
         try output.writer.writeAll(",\"credentialKind\":");
         try std.json.Stringify.value(account.credential_kind, .{}, &output.writer);
+        try output.writer.writeAll(",\"configuration\":");
+        try output.writer.writeAll(account.configuration_json);
         try output.writer.writeAll(",\"secretProvider\":");
         try std.json.Stringify.value(account.secret_provider, .{}, &output.writer);
         try output.writer.writeAll(",\"secretRef\":");
@@ -267,7 +272,7 @@ fn syncManifest(allocator: std.mem.Allocator, io: std.Io, data_dir: []const u8, 
     try atomic_file.replace(io);
 }
 
-fn resolveSecret(allocator: std.mem.Allocator, io: std.Io, environment: *const std.process.Environ.Map, data_dir: []const u8, store: *const Store, secret_ref: []const u8, provider: []const u8) ![]u8 {
+pub fn resolveSecret(allocator: std.mem.Allocator, io: std.Io, environment: *const std.process.Environ.Map, data_dir: []const u8, store: *const Store, secret_ref: []const u8, provider: []const u8) ![]u8 {
     try syncManifest(allocator, io, data_dir, store);
     const executable = try resolveSecretSpec(allocator, io, environment);
     defer allocator.free(executable);
@@ -322,6 +327,14 @@ fn resolveSecretSpec(allocator: std.mem.Allocator, io: std.Io, environment: *con
 
 fn dupeField(allocator: std.mem.Allocator, object: std.json.ObjectMap, name: []const u8) ![]u8 {
     return allocator.dupe(u8, stringField(object, name) orelse return error.InvalidAccountStore);
+}
+
+fn stringifyField(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
+    if (value != .object) return error.InvalidAccountStore;
+    var output: std.Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try std.json.Stringify.value(value, .{}, &output.writer);
+    return output.toOwnedSlice();
 }
 
 fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

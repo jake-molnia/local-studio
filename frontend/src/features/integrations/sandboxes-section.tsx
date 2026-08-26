@@ -35,6 +35,7 @@ export function SandboxAccountModal({
   const [tokenSecret, setTokenSecret] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [endpoint, setEndpoint] = useState("https://app.daytona.io/api");
+  const [image, setImage] = useState("");
   const [showSecrets, setShowSecrets] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -42,7 +43,7 @@ export function SandboxAccountModal({
   const valid =
     provider === "modal"
       ? tokenId.trim().length > 0 && tokenSecret.trim().length > 0
-      : apiKey.trim().length > 0 && endpoint.trim().length > 0;
+      : apiKey.trim().length > 0 && endpoint.trim().length > 0 && image.trim().length > 0;
 
   const connect = async () => {
     setBusy(true);
@@ -56,7 +57,7 @@ export function SandboxAccountModal({
           label: label.trim() || undefined,
           ...(provider === "modal"
             ? { tokenId, tokenSecret }
-            : { apiKey, endpoint: endpoint.trim() }),
+            : { apiKey, endpoint: endpoint.trim(), image: image.trim() }),
         }),
       });
       setTokenSecret("");
@@ -98,7 +99,8 @@ export function SandboxAccountModal({
       />
       <UiModalBody className="space-y-4 pb-5">
         <Alert variant="info">
-          This stores the login only. Sandbox creation and execution are not enabled yet.
+          Daytona project sessions provision one isolated worker per session and use only harnesses
+          detected inside the selected image.
         </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
         {connected.length ? (
@@ -194,6 +196,18 @@ export function SandboxAccountModal({
                   onToggle={() => setShowSecrets(!showSecrets)}
                 />
               </div>
+            </FormField>
+            <FormField
+              label="Worker image"
+              description="Public controller image with the required harness installed. Use a pinned tag or digest, not latest."
+            >
+              <Input
+                value={image}
+                onChange={(event) => setImage(event.target.value)}
+                autoComplete="off"
+                className="font-mono"
+                placeholder="registry.example.com/local-studio-worker:2026-08-26"
+              />
             </FormField>
           </>
         )}

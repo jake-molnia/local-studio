@@ -12,6 +12,7 @@ export const SandboxAccountEntrySchema = Schema.Struct({
   endpoint: Schema.String,
   connectedAt: Schema.String,
   secretProvider: Schema.String,
+  image: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 export const SandboxAccountsResponseSchema = Schema.Struct({
