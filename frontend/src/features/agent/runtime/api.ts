@@ -254,7 +254,10 @@ export function compactSession(args: CompactSessionArgs): Promise<CompactSession
 
 export type SubmitTurnArgs = {
   sessionId: string;
+  kind: "chat" | "project";
   harness?: string;
+  placement?: "local" | "daytona";
+  sandboxAccountId?: string;
   projectId?: string;
   modelId: string;
   modelRouteId?: string;

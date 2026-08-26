@@ -58,7 +58,7 @@ export function workspaceNavigationAction(
   if (!key) return null;
   const tab = {
     ...makeFreshTab(),
-    harness: isChatsProject(project) ? ("chat" as const) : undefined,
+    executionKind: isChatsProject(project) ? ("chat" as const) : ("project" as const),
     projectId: project?.id,
     cwd: isChatsProject(project) ? undefined : project?.path,
   };

@@ -432,7 +432,7 @@ export function ChatPane({
     cwd,
     browserToolEnabled,
     browserBackend,
-    forcedHarness: effectiveProjectId === "chats" ? "chat" : undefined,
+    executionKind: effectiveProjectId === "chats" ? "chat" : "project",
     onPiSessionIdChange: handlePiSessionIdAssigned,
     updateSession: updateTab,
     selectionFor: tools.selectionFor,
@@ -491,7 +491,8 @@ export function ChatPane({
       if (!activeTab || activeTab.messages.length > 0) return;
       updateTab(activeTab.id, (session) => ({
         ...session,
-        harness: isChatsProject(project) ? "chat" : undefined,
+        executionKind: isChatsProject(project) ? "chat" : "project",
+        harness: undefined,
         projectId: project.id,
         cwd: isChatsProject(project) ? undefined : project.path,
       }));

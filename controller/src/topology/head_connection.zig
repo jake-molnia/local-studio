@@ -86,24 +86,34 @@ fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: 
     try std.json.Stringify.value(api_key, .{}, &output.writer);
     try output.writer.writeAll(",\"role\":");
     try std.json.Stringify.value(if (mode == .worker) "worker" else "standalone", .{}, &output.writer);
-    try output.writer.writeAll(",\"capabilities\":{\"compute\":true,\"harnesses\":[\"chat\"");
-    if (harness.piIsAvailable()) try output.writer.writeAll(",\"pi\"");
-    if (harness.fxIsAvailable()) try output.writer.writeAll(",\"fx\"");
-    if (harness.opencodeIsAvailable()) try output.writer.writeAll(",\"opencode\"");
-    if (harness.codexIsAvailable()) try output.writer.writeAll(",\"codex\"");
-    if (harness.claudeIsAvailable()) try output.writer.writeAll(",\"claude\"");
-    try output.writer.writeAll("],\"mcp\":true,\"terminal\":true,\"browser\":true,\"harnessDetails\":[{\"id\":\"chat\",\"version\":\"0.0.0-local-studio\",\"source\":\"embedded\",\"capabilities\":[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]}");
-    if (harness.piIsAvailable()) try writeHarnessDetail(&output.writer, "pi", harness.piVersion(), harness.piSource(), "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
-    if (harness.fxIsAvailable()) try writeHarnessDetail(&output.writer, "fx", harness.fxVersion(), harness.fxSource(), "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
-    if (harness.opencodeIsAvailable()) try writeHarnessDetail(&output.writer, "opencode", harness.opencodeVersion(), harness.opencodeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
-    if (harness.codexIsAvailable()) try writeHarnessDetail(&output.writer, "codex", harness.codexVersion(), harness.codexSource(), "[\"persistent-session\",\"resume\",\"cancel\"]");
-    if (harness.claudeIsAvailable()) try writeHarnessDetail(&output.writer, "claude", harness.claudeVersion(), harness.claudeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
+    try output.writer.writeAll(",\"capabilities\":{\"compute\":true,\"harnesses\":[");
+    var first_harness = true;
+    if (harness.piIsAvailable()) try writeHarnessId(&output.writer, "pi", &first_harness);
+    if (harness.fxIsAvailable()) try writeHarnessId(&output.writer, "fx", &first_harness);
+    if (harness.opencodeIsAvailable()) try writeHarnessId(&output.writer, "opencode", &first_harness);
+    if (harness.codexIsAvailable()) try writeHarnessId(&output.writer, "codex", &first_harness);
+    if (harness.claudeIsAvailable()) try writeHarnessId(&output.writer, "claude", &first_harness);
+    try output.writer.writeAll("],\"mcp\":true,\"terminal\":true,\"browser\":true,\"harnessDetails\":[");
+    var first_detail = true;
+    if (harness.piIsAvailable()) try writeHarnessDetail(&output.writer, "pi", harness.piVersion(), harness.piSource(), "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]", &first_detail);
+    if (harness.fxIsAvailable()) try writeHarnessDetail(&output.writer, "fx", harness.fxVersion(), harness.fxSource(), "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]", &first_detail);
+    if (harness.opencodeIsAvailable()) try writeHarnessDetail(&output.writer, "opencode", harness.opencodeVersion(), harness.opencodeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]", &first_detail);
+    if (harness.codexIsAvailable()) try writeHarnessDetail(&output.writer, "codex", harness.codexVersion(), harness.codexSource(), "[\"persistent-session\",\"resume\",\"cancel\"]", &first_detail);
+    if (harness.claudeIsAvailable()) try writeHarnessDetail(&output.writer, "claude", harness.claudeVersion(), harness.claudeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]", &first_detail);
     try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
 }
 
-fn writeHarnessDetail(writer: *Io.Writer, id: []const u8, version: ?[]const u8, source: []const u8, capabilities: []const u8) !void {
-    try writer.writeAll(",{\"id\":");
+fn writeHarnessId(writer: *Io.Writer, id: []const u8, first: *bool) !void {
+    if (!first.*) try writer.writeByte(',');
+    first.* = false;
+    try std.json.Stringify.value(id, .{}, writer);
+}
+
+fn writeHarnessDetail(writer: *Io.Writer, id: []const u8, version: ?[]const u8, source: []const u8, capabilities: []const u8, first: *bool) !void {
+    if (!first.*) try writer.writeByte(',');
+    first.* = false;
+    try writer.writeAll("{\"id\":");
     try std.json.Stringify.value(id, .{}, writer);
     try writer.writeAll(",\"version\":");
     if (version) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");

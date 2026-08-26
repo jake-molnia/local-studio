@@ -8,6 +8,7 @@ import type { ComposerSkillRef } from "@/features/agent/composer-context";
 import type { RuntimeContextUsage } from "@/features/agent/runtime/api";
 import type { AgentThinkingLevel } from "@/features/agent/contracts";
 import type { AgentHarness } from "@shared/agent/harness-id";
+import type { AgentSessionKind } from "@shared/agent/execution-contract";
 
 export type { AgentHarness } from "@shared/agent/harness-id";
 
@@ -38,6 +39,9 @@ export type Session = {
   // Pi session UUID (null = unstarted, will be assigned by pi when the first
   // turn runs).
   piSessionId: string | null;
+  executionKind?: AgentSessionKind;
+  placement?: "local" | "daytona";
+  sandboxAccountId?: string;
   harness?: AgentHarness;
   projectId?: string;
   cwd?: string;

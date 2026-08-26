@@ -18,12 +18,7 @@ import {
   type ComposerPromptTemplateRef,
   type ComposerSkillRef,
 } from "@/features/agent/composer-context";
-import type {
-  AgentHarness,
-  Session,
-  SessionId,
-  UpdateSession,
-} from "@/features/agent/runtime/types";
+import type { Session, SessionId, UpdateSession } from "@/features/agent/runtime/types";
 import type { BrowserBackend, ToolSelection } from "@/features/agent/tools/types";
 import type {
   AgentQueueAction,
@@ -50,7 +45,7 @@ export type UseSessionEngineDeps = {
   cwd: string;
   browserToolEnabled: boolean;
   browserBackend: BrowserBackend;
-  forcedHarness?: AgentHarness;
+  executionKind: "chat" | "project";
   onPiSessionIdChange?: (piSessionId: string) => void;
   /** Mutate a single session record. */
   updateSession: UpdateSession;
@@ -103,7 +98,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
     cwd,
     browserToolEnabled,
     browserBackend,
-    forcedHarness,
+    executionKind,
     onPiSessionIdChange,
     updateSession,
     selectionFor,
@@ -130,6 +125,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           const skills = selection.skills ?? EMPTY_SKILLS;
           const promptTemplates = selection.promptTemplates ?? EMPTY_PROMPT_TEMPLATES;
           const browserEnabledForTurn = browserToolEnabled;
+          const session = tabsRef.current.find((tab) => tab.id === sessionId);
           const message = selectedContextPrompt(text, skills);
           const contextualQueueReplacement = queueReplacement
             ? selectedContextPrompt(queueReplacement, skills)
@@ -138,12 +134,17 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
             try: () =>
               api.submitTurnCommand({
                 sessionId: runtime,
+                kind: session?.executionKind ?? executionKind,
+                harness: session?.harness,
                 modelId,
                 modelRouteId,
                 thinkingLevel,
                 toolAccess,
                 message,
-                cwd: cwd.trim() || undefined,
+                cwd:
+                  (session?.executionKind ?? executionKind) === "project"
+                    ? (session?.cwd || cwd).trim() || undefined
+                    : undefined,
                 piSessionId,
                 mode,
                 queueAction,
@@ -187,6 +188,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       browserToolEnabled,
       browserBackend,
       cwd,
+      executionKind,
       modelId,
       modelRouteId,
       thinkingLevel,
@@ -203,7 +205,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           activeTabId,
           browserToolEnabled,
           browserBackend,
-          forcedHarness,
+          executionKind,
           cwd,
           modelId,
           modelRouteId,
@@ -225,7 +227,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       cwd,
       browserToolEnabled,
       browserBackend,
-      forcedHarness,
+      executionKind,
       onPiSessionIdChange,
       updateSession,
     ],

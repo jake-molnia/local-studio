@@ -99,7 +99,7 @@ export function generateThreadTitle(input: ThreadTitleInput): Promise<string | n
     yield* Effect.tryPromise(() =>
       submitTurnCommand({
         sessionId,
-        harness: "chat",
+        kind: "chat",
         projectId: TITLE_PROJECT_ID,
         modelId: route.modelId,
         modelRouteId: route.routeId,

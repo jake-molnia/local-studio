@@ -45,7 +45,7 @@ export function useChatPaneSessionTitle({
   const sessionLooksEmpty =
     !activeTab || (activeTab.messages.length === 0 && !activeTab.input.trim() && !running);
   const emptySessionTitle =
-    projectId === "chats" || activeTab?.harness === "chat" || activeTab?.projectId === "chats"
+    projectId === "chats" || activeTab?.executionKind === "chat" || activeTab?.projectId === "chats"
       ? "New chat"
       : "New task";
   const displayedSessionTitle = sessionLooksEmpty

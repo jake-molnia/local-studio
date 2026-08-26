@@ -53,7 +53,7 @@ export type PromptStreamDeps = {
   browserToolEnabled: boolean;
   browserBackend: BrowserBackend;
   cwd: string;
-  forcedHarness?: AgentHarness;
+  executionKind: "chat" | "project";
   modelId: string;
   modelRouteId: string;
   thinkingLevel: AgentThinkingLevel;
@@ -111,9 +111,14 @@ function createPromptTurnContext(
   if (!current || !deps.modelId) return null;
   const defaultHarness =
     typeof window === "undefined" ? "pi" : readAgentDefaults(window.localStorage).harness;
+  const executionKind = current.executionKind ?? deps.executionKind;
   const selected = {
     ...current,
-    harness: deps.forcedHarness ?? current.harness ?? (defaultHarness as AgentHarness),
+    executionKind,
+    harness:
+      executionKind === "project"
+        ? (current.harness ?? (defaultHarness as AgentHarness))
+        : undefined,
   };
 
   const selection = deps.selectionFor(sessionId);
@@ -124,7 +129,7 @@ function createPromptTurnContext(
   return {
     assistantId: newId("assistant"),
     browserEnabledForTurn:
-      selected.harness === "chat" ? true : (args.browserToolEnabled ?? deps.browserToolEnabled),
+      executionKind === "chat" ? true : (args.browserToolEnabled ?? deps.browserToolEnabled),
     promptTemplates,
     // The session id is the opaque runtime key the server addresses this
     // session by.
@@ -143,12 +148,13 @@ function appendOptimisticPrompt(
 ): void {
   deps.updateSession(context.sessionId, (session) => ({
     ...session,
-    harness: deps.forcedHarness ?? session.harness,
-    cwd:
-      (deps.forcedHarness ?? session.harness) === "chat" ||
-      (deps.forcedHarness ?? session.harness) === "fx"
-        ? undefined
-        : session.cwd || deps.cwd,
+    executionKind: context.selected.executionKind,
+    harness: context.selected.harness,
+    placement:
+      context.selected.executionKind === "project" ? context.selected.placement : undefined,
+    sandboxAccountId:
+      context.selected.executionKind === "project" ? context.selected.sandboxAccountId : undefined,
+    cwd: context.selected.executionKind === "chat" ? undefined : session.cwd || deps.cwd,
     modelId: session.modelId || deps.modelId,
     modelRouteId: session.modelRouteId || deps.modelRouteId,
     startedAt: session.startedAt ?? new Date().toISOString(),
@@ -262,6 +268,7 @@ function promptTurnRequest(
 ): api.SubmitTurnArgs {
   return {
     sessionId: context.runtime,
+    kind: context.selected.executionKind ?? deps.executionKind,
     harness: context.selected.harness,
     projectId: context.selected.projectId,
     modelId: deps.modelId,
@@ -271,7 +278,7 @@ function promptTurnRequest(
     message: args.prompt,
     images: args.images,
     cwd:
-      context.selected.harness === "chat" || context.selected.harness === "fx"
+      context.selected.executionKind === "chat"
         ? undefined
         : (context.selected.cwd || deps.cwd).trim() || undefined,
     piSessionId:

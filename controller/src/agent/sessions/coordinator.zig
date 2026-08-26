@@ -1,6 +1,9 @@
 const std = @import("std");
 const config = @import("../../app/config.zig");
 const records = @import("control_store.zig");
+const execution = @import("../execution/store.zig");
+const cloud_store = @import("../cloud/store.zig");
+const daytona_runtime = @import("../cloud/daytona.zig");
 const sqlite = @import("../../storage/sqlite.zig");
 const harness_nodes = @import("../harness/nodes.zig");
 const harness_catalog = @import("../harness/catalog.zig");
@@ -45,7 +48,6 @@ pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
     try output.writer.writeAll("{\"harnesses\":[");
     for ([_]struct { id: []const u8, name: []const u8, transport: []const u8, selectable: bool }{
         .{ .id = "pi", .name = "Pi", .transport = "jsonl-rpc", .selectable = true },
-        .{ .id = "chat", .name = "Chat", .transport = "embedded-acp", .selectable = false },
         .{ .id = "fx", .name = "FX", .transport = "acp", .selectable = true },
         .{ .id = "opencode", .name = "OpenCode", .transport = "http-sse", .selectable = true },
         .{ .id = "codex", .name = "Codex", .transport = "app-server", .selectable = true },
@@ -53,7 +55,7 @@ pub fn harnessesPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
     }, 0..) |descriptor, index| {
         if (index > 0) try output.writer.writeByte(',');
         const node_count = try harness_nodes.count(allocator, io, database, descriptor.id);
-        const available = std.mem.eql(u8, descriptor.id, "chat") or node_count > 0;
+        const available = node_count > 0;
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(descriptor.id, .{}, &output.writer);
         try output.writer.writeAll(",\"name\":");
@@ -121,6 +123,14 @@ pub fn sessionsPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.D
 }
 
 pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, document: []const u8) ![]u8 {
+    return turnPayloadInternal(allocator, io, mode, client, database, harness, null, document);
+}
+
+pub fn turnPayloadWithCloud(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, daytona: *daytona_runtime.Manager, document: []const u8) ![]u8 {
+    return turnPayloadInternal(allocator, io, mode, client, database, harness, daytona, document);
+}
+
+fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, daytona: ?*daytona_runtime.Manager, document: []const u8) ![]u8 {
     const routed_document = try agent_goal_driver.decorateTurn(allocator, io, database, document);
     defer allocator.free(routed_document);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, routed_document, .{}) catch return error.InvalidTurnPayload;
@@ -134,6 +144,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const project_path = optionalString(object, "cwd");
     const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
+    const requested_placement = optionalString(object, "placement");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
@@ -141,7 +152,17 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     defer if (existing) |*session| session.deinit();
     const native_session_id = requested_native_session_id orelse if (existing) |session| session.native_session_id else null;
     const model_route_id = optionalString(object, "modelRouteId") orelse if (existing) |session| session.model_route_id orelse model_id else model_id;
-    const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
+    const kind_value = optionalString(object, "kind");
+    const explicit_harness = optionalString(object, "harness");
+    const is_chat = if (kind_value) |value|
+        std.mem.eql(u8, value, "chat")
+    else
+        project_path == null and (explicit_harness == null or std.mem.eql(u8, explicit_harness.?, "chat"));
+    if (kind_value != null and !is_chat and !std.mem.eql(u8, kind_value.?, "project")) return error.InvalidSessionKind;
+    if (is_chat and project_path != null) return error.InvalidChatSession;
+    if (!is_chat and project_path == null) return error.ProjectWorkspaceRequired;
+    if (!is_chat and explicit_harness != null and std.mem.eql(u8, explicit_harness.?, "chat")) return error.InvalidProjectHarness;
+    const requested_harness = if (is_chat) "chat" else explicit_harness orelse if (existing) |session| session.harness else return error.ProjectHarnessRequired;
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
     var native_owner = if (native_session_id) |value| try lockedGetByNative(allocator, io, database, value) else null;
     defer if (native_owner) |*session| session.deinit();
@@ -154,7 +175,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         null;
     var detached_document: ?[]u8 = null;
     defer if (detached_document) |value| allocator.free(value);
-    if (mode == .head) {
+    if (mode == .head and !is_chat) {
         const storage = parsed.arena.allocator();
         try parsed.value.object.put(storage, "nativeSessionId", if (resume_native_session_id) |value| .{ .string = value } else .null);
         try parsed.value.object.put(storage, "initialEventSeq", .{ .integer = @intCast(if (existing) |session| session.event_cursor else 0) });
@@ -165,21 +186,52 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         detached_document = try serialize(allocator, parsed.value);
     }
     const dispatch_document = detached_document orelse routed_document;
-    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
+    if (!is_chat and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
+    const existing_cloud = if (existing) |session| std.mem.startsWith(u8, session.node_id, "daytona-") else false;
+    const use_daytona = !is_chat and mode == .head and if (requested_placement) |value| std.mem.eql(u8, value, "daytona") else existing_cloud;
+    if (requested_placement) |value| if (!std.mem.eql(u8, value, "local") and !std.mem.eql(u8, value, "node") and !std.mem.eql(u8, value, "daytona")) return error.InvalidAgentPlacement;
+    if (is_chat and requested_placement != null and !std.mem.eql(u8, requested_placement.?, "head")) return error.InvalidChatPlacement;
+
+    try lockedEnsureExecution(io, database, .{
+        .id = session_id,
+        .kind = if (is_chat) .chat else .project,
+        .workspace = project_path,
+        .harness = if (is_chat) null else requested_harness,
+        .project_id = project_id,
+        .model_id = model_id,
+        .model_route_id = model_route_id,
+    });
     const preferred_node = if (existing) |session| session.node_id else requested_node;
-    var target = if (mode == .head) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
+    var target = if (mode == .head and !is_chat and (!use_daytona or existing_cloud)) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
-    if (mode == .head and target == null) return error.HarnessNodeRequired;
-    const node_id = if (mode == .standalone) "local" else target.?.id;
+    const turn_attempt = try lockedBeginExecution(io, database, session_id, message, if (is_chat) .head else if (mode == .standalone) .local else if (use_daytona) .daytona else .node, if (target) |node| node.id else null, if (is_chat) "head" else if (mode == .standalone) "local" else if (target) |node| node.id else "daytona");
+    if (use_daytona and target == null) {
+        const cloud = daytona orelse return error.DaytonaPlacementUnavailable;
+        const account_id = optionalString(object, "sandboxAccountId") orelse return error.SandboxAccountRequired;
+        const configured_image = if (optionalString(object, "sandboxImage")) |value| try allocator.dupe(u8, value) else try cloud.defaultImage(account_id) orelse return error.DaytonaImageRequired;
+        defer allocator.free(configured_image);
+        const image = configured_image;
+        const worker_id = try lockedCreateCloudWorker(io, database, session_id, turn_attempt.attempt_id[0..], account_id, requested_harness, image);
+        var provisioned = cloud.provision(client, database, worker_id[0..], session_id, account_id, requested_harness, image) catch |failure| {
+            try lockedCloudWorkerStatus(io, database, worker_id[0..], "failed", @errorName(failure));
+            try lockedExecutionStatus(io, database, session_id, "failed", null, @errorName(failure));
+            return failure;
+        };
+        defer provisioned.deinit();
+        try lockedAttemptPlacement(io, database, turn_attempt.attempt_id[0..], provisioned.node_id);
+        target = try selectHarnessNode(allocator, io, database, requested_harness, provisioned.node_id);
+    }
+    if (mode == .head and !is_chat and target == null) return error.HarnessNodeRequired;
+    const node_id = if (is_chat) "head" else if (mode == .standalone) "local" else target.?.id;
 
     try lockedSave(allocator, io, database, .{
         .id = session_id,
         .harness = requested_harness,
-        .harness_version = if (mode == .standalone)
+        .harness_version = if (mode == .standalone or is_chat)
             if (std.mem.eql(u8, requested_harness, "chat")) "0.0.0-local-studio" else if (std.mem.eql(u8, requested_harness, "fx")) harness.fxVersion() else if (std.mem.eql(u8, requested_harness, "opencode")) harness.opencodeVersion() else if (std.mem.eql(u8, requested_harness, "codex")) harness.codexVersion() else if (std.mem.eql(u8, requested_harness, "claude")) harness.claudeVersion() else harness.piVersion()
         else
             target.?.harness_version orelse if (existing) |session| session.harness_version else null,
-        .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else harnessCapabilities(requested_harness),
+        .capabilities_json = if (mode == .head and !is_chat and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else harnessCapabilities(requested_harness),
         .node_id = node_id,
         .native_session_id = resume_native_session_id,
         .project_id = project_id,
@@ -200,17 +252,19 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         try lockedTranscript(io, database, session_id, source_key, transcript);
     }
 
-    const payload = if (mode == .standalone)
+    const payload = if (mode == .standalone or is_chat)
         harness.turnPayloadAt(dispatch_document, if (existing) |session| session.event_cursor else 0, resume_native_session_id)
     else
         remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", dispatch_document);
     const response = payload catch |failure| {
         try lockedFinish(io, database, command_id[0..], "rejected", @errorName(failure));
         try lockedRuntime(io, database, session_id, "unavailable", null, null);
+        try lockedExecutionStatus(io, database, session_id, "failed", null, @errorName(failure));
         return failure;
     };
     errdefer allocator.free(response);
     try lockedFinish(io, database, command_id[0..], "accepted", null);
+    try lockedAttemptStatus(io, database, turn_attempt.attempt_id[0..], "running", null);
     try ingestRuntimeDocument(allocator, io, database, session_id, response);
     return response;
 }
@@ -218,7 +272,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
 pub fn statusPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, session_id: []const u8, after: u64) ![]u8 {
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return emptyStatus(allocator, session_id);
     defer session.deinit();
-    const payload = if (mode == .standalone)
+    const payload = if (mode == .standalone or std.mem.eql(u8, session.harness, "chat"))
         try harness.statusPayload(session_id, after)
     else remote: {
         var target = (try selectHarnessNode(allocator, io, database, session.harness, session.node_id)) orelse {
@@ -271,7 +325,7 @@ pub fn controlPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, c
     var session = (try lockedGet(allocator, io, database, session_id)) orelse return error.SessionNotFound;
     defer session.deinit();
     if (std.mem.eql(u8, operation, "abort")) try agent_goal_driver.pauseForAbort(allocator, io, database, &session);
-    if (mode == .standalone) {
+    if (mode == .standalone or std.mem.eql(u8, session.harness, "chat")) {
         if (std.mem.eql(u8, operation, "abort")) return harness.abortPayload(document);
         if (std.mem.eql(u8, operation, "compact")) return harness.compactPayload(document);
         if (std.mem.eql(u8, operation, "extension-ui")) return harness.extensionUiPayload(document);
@@ -466,6 +520,7 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
         const serialized = try serialize(allocator, event);
         defer allocator.free(serialized);
         try records.appendEvent(database, session_id, sequence, session_harness, serialized);
+        try execution.observeHarnessEvent(database, session_id, session_harness, event);
         if (event.object.get("event")) |canonical| {
             const canonical_document = try serialize(allocator, canonical);
             defer allocator.free(canonical_document);
@@ -476,6 +531,7 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     };
     try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
     try records.updateDriver(database, session_id, harness_version, capabilities_json);
+    try execution.setLatestStatus(database, session_id, phase, native_session_id, failure);
     try transaction.commit();
 }
 
@@ -610,6 +666,50 @@ fn lockedRuntime(io: Io, database: *sqlite.Database, session_id: []const u8, sta
     try database.lock(io);
     defer database.unlock(io);
     try records.updateRuntime(database, session_id, status, native_session_id, cursor);
+    const execution_status = if (std.mem.eql(u8, status, "stopped")) "idle" else status;
+    try execution.setLatestStatus(database, session_id, execution_status, native_session_id, null);
+}
+
+fn lockedEnsureExecution(io: Io, database: *sqlite.Database, input: execution.SessionInput) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try execution.ensureSession(database, input);
+}
+
+fn lockedBeginExecution(io: Io, database: *sqlite.Database, session_id: []const u8, prompt: []const u8, placement: execution.Placement, placement_id: ?[]const u8, owner: []const u8) !execution.TurnAttempt {
+    try database.lock(io);
+    defer database.unlock(io);
+    return execution.beginTurn(database, io, session_id, prompt, placement, placement_id, owner, 3600);
+}
+
+fn lockedAttemptStatus(io: Io, database: *sqlite.Database, attempt_id: []const u8, status: []const u8, native_session_id: ?[]const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try execution.setAttemptStatus(database, attempt_id, status, native_session_id);
+}
+
+fn lockedAttemptPlacement(io: Io, database: *sqlite.Database, attempt_id: []const u8, placement_id: []const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try execution.setAttemptPlacementId(database, attempt_id, placement_id);
+}
+
+fn lockedCreateCloudWorker(io: Io, database: *sqlite.Database, session_id: []const u8, attempt_id: []const u8, account_id: []const u8, harness: []const u8, image: []const u8) ![36]u8 {
+    try database.lock(io);
+    defer database.unlock(io);
+    return cloud_store.create(database, io, session_id, attempt_id, account_id, harness, image, 3600);
+}
+
+fn lockedCloudWorkerStatus(io: Io, database: *sqlite.Database, worker_id: []const u8, status: []const u8, message: ?[]const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try cloud_store.setStatus(database, worker_id, status, message);
+}
+
+fn lockedExecutionStatus(io: Io, database: *sqlite.Database, session_id: []const u8, status: []const u8, native_session_id: ?[]const u8, failure: ?[]const u8) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    try execution.setLatestStatus(database, session_id, status, native_session_id, failure);
 }
 
 fn runtimePhase(document: std.json.ObjectMap, active: bool, running: bool, failed: bool) []const u8 {
