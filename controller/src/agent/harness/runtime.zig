@@ -51,6 +51,12 @@ const Session = struct {
     last_error: ?[]u8 = null,
     events: EventWindow = .{ .maximum = runtime_limits.harness_events },
     responses: std.StringHashMapUnmanaged([]u8) = .empty,
+    active_request_id: ?[]u8 = null,
+    retry_count: u8 = 0,
+    continuation_count: u8 = 0,
+    waiting_for_children: bool = false,
+    resume_scheduled: bool = false,
+    pending_subagents: std.StringHashMapUnmanaged(void) = .empty,
 
     fn deinit(session: *Session, io: Io) void {
         if (session.child) |*child| if (child.id != null) child.kill(io);
@@ -69,6 +75,10 @@ const Session = struct {
             session.allocator.free(entry.value_ptr.*);
         }
         session.responses.deinit(session.allocator);
+        if (session.active_request_id) |value| session.allocator.free(value);
+        var subagent_iterator = session.pending_subagents.keyIterator();
+        while (subagent_iterator.next()) |key| session.allocator.free(key.*);
+        session.pending_subagents.deinit(session.allocator);
         session.allocator.destroy(session);
     }
 };
@@ -462,7 +472,6 @@ pub const Manager = struct {
                 };
             } else {
                 try manager.sendAcpPrompt(session, message);
-                session.active = true;
             }
         }
         if (harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode) return manager.turnResponse(session, was_active);
@@ -1168,6 +1177,17 @@ pub const Manager = struct {
     }
 
     fn sendAcpPrompt(manager: *Manager, session: *Session, message: []const u8) !void {
+        session.retry_count = 0;
+        session.continuation_count = 0;
+        session.waiting_for_children = false;
+        session.resume_scheduled = false;
+        var subagent_iterator = session.pending_subagents.keyIterator();
+        while (subagent_iterator.next()) |key| session.allocator.free(key.*);
+        session.pending_subagents.clearRetainingCapacity();
+        return manager.sendAcpPromptContinuation(session, message);
+    }
+
+    fn sendAcpPromptContinuation(manager: *Manager, session: *Session, message: []const u8) !void {
         const request_id = manager.commandId();
         var document: Io.Writer.Allocating = .init(manager.allocator);
         defer document.deinit();
@@ -1178,7 +1198,37 @@ pub const Manager = struct {
         try document.writer.writeAll(",\"prompt\":[{\"type\":\"text\",\"text\":");
         try std.json.Stringify.value(message, .{}, &document.writer);
         try document.writer.writeAll("}]}}");
-        try manager.send(session, document.writer.buffered());
+        const owned_request_id = try manager.allocator.dupe(u8, request_id[0..]);
+        errdefer manager.allocator.free(owned_request_id);
+        try manager.mutex.lock(manager.io);
+        if (!session.running or session.child == null or session.child.?.stdin == null) {
+            manager.mutex.unlock(manager.io);
+            return error.HarnessExited;
+        }
+        if (session.active_request_id != null) {
+            manager.mutex.unlock(manager.io);
+            return error.SessionAlreadyActive;
+        }
+        session.active_request_id = owned_request_id;
+        session.active = true;
+        session.waiting_for_children = false;
+        const write_result = session.child.?.stdin.?.writeStreamingAll(manager.io, document.writer.buffered());
+        if (write_result) |_| {
+            session.child.?.stdin.?.writeStreamingAll(manager.io, "\n") catch |failure| {
+                manager.allocator.free(session.active_request_id.?);
+                session.active_request_id = null;
+                session.active = false;
+                manager.mutex.unlock(manager.io);
+                return failure;
+            };
+        } else |failure| {
+            manager.allocator.free(session.active_request_id.?);
+            session.active_request_id = null;
+            session.active = false;
+            manager.mutex.unlock(manager.io);
+            return failure;
+        }
+        manager.mutex.unlock(manager.io);
     }
 
     fn existingSession(manager: *Manager, session_id: []const u8) !*Session {
@@ -1278,9 +1328,118 @@ pub const Manager = struct {
             try manager.send(session, response.writer.buffered());
         };
         try manager.mutex.lock(manager.io);
-        defer manager.mutex.unlock(manager.io);
-        if (method == null and response_id != null) session.active = false;
+        errdefer manager.mutex.unlock(manager.io);
+        if (method != null) {
+            if (session.harness == .opencode and std.mem.eql(u8, method.?, "session/update")) try manager.observeOpenCodeSubagent(session, object);
+            try manager.appendEvent(session, line);
+            manager.mutex.unlock(manager.io);
+            return;
+        }
+        const active_request_id = session.active_request_id;
+        if (active_request_id == null or !std.mem.eql(u8, active_request_id.?, response_id.?)) {
+            if (session.responses.fetchRemove(response_id.?)) |previous| {
+                manager.allocator.free(previous.key);
+                manager.allocator.free(previous.value);
+            }
+            const key = try manager.allocator.dupe(u8, response_id.?);
+            errdefer manager.allocator.free(key);
+            try session.responses.put(manager.allocator, key, try manager.allocator.dupe(u8, line));
+            manager.mutex.unlock(manager.io);
+            return;
+        }
+        manager.allocator.free(session.active_request_id.?);
+        session.active_request_id = null;
+        if (object.get("error")) |error_value| {
+            if (isRetryableAcpError(error_value) and session.retry_count < 2) {
+                session.retry_count += 1;
+                session.active = true;
+                session.resume_scheduled = true;
+                try manager.appendAcpLifecycleEvent(session, "turn_retry", acpErrorMessage(error_value), null);
+                manager.mutex.unlock(manager.io);
+                try manager.tasks.concurrent(manager.io, resumeAcpPrompt, .{AcpResume{
+                    .manager = manager,
+                    .session = session,
+                    .delay_ms = 250,
+                    .wait_for_children = false,
+                    .message = "The previous provider request was interrupted by a transient transport failure. Continue the current task from the existing session state without repeating completed work.",
+                }});
+                return;
+            }
+            session.active = false;
+            session.waiting_for_children = false;
+            session.resume_scheduled = false;
+            try manager.setSessionError(session, acpErrorMessage(error_value));
+            try manager.appendEvent(session, line);
+            manager.mutex.unlock(manager.io);
+            return;
+        }
+        if (session.harness == .opencode and session.pending_subagents.count() > 0) {
+            if (session.continuation_count >= 8) {
+                session.active = false;
+                session.waiting_for_children = false;
+                session.resume_scheduled = false;
+                try manager.setSessionError(session, "Background subagents did not return control to the parent turn");
+                try manager.appendAcpLifecycleEvent(session, "extension_error", session.last_error.?, null);
+                manager.mutex.unlock(manager.io);
+                return;
+            }
+            session.continuation_count += 1;
+            session.active = true;
+            session.waiting_for_children = true;
+            session.resume_scheduled = true;
+            try manager.appendAcpLifecycleEvent(session, "turn_waiting", "Waiting for background subagents", session.pending_subagents.count());
+            manager.mutex.unlock(manager.io);
+            try manager.tasks.concurrent(manager.io, resumeAcpPrompt, .{AcpResume{
+                .manager = manager,
+                .session = session,
+                .delay_ms = 1000,
+                .wait_for_children = true,
+                .message = "Continue the current task. Wait for any background subagents that are still running, use every completed subagent result already present in this session, and return the complete answer instead of another progress update.",
+            }});
+            return;
+        }
+        session.active = false;
+        session.waiting_for_children = false;
+        session.resume_scheduled = false;
+        try manager.setSessionError(session, null);
         try manager.appendEvent(session, line);
+        manager.mutex.unlock(manager.io);
+    }
+
+    fn observeOpenCodeSubagent(manager: *Manager, session: *Session, object: std.json.ObjectMap) !void {
+        const params = object.get("params") orelse return;
+        if (params != .object) return;
+        const update = params.object.get("update") orelse return;
+        if (update != .object) return;
+        const update_type = optionalString(update.object, "sessionUpdate") orelse return;
+        const tool_call_id = optionalString(update.object, "toolCallId") orelse return;
+        if (std.mem.indexOfScalar(u8, tool_call_id, ':') != null) return;
+        if (std.mem.eql(u8, update_type, "tool_call") and std.mem.eql(u8, optionalString(update.object, "title") orelse "", "subagent")) {
+            if (!session.pending_subagents.contains(tool_call_id)) try session.pending_subagents.put(manager.allocator, try manager.allocator.dupe(u8, tool_call_id), {});
+            return;
+        }
+        if (!std.mem.eql(u8, update_type, "tool_call_update")) return;
+        const status = optionalString(update.object, "status") orelse return;
+        if (!std.mem.eql(u8, status, "completed") and !std.mem.eql(u8, status, "failed")) return;
+        if (std.mem.eql(u8, status, "completed") and isBackgroundSubagentAcknowledgement(update.object)) return;
+        if (session.pending_subagents.fetchRemove(tool_call_id)) |removed| manager.allocator.free(removed.key);
+    }
+
+    fn appendAcpLifecycleEvent(manager: *Manager, session: *Session, event_type: []const u8, message: []const u8, pending: ?usize) !void {
+        var event: Io.Writer.Allocating = .init(manager.allocator);
+        defer event.deinit();
+        try event.writer.writeAll("{\"type\":");
+        try std.json.Stringify.value(event_type, .{}, &event.writer);
+        try event.writer.writeAll(",\"message\":");
+        try std.json.Stringify.value(message, .{}, &event.writer);
+        if (pending) |count| try event.writer.print(",\"pending\":{d}", .{count});
+        try event.writer.writeByte('}');
+        try manager.appendEvent(session, event.writer.buffered());
+    }
+
+    fn setSessionError(manager: *Manager, session: *Session, message: ?[]const u8) !void {
+        if (session.last_error) |previous| manager.allocator.free(previous);
+        session.last_error = if (message) |value| try manager.allocator.dupe(u8, value) else null;
     }
 
     fn handleCodexLine(manager: *Manager, session: *Session, line: []const u8, object: std.json.ObjectMap) !void {
@@ -1395,6 +1554,91 @@ pub const Manager = struct {
         }, LoggedEvent.deinit);
     }
 };
+
+const AcpResume = struct {
+    manager: *Manager,
+    session: *Session,
+    delay_ms: i64,
+    wait_for_children: bool,
+    message: []const u8,
+};
+
+fn resumeAcpPrompt(task: AcpResume) Io.Cancelable!void {
+    var wait_rounds: usize = 0;
+    while (true) {
+        try task.manager.io.sleep(.fromMilliseconds(if (wait_rounds == 0) task.delay_ms else 1000), .awake);
+        try task.manager.mutex.lock(task.manager.io);
+        if (!task.session.running or !task.session.active or !task.session.resume_scheduled or task.session.active_request_id != null) {
+            task.manager.mutex.unlock(task.manager.io);
+            return;
+        }
+        if (task.wait_for_children and task.session.pending_subagents.count() > 0 and wait_rounds < 1800) {
+            wait_rounds += 1;
+            task.manager.mutex.unlock(task.manager.io);
+            continue;
+        }
+        break;
+    }
+    if (task.wait_for_children and task.session.pending_subagents.count() > 0) {
+        task.session.resume_scheduled = false;
+        task.session.active = false;
+        task.session.waiting_for_children = false;
+        task.manager.setSessionError(task.session, "Background subagents did not finish before the continuation deadline") catch {
+            task.manager.mutex.unlock(task.manager.io);
+            return;
+        };
+        task.manager.appendAcpLifecycleEvent(task.session, "extension_error", task.session.last_error.?, null) catch {
+            task.manager.mutex.unlock(task.manager.io);
+            return;
+        };
+        task.manager.mutex.unlock(task.manager.io);
+        return;
+    }
+    task.session.resume_scheduled = false;
+    task.manager.mutex.unlock(task.manager.io);
+    task.manager.sendAcpPromptContinuation(task.session, task.message) catch |failure| {
+        try task.manager.mutex.lock(task.manager.io);
+        defer task.manager.mutex.unlock(task.manager.io);
+        task.session.active = false;
+        task.session.waiting_for_children = false;
+        task.manager.setSessionError(task.session, @errorName(failure)) catch return;
+        task.manager.appendAcpLifecycleEvent(task.session, "extension_error", task.session.last_error.?, null) catch return;
+    };
+}
+
+fn acpErrorMessage(value: std.json.Value) []const u8 {
+    if (value == .string) return value.string;
+    if (value != .object) return "Harness request failed";
+    return optionalString(value.object, "message") orelse "Harness request failed";
+}
+
+fn isRetryableAcpError(value: std.json.Value) bool {
+    const message = acpErrorMessage(value);
+    return std.mem.indexOf(u8, message, "ECONNRESET") != null or
+        std.mem.indexOf(u8, message, "ETIMEDOUT") != null or
+        std.mem.indexOf(u8, message, "EAI_AGAIN") != null or
+        std.mem.indexOf(u8, message, "socket connection was closed") != null or
+        std.mem.indexOf(u8, message, "connection reset") != null or
+        std.mem.indexOf(u8, message, "temporarily unavailable") != null;
+}
+
+fn isBackgroundSubagentAcknowledgement(update: std.json.ObjectMap) bool {
+    if (update.get("rawOutput")) |raw_output| if (raw_output == .object) {
+        if (raw_output.object.get("metadata")) |metadata| if (metadata == .object) {
+            if (std.mem.eql(u8, optionalString(metadata.object, "status") orelse "", "running")) return true;
+        };
+    };
+    const content = update.get("content") orelse return false;
+    if (content != .array) return false;
+    for (content.array.items) |item| {
+        if (item != .object) continue;
+        const nested = item.object.get("content") orelse continue;
+        if (nested != .object) continue;
+        const text = optionalString(nested.object, "text") orelse continue;
+        if (std.mem.indexOf(u8, text, "working in the background") != null) return true;
+    }
+    return false;
+}
 
 const ChatPrompt = struct {
     manager: *Manager,

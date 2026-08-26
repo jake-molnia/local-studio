@@ -149,6 +149,22 @@ pub fn initialize(database: *sqlite.Database) !void {
     try ensureColumn(database, "harness_version", "ALTER TABLE agent_sessions ADD COLUMN harness_version TEXT");
     try ensureColumn(database, "capabilities_json", "ALTER TABLE agent_sessions ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'");
     try ensureColumn(database, "model_route_id", "ALTER TABLE agent_sessions ADD COLUMN model_route_id TEXT");
+    try database.execute(
+        \\UPDATE agent_transcript_entries AS transcript
+        \\SET document = (
+        \\  SELECT json_extract(event.document, '$.event')
+        \\  FROM agent_events AS event
+        \\  WHERE event.session_id = transcript.session_id
+        \\    AND event.sequence = CAST(substr(transcript.source_key, 7) AS INTEGER)
+        \\)
+        \\WHERE transcript.source_key LIKE 'event:%'
+        \\  AND EXISTS (
+        \\    SELECT 1 FROM agent_events AS event
+        \\    WHERE event.session_id = transcript.session_id
+        \\      AND event.sequence = CAST(substr(transcript.source_key, 7) AS INTEGER)
+        \\      AND json_extract(event.document, '$.event') IS NOT NULL
+        \\  )
+    );
 }
 
 pub fn get(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?Session {
@@ -183,7 +199,7 @@ pub fn listActive(allocator: std.mem.Allocator, database: *sqlite.Database) !Ses
     return querySessions(
         allocator,
         database,
-        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, model_route_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE status IN ('queued', 'running') ORDER BY updated_at LIMIT 10000",
+        "SELECT session_id, harness, harness_version, capabilities_json, node_id, native_session_id, project_id, project_path, model_id, model_route_id, status, event_cursor, sharing_policy, automation_id, created_at, updated_at FROM agent_sessions WHERE status IN ('queued', 'running', 'waiting', 'retrying') ORDER BY updated_at LIMIT 10000",
     );
 }
 
@@ -321,7 +337,7 @@ pub fn appendTranscript(database: *sqlite.Database, session_id: []const u8, sour
     var statement = try database.prepare(
         \\INSERT INTO agent_transcript_entries (session_id, source_key, document)
         \\VALUES (?, ?, ?)
-        \\ON CONFLICT(session_id, source_key) DO NOTHING
+        \\ON CONFLICT(session_id, source_key) DO UPDATE SET document = excluded.document
     );
     defer statement.deinit();
     try statement.bindText(1, session_id);

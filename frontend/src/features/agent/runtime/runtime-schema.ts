@@ -24,6 +24,7 @@ export const RuntimeStatusSchema = Schema.Struct({
   piSessionId: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   modelId: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   eventSeq: Schema.optional(Schema.Number),
+  lastError: Schema.optional(Schema.Union([Schema.Null, Schema.String])),
   events: Schema.optional(Schema.Array(RuntimeLoggedEventSchema)),
   contextUsage: Schema.optional(Schema.Union([Schema.Null, RuntimeContextUsageSchema])),
 });

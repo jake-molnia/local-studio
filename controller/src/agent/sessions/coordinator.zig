@@ -323,9 +323,19 @@ pub fn serveEvents(allocator: std.mem.Allocator, io: Io, _: config.Mode, _: *htt
             try body.flush();
             idle_rounds = 0;
         } else idle_rounds += 1;
-        const active = std.mem.eql(u8, snapshot.session.status, "queued") or std.mem.eql(u8, snapshot.session.status, "running");
+        const active = std.mem.eql(u8, snapshot.session.status, "queued") or
+            std.mem.eql(u8, snapshot.session.status, "running") or
+            std.mem.eql(u8, snapshot.session.status, "waiting") or
+            std.mem.eql(u8, snapshot.session.status, "retrying");
         if (!active and idle_rounds >= 2) {
-            try writeStatusEvent(&body.writer, &snapshot.session, if (std.mem.eql(u8, snapshot.session.status, "unavailable")) "unavailable" else "idle");
+            const terminal_phase = if (std.mem.eql(u8, snapshot.session.status, "failed") or
+                std.mem.eql(u8, snapshot.session.status, "interrupted") or
+                std.mem.eql(u8, snapshot.session.status, "unavailable") or
+                std.mem.eql(u8, snapshot.session.status, "stopped"))
+                snapshot.session.status
+            else
+                "idle";
+            try writeStatusEvent(&body.writer, &snapshot.session, terminal_phase);
             try body.end();
             return;
         }
@@ -433,9 +443,11 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     if (status != .object) return;
     const active = booleanField(status.object, "active") orelse false;
     const running = booleanField(status.object, "running") orelse active;
-    const phase = if (active) "running" else if (running) "idle" else "stopped";
+    const failure = runtimeFailure(parsed.value.object, status.object);
+    const phase = runtimePhase(parsed.value.object, active, running, failure != null);
     const native_session_id = optionalString(status.object, "nativeSessionId") orelse optionalString(status.object, "piSessionId");
     const harness_version = optionalString(status.object, "harnessVersion");
+    const session_harness = optionalString(status.object, "harness") orelse "pi";
     const capabilities_json = if (status.object.get("capabilities")) |value| try serialize(allocator, value) else null;
     defer if (capabilities_json) |value| allocator.free(value);
     var committed_cursor: ?u64 = null;
@@ -453,16 +465,13 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
         const sequence = unsignedField(event.object, "seq") orelse continue;
         const serialized = try serialize(allocator, event);
         defer allocator.free(serialized);
-        const session_harness = optionalString(status.object, "harness") orelse "pi";
         try records.appendEvent(database, session_id, sequence, session_harness, serialized);
-        if (event.object.get("event")) |native| {
-            const native_document = try serialize(allocator, native);
-            defer allocator.free(native_document);
-            const canonical = try harness_events.canonicalDocument(allocator, session_harness, native_document);
-            defer allocator.free(canonical);
+        if (event.object.get("event")) |canonical| {
+            const canonical_document = try serialize(allocator, canonical);
+            defer allocator.free(canonical_document);
             const source_key = try std.fmt.allocPrint(allocator, "event:{d}", .{sequence});
             defer allocator.free(source_key);
-            try records.appendTranscript(database, session_id, source_key, canonical);
+            try records.appendTranscript(database, session_id, source_key, canonical_document);
         }
     };
     try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
@@ -601,6 +610,42 @@ fn lockedRuntime(io: Io, database: *sqlite.Database, session_id: []const u8, sta
     try database.lock(io);
     defer database.unlock(io);
     try records.updateRuntime(database, session_id, status, native_session_id, cursor);
+}
+
+fn runtimePhase(document: std.json.ObjectMap, active: bool, running: bool, failed: bool) []const u8 {
+    if (failed) return "failed";
+    if (latestNormalizedType(document)) |event_type| {
+        if (std.mem.eql(u8, event_type, "turn.waiting")) return "waiting";
+        if (std.mem.eql(u8, event_type, "turn.retrying")) return "retrying";
+    }
+    if (active) return "running";
+    return if (running) "idle" else "stopped";
+}
+
+fn runtimeFailure(document: std.json.ObjectMap, status: std.json.ObjectMap) ?[]const u8 {
+    if (optionalString(status, "lastError")) |failure| return failure;
+    const events = document.get("events") orelse return null;
+    if (events != .array) return null;
+    var index = events.array.items.len;
+    while (index > 0) {
+        index -= 1;
+        const envelope = events.array.items[index];
+        if (envelope != .object) continue;
+        const event = envelope.object.get("event") orelse continue;
+        if (event != .object or !std.mem.eql(u8, optionalString(event.object, "type") orelse "", "extension_error")) continue;
+        return optionalString(event.object, "message") orelse "Harness turn failed";
+    }
+    return null;
+}
+
+fn latestNormalizedType(document: std.json.ObjectMap) ?[]const u8 {
+    const events = document.get("events") orelse return null;
+    if (events != .array or events.array.items.len == 0) return null;
+    const envelope = events.array.items[events.array.items.len - 1];
+    if (envelope != .object) return null;
+    const normalized = envelope.object.get("normalized") orelse return null;
+    if (normalized != .object) return null;
+    return optionalString(normalized.object, "type");
 }
 
 fn selectHarnessNode(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, harness: []const u8, preferred_node: ?[]const u8) !?harness_nodes.Target {

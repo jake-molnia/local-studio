@@ -30,6 +30,7 @@ pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness:
     defer parsed.deinit();
     if (parsed.value != .object) return writer.writeAll(document);
     const object = parsed.value.object;
+    if (stringField(object, "type")) |event_type| if (isCanonical(event_type)) return writer.writeAll(document);
     const method = stringField(object, "method");
     if (method) |value| if (std.mem.eql(u8, value, "session/update")) {
         const params = object.get("params") orelse return writer.writeAll(document);
@@ -56,6 +57,14 @@ pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness:
             try std.json.Stringify.value(stringField(update.object, "toolCallId") orelse "", .{}, writer);
             try writer.writeAll(",\"toolName\":");
             try std.json.Stringify.value(stringField(update.object, "title") orelse "tool", .{}, writer);
+            if (update.object.get("rawInput")) |input| {
+                try writer.writeAll(",\"arguments\":");
+                try std.json.Stringify.value(input, .{}, writer);
+            }
+            if (stringField(update.object, "kind")) |kind| {
+                try writer.writeAll(",\"kind\":");
+                try std.json.Stringify.value(kind, .{}, writer);
+            }
             try writer.writeByte('}');
             return;
         }
@@ -68,6 +77,8 @@ pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness:
             try std.json.Stringify.value(stringField(update.object, "toolCallId") orelse "", .{}, writer);
             try writer.writeAll(",\"isError\":");
             try writer.writeAll(if (std.mem.eql(u8, status, "failed")) "true" else "false");
+            try writer.writeAll(",\"status\":");
+            try std.json.Stringify.value(status, .{}, writer);
             if (toolUpdateText(update.object)) |text| {
                 try writer.writeAll(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":");
                 try std.json.Stringify.value(text, .{}, writer);
@@ -158,6 +169,16 @@ pub fn writeNormalized(allocator: std.mem.Allocator, writer: *Io.Writer, harness
 }
 
 fn writeAcpNormalized(writer: *Io.Writer, harness: []const u8, object: std.json.ObjectMap) !void {
+    if (stringField(object, "type")) |native_type| if (isCanonical(native_type)) {
+        try writer.writeAll("{\"type\":");
+        try std.json.Stringify.value(normalizedKind(object, native_type), .{}, writer);
+        try writer.writeAll(",\"harness\":");
+        try std.json.Stringify.value(harness, .{}, writer);
+        try writer.writeAll(",\"nativeType\":");
+        try std.json.Stringify.value(native_type, .{}, writer);
+        try writer.writeByte('}');
+        return;
+    };
     const method = stringField(object, "method");
     if (method) |value| if (std.mem.eql(u8, value, "session/update")) {
         const params = object.get("params") orelse return writer.writeAll("null");
@@ -208,6 +229,8 @@ fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u
     if (std.mem.eql(u8, native_type, "tool_execution_end")) return "tool.completed";
     if (std.mem.eql(u8, native_type, "extension_ui_request")) return "approval.requested";
     if (std.mem.eql(u8, native_type, "extension_error")) return "session.failed";
+    if (std.mem.eql(u8, native_type, "turn_waiting")) return "turn.waiting";
+    if (std.mem.eql(u8, native_type, "turn_retry")) return "turn.retrying";
     if (std.mem.eql(u8, native_type, "message_update")) {
         const event = object.get("assistantMessageEvent") orelse return "message.updated";
         if (event != .object) return "message.updated";
@@ -218,6 +241,21 @@ fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u
         return "message.updated";
     }
     return "native.event";
+}
+
+fn isCanonical(event_type: []const u8) bool {
+    return std.mem.eql(u8, event_type, "message") or
+        std.mem.eql(u8, event_type, "message_start") or
+        std.mem.eql(u8, event_type, "message_update") or
+        std.mem.eql(u8, event_type, "message_end") or
+        std.mem.eql(u8, event_type, "tool_execution_start") or
+        std.mem.eql(u8, event_type, "tool_execution_update") or
+        std.mem.eql(u8, event_type, "tool_execution_end") or
+        std.mem.eql(u8, event_type, "agent_start") or
+        std.mem.eql(u8, event_type, "agent_settled") or
+        std.mem.eql(u8, event_type, "extension_error") or
+        std.mem.eql(u8, event_type, "turn_waiting") or
+        std.mem.eql(u8, event_type, "turn_retry");
 }
 
 fn codexError(object: std.json.ObjectMap) ?[]const u8 {
