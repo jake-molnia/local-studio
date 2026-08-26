@@ -275,9 +275,10 @@ function openNewSessionInFocusedPane(
     const activeId = paneSessionId(pane);
     const active = activeId ? state.sessions.get(activeId) : undefined;
     if (active && isEmptyStarterSession(active)) {
+      const retargeted = { ...session, id: active.id };
       return withComposerFocusIntent(
-        focusSessionAsOnlyPane(state, targetPaneId, active.id),
-        active.id,
+        replaceWorkspaceSession(state, targetPaneId, retargeted),
+        retargeted.id,
       );
     }
     const minted = replaceWorkspaceSession(state, targetPaneId, session);
