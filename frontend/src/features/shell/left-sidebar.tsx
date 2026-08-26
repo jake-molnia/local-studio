@@ -32,6 +32,10 @@ import {
   routeOwnsMobileHeader,
 } from "@/features/shell/left-sidebar-nav";
 import { WorkbenchTabStrip } from "@/features/workbench/workbench-tab-strip";
+import {
+  setWorkbenchSidebar,
+  useWorkbenchPreferences,
+} from "@/features/workbench/controller-state";
 
 type PaletteMode = "search" | null;
 
@@ -42,8 +46,8 @@ type SidebarResizeInteraction = {
   sidebar: HTMLElement;
 };
 
-const SIDEBAR_MIN_WIDTH = 194;
-const SIDEBAR_MAX_WIDTH = 360;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 480;
 const MIN_WORKSPACE_WIDTH = 560;
 const LAST_WORKSPACE_URL_KEY = "local-studio:last-workspace-url";
 function clampSidebarWidth(width: number, maxWidth = SIDEBAR_MAX_WIDTH): number {
@@ -57,24 +61,21 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
   const hidesAppSidebar = routeHidesAppSidebar(pathname);
   const ownsThreadTabs = pathname === "/agent";
   const projectsNavImmediate = !hidesAppSidebar;
-  const {
-    desktopSidebarPinnedOpen,
-    setDesktopSidebarPinnedOpen,
-    sidebarWidth,
-    setSidebarWidth,
-    mobileMenuOpen,
-    setMobileMenuOpen,
-  } = useAppStore(
+  const { mobileMenuOpen, setMobileMenuOpen } = useAppStore(
     useShallow((s) => ({
-      desktopSidebarPinnedOpen: s.desktopSidebarPinnedOpen,
-      setDesktopSidebarPinnedOpen: s.setDesktopSidebarPinnedOpen,
-      sidebarWidth: s.sidebarWidth,
-      setSidebarWidth: s.setSidebarWidth,
       mobileMenuOpen: s.mobileNavOpen,
       setMobileMenuOpen: s.setMobileNavOpen,
     })),
   );
-  const isExpanded = desktopSidebarPinnedOpen;
+  const { sidebarPinnedOpen: isExpanded, sidebarWidth } = useWorkbenchPreferences();
+  const setSidebarWidth = useCallback(
+    (width: number) => setWorkbenchSidebar({ sidebarWidth: width }),
+    [],
+  );
+  const setSidebarPinnedOpen = useCallback(
+    (open: boolean) => setWorkbenchSidebar({ sidebarPinnedOpen: open }),
+    [],
+  );
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(SIDEBAR_MAX_WIDTH);
   const clampedSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarMaxWidth);
   const ownsMobileHeader = routeOwnsMobileHeader(pathname);
@@ -292,7 +293,7 @@ export function LeftSidebar({ children }: { children: ReactNode }) {
         onRevealProjectsNav={() => {
           if (!hidesAppSidebar && !projectsNavReady) setProjectsNavReady(true);
         }}
-        onSetPinnedOpen={setDesktopSidebarPinnedOpen}
+        onSetPinnedOpen={setSidebarPinnedOpen}
         onOpenSearch={() => setPaletteMode("search")}
         navView={navView}
         onToggleNavView={() =>

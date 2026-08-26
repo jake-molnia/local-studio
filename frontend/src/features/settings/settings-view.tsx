@@ -29,6 +29,7 @@ import { ArchivedChatsSettings } from "./agent-settings-sections";
 import { AppVersionSection } from "./app-version-section";
 import { AgentDefaultsSection } from "./agent-defaults-section";
 import { CredentialStoreSection } from "./credential-store-section";
+import { WorkbenchSettings } from "./workbench-settings";
 import { AppearanceSettings } from "./appearance-settings";
 import { ShortcutsSettings } from "./terminal-settings";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -420,6 +421,7 @@ export function SettingsView({
         <>
           <ProfileSettings />
           <AgentDefaultsSection />
+          <WorkbenchSettings />
           <AppVersionSection />
         </>
       ) : null}
