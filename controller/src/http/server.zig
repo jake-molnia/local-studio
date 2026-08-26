@@ -142,7 +142,7 @@ pub const HttpServer = struct {
         errdefer browser.deinit();
         var daytona = try agent_daytona.Manager.init(allocator, io, config.data_dir, config.environment);
         errdefer daytona.deinit();
-        var messaging = try agent_messaging.Manager.init(allocator, io, config.data_dir, config.environment);
+        var messaging = try agent_messaging.Manager.init(allocator, io, &config);
         errdefer messaging.deinit();
         return .{
             .allocator = allocator,
@@ -193,7 +193,7 @@ pub const HttpServer = struct {
         if (server.config.mode != .worker) try group.concurrent(server.io, automations.runScheduler, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness, &server.daytona });
         if (server.config.mode != .worker) try group.concurrent(server.io, agent_coordinator.runEventPump, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness });
         if (server.config.mode == .head) try group.concurrent(server.io, agent_daytona.Manager.runReconciler, .{ &server.daytona, &server.client, database });
-        if (server.config.mode == .head) try group.concurrent(server.io, agent_messaging.Manager.runTelegramPoller, .{ &server.messaging, &server.client, database });
+        if (server.config.mode == .head) try group.concurrent(server.io, agent_messaging.Manager.runTelegramPoller, .{ &server.messaging, server.config.mode, &server.client, database, &server.harness });
         if (server.config.mode == .head) try group.concurrent(server.io, agent_messaging.Manager.runDispatcher, .{ &server.messaging, server.config.mode, &server.client, database, &server.harness });
         while (!shutdown.isRequested()) {
             var stream = server.listener.accept(server.io) catch |failure| {
@@ -390,6 +390,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const payload = response catch |failure| return respondMessagingFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/messaging/react")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = messaging.reactionPayload(client, database, document) catch |failure| return respondMessagingFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/models")) {
@@ -2592,7 +2600,8 @@ fn respondMessagingFailure(request: *http.Server.Request, failure: anyerror) !bo
         error.PairingNotFound => .not_found,
         error.PairingLocked => .locked,
         error.PairingExpired, error.PairingCodeInvalid => .forbidden,
-        error.InvalidPairingPayload, error.InvalidMessagingDefaults, error.MessagingModelRequired, error.PairingIdRequired, error.PairingCodeRequired, error.InvalidDiscordInteraction, error.DiscordPublicKeyRequired => .bad_request,
+        error.InvalidPairingPayload, error.InvalidMessagingDefaults, error.InvalidMessagingReaction, error.MessagingModelRequired, error.PairingIdRequired, error.PairingCodeRequired, error.InvalidDiscordInteraction, error.DiscordPublicKeyRequired => .bad_request,
+        error.MessagingConversationNotFound, error.MessagingMessageNotFound => .not_found,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
