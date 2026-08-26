@@ -10,7 +10,7 @@ pub const Route = struct {
     streaming: Streaming,
 };
 
-pub const route_count: usize = 273;
+pub const route_count: usize = 276;
 
 pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/docs", .ownership = .shared, .streaming = .never },
@@ -107,6 +107,9 @@ pub const routes = [_]Route{
     .{ .method = .POST, .path = "/v1/tokenize-chat-completions", .ownership = .proxied, .streaming = .never },
     .{ .method = .POST, .path = "/vram-calculator", .ownership = .proxied, .streaming = .never },
     .{ .method = .GET, .path = "/wait-ready", .ownership = .proxied, .streaming = .never },
+    .{ .method = .GET, .path = "/api/workbench", .ownership = .shared, .streaming = .never },
+    .{ .method = .POST, .path = "/api/workbench/commands", .ownership = .shared, .streaming = .never },
+    .{ .method = .GET, .path = "/api/workbench/events", .ownership = .shared, .streaming = .always },
     .{ .method = .POST, .path = "/api/agent/turn", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/abort", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/compact", .ownership = .head, .streaming = .never },

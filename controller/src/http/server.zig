@@ -71,6 +71,7 @@ const inference_usage = @import("../inference/usage/store.zig");
 const sqlite = @import("../storage/sqlite.zig");
 const system_info = @import("../system/platform/system_info.zig");
 const topology = @import("../topology/topology.zig");
+const workbench = @import("../workbench/service.zig");
 
 const Config = config_module.Config;
 const Mode = config_module.Mode;
@@ -322,6 +323,24 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/workbench")) {
+        const response = workbench.projectionPayload(allocator, io, database) catch |failure| return respondWorkbenchFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/workbench/commands")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = workbench.commandPayload(allocator, io, database, document) catch |failure| return respondWorkbenchFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/workbench/events")) {
+        serveWorkbenchEvents(allocator, io, database, request) catch return false;
+        return false;
     }
     if (std.mem.eql(u8, route.path, "/api/agent/harnesses")) {
         const response = try agent_coordinator.harnessesPayload(allocator, io, mode, database, harness);
@@ -2863,6 +2882,16 @@ fn respondAutomationFailure(request: *http.Server.Request, failure: anyerror) !b
     return respondDownloadError(request, status, detail);
 }
 
+fn respondWorkbenchFailure(request: *http.Server.Request, failure: anyerror) !bool {
+    const status: http.Status = switch (failure) {
+        error.WorkbenchTaskNotFound, error.WorkbenchProjectNotFound, error.WorkbenchTabNotFound => .not_found,
+        error.WorkbenchTaskUnavailable, error.WorkbenchTabNotClosable => .conflict,
+        error.InvalidWorkbenchCommand, error.WorkbenchCommandIdRequired, error.WorkbenchActorIdRequired, error.WorkbenchCommandKindRequired, error.WorkbenchTaskIdRequired, error.WorkbenchProjectIdRequired, error.WorkbenchTargetIdRequired, error.WorkbenchPinnedRequired, error.WorkbenchTabIdRequired, error.WorkbenchResourceKindRequired, error.WorkbenchResourceIdRequired, error.WorkbenchTabTitleRequired, error.WorkbenchLifecycleModeRequired, error.WorkbenchCacheLimitRequired, error.WorkbenchSidebarValueRequired, error.InvalidWorkbenchResourceKind, error.InvalidWorkbenchSidebarWidth, error.InvalidWorkbenchSidebarOrder, error.InvalidWorkbenchLifecycleMode, error.InvalidWorkbenchCacheLimit, error.UnknownWorkbenchCommand => .bad_request,
+        else => .internal_server_error,
+    };
+    return respondDownloadError(request, status, @errorName(failure));
+}
+
 fn respondHeadConnectionFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
         error.InvalidHeadConnection, error.HeadUrlRequired, error.InvalidHeadUrl, error.EnrollmentNodeAddressRequired, error.EnrollmentNodeCredentialRequired => .bad_request,
@@ -3830,6 +3859,50 @@ fn serveSessionListChanged(allocator: std.mem.Allocator, io: Io, database: *sqli
                 try body.writer.flush();
                 try body.flush();
             }
+        }
+    }
+}
+
+fn serveWorkbenchEvents(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, request: *http.Server.Request) !void {
+    var stream_buffer: [4096]u8 = undefined;
+    var body = try request.respondStreaming(&stream_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream; charset=utf-8" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var current_generation = workbench.generation();
+    var heartbeat: usize = 0;
+    const initial = try workbench.eventPayload(allocator, io, database);
+    defer allocator.free(initial);
+    try body.writer.writeAll("event: workbench\ndata: ");
+    try body.writer.writeAll(initial);
+    try body.writer.writeAll("\n\n");
+    try body.writer.flush();
+    try body.flush();
+    while (true) {
+        try io.sleep(.fromMilliseconds(25), .awake);
+        heartbeat += 1;
+        const next_generation = workbench.generation();
+        if (next_generation != current_generation) {
+            current_generation = next_generation;
+            heartbeat = 0;
+            const event = try workbench.eventPayload(allocator, io, database);
+            defer allocator.free(event);
+            try body.writer.writeAll("event: workbench\ndata: ");
+            try body.writer.writeAll(event);
+            try body.writer.writeAll("\n\n");
+            try body.writer.flush();
+            try body.flush();
+        } else if (heartbeat >= 1200) {
+            heartbeat = 0;
+            try body.writer.writeAll(": keep-alive\n\n");
+            try body.writer.flush();
+            try body.flush();
         }
     }
 }

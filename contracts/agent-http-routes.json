@@ -1,6 +1,19 @@
 {
   "version": 1,
   "routes": [
+    { "method": "GET", "path": "/api/workbench", "ownership": "shared", "streaming": "never" },
+    {
+      "method": "POST",
+      "path": "/api/workbench/commands",
+      "ownership": "shared",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workbench/events",
+      "ownership": "shared",
+      "streaming": "always"
+    },
     { "method": "POST", "path": "/api/agent/turn", "ownership": "head", "streaming": "never" },
     { "method": "POST", "path": "/api/agent/abort", "ownership": "head", "streaming": "never" },
     { "method": "POST", "path": "/api/agent/compact", "ownership": "head", "streaming": "never" },
