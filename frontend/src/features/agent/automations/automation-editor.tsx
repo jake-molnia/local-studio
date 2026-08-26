@@ -5,9 +5,10 @@ import { AppContentColumn, Button, FormField, Input, Select, Textarea } from "@/
 import { Clock, Pause, Play, Plus, Trash2, X } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import type { Automation, AutomationSchedule } from "@shared/agent/automation";
+import { AGENT_HARNESSES } from "@shared/agent/harness-id";
 import type { AutomationModel } from "./automation-api";
 import { AutomationRunHistory } from "./automation-run-history";
-import { AutomationSessionPicker } from "./automation-session-picker";
+import { useSandboxAccounts } from "@/features/agent/ui/use-sandbox-accounts";
 import {
   NEW_AUTOMATION_DRAFT,
   draftFromAutomation,
@@ -80,6 +81,8 @@ export function AutomationEditor({
     () => (automation ? draftFromAutomation(automation) : initialDraft) ?? NEW_AUTOMATION_DRAFT,
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const sandboxAccounts = useSandboxAccounts();
+  const daytonaAccounts = sandboxAccounts.filter((account) => account.provider === "daytona");
 
   useMountSubscription(() => {
     if (models.length === 0) return;
@@ -166,6 +169,20 @@ export function AutomationEditor({
             </div>
 
             <div className="grid gap-4 border-t border-(--ui-separator) pt-5 sm:grid-cols-2">
+              <FormField label="Runtime" required>
+                <Select
+                  value={draft.executionKind}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      executionKind: event.target.value === "project" ? "project" : "chat",
+                    }))
+                  }
+                >
+                  <option value="chat">Chat</option>
+                  <option value="project">Project task</option>
+                </Select>
+              </FormField>
               <FormField label="Model" required>
                 <Select
                   value={draft.modelId}
@@ -203,32 +220,76 @@ export function AutomationEditor({
                     ))}
                 </Select>
               </FormField>
-              <FormField
-                label="Working directory"
-                description="Optional. Leave empty to use the Local Studio default."
-              >
-                <Input
-                  value={draft.cwd}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, cwd: event.target.value }))
-                  }
-                  placeholder="/path/to/project"
-                />
-              </FormField>
+              {draft.executionKind === "project" ? (
+                <>
+                  <FormField label="Harness" required>
+                    <Select
+                      value={draft.harness}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          harness: event.target.value as AutomationDraft["harness"],
+                        }))
+                      }
+                    >
+                      {AGENT_HARNESSES.map((harness) => (
+                        <option key={harness} value={harness}>
+                          {harness}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                  <FormField label="Working directory" required>
+                    <Input
+                      value={draft.cwd}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, cwd: event.target.value }))
+                      }
+                      placeholder="/path/to/project"
+                    />
+                  </FormField>
+                  <FormField label="Placement" required>
+                    <Select
+                      value={draft.placement}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          placement: event.target.value === "daytona" ? "daytona" : "local",
+                          sandboxAccountId:
+                            event.target.value === "daytona"
+                              ? current.sandboxAccountId || daytonaAccounts[0]?.id || ""
+                              : "",
+                        }))
+                      }
+                    >
+                      <option value="local">Local</option>
+                      <option value="daytona" disabled={daytonaAccounts.length === 0}>
+                        Daytona
+                      </option>
+                    </Select>
+                  </FormField>
+                  {draft.placement === "daytona" ? (
+                    <FormField label="Daytona account" required>
+                      <Select
+                        value={draft.sandboxAccountId}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            sandboxAccountId: event.target.value,
+                          }))
+                        }
+                      >
+                        {daytonaAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormField>
+                  ) : null}
+                </>
+              ) : null}
             </div>
-
-            <FormField
-              label="Run in"
-              asGroup
-              description="A fresh session starts blank every time. Pick an existing chat to run the task inside that thread's context instead."
-            >
-              <AutomationSessionPicker
-                value={draft.targetSessionId}
-                onChange={(targetSessionId) =>
-                  setDraft((current) => ({ ...current, targetSessionId }))
-                }
-              />
-            </FormField>
 
             {!creating && automation?.runs.length ? (
               <AutomationRunHistory

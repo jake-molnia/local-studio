@@ -1,4 +1,5 @@
 import type { Automation, AutomationSchedule } from "@shared/agent/automation";
+import type { AgentHarness } from "@shared/agent/harness-id";
 
 export type AutomationFilter = "all" | "active" | "paused";
 
@@ -7,9 +8,11 @@ export type AutomationDraft = {
   prompt: string;
   modelId: string;
   modelRouteId: string;
+  executionKind: "chat" | "project";
   cwd: string;
-  /** Session every run continues; null starts a fresh one each time. */
-  targetSessionId: string | null;
+  harness: AgentHarness;
+  placement: "local" | "daytona";
+  sandboxAccountId: string;
   schedule: AutomationSchedule;
 };
 
@@ -18,8 +21,11 @@ export const NEW_AUTOMATION_DRAFT: AutomationDraft = {
   prompt: "",
   modelId: "",
   modelRouteId: "",
+  executionKind: "chat",
   cwd: "",
-  targetSessionId: null,
+  harness: "pi",
+  placement: "local",
+  sandboxAccountId: "",
   schedule: { kind: "daily", time: "08:00" },
 };
 
@@ -31,8 +37,11 @@ export function draftFromAutomation(automation: Automation): AutomationDraft {
     prompt: automation.prompt,
     modelId: automation.modelId,
     modelRouteId: automation.modelRouteId ?? automation.modelId,
-    cwd: automation.cwd,
-    targetSessionId: automation.targetSessionId ?? null,
+    executionKind: automation.executionKind,
+    cwd: automation.cwd ?? "",
+    harness: automation.harness ?? "pi",
+    placement: automation.placement ?? "local",
+    sandboxAccountId: automation.sandboxAccountId ?? "",
     schedule: automation.schedule,
   };
 }
@@ -73,7 +82,7 @@ export function filterAutomations(
   return automations.filter((automation) => {
     if (filter !== "all" && automation.status !== filter) return false;
     if (!normalizedQuery) return true;
-    return [automation.name, automation.prompt, automation.modelId, automation.cwd]
+    return [automation.name, automation.prompt, automation.modelId, automation.cwd ?? ""]
       .join(" ")
       .toLocaleLowerCase()
       .includes(normalizedQuery);
@@ -82,6 +91,13 @@ export function filterAutomations(
 
 export function draftIsValid(draft: AutomationDraft): boolean {
   return Boolean(
-    draft.name.trim() && draft.prompt.trim() && draft.modelId.trim() && draft.modelRouteId.trim(),
+    draft.name.trim() &&
+    draft.prompt.trim() &&
+    draft.modelId.trim() &&
+    draft.modelRouteId.trim() &&
+    (draft.executionKind === "chat" ||
+      (draft.cwd.trim() &&
+        draft.harness &&
+        (draft.placement === "local" || draft.sandboxAccountId))),
   );
 }

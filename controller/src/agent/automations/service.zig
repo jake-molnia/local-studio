@@ -5,6 +5,7 @@ const sqlite = @import("../../storage/sqlite.zig");
 const agent_coordinator = @import("../sessions/coordinator.zig");
 const agent_run_completion = @import("../sessions/run_completion.zig");
 const harness_runtime = @import("../harness/runtime.zig");
+const daytona_runtime = @import("../cloud/daytona.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -32,7 +33,16 @@ pub fn createPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Dat
     const name = requiredString(object, "name") orelse return error.AutomationNameRequired;
     const prompt = requiredString(object, "prompt") orelse return error.AutomationPromptRequired;
     const model_id = requiredString(object, "modelId") orelse return error.AutomationModelRequired;
-    const cwd = requiredString(object, "cwd") orelse return error.AutomationCwdRequired;
+    const execution_kind = requiredString(object, "executionKind") orelse return error.AutomationExecutionKindRequired;
+    if (!std.mem.eql(u8, execution_kind, "chat") and !std.mem.eql(u8, execution_kind, "project")) return error.InvalidAutomationExecutionKind;
+    const cwd = optionalString(object, "cwd");
+    const selected_harness = optionalString(object, "harness");
+    const placement = optionalString(object, "placement") orelse "local";
+    const sandbox_account_id = optionalString(object, "sandboxAccountId");
+    if (std.mem.eql(u8, execution_kind, "chat") and (cwd != null or selected_harness != null)) return error.InvalidChatAutomation;
+    if (std.mem.eql(u8, execution_kind, "project") and (cwd == null or selected_harness == null)) return error.InvalidProjectAutomation;
+    if (!std.mem.eql(u8, placement, "local") and !std.mem.eql(u8, placement, "daytona")) return error.InvalidAutomationPlacement;
+    if (std.mem.eql(u8, placement, "daytona") and sandbox_account_id == null) return error.SandboxAccountRequired;
     const schedule = object.get("schedule") orelse return error.AutomationScheduleRequired;
     try validateSchedule(schedule);
     var random: [4]u8 = undefined;
@@ -46,7 +56,7 @@ pub fn createPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Dat
     const next = try nextRunAt(io, schedule, &next_buffer);
     var output: Io.Writer.Allocating = .init(allocator);
     defer output.deinit();
-    try output.writer.writeAll("{\"version\":1,\"id\":");
+    try output.writer.writeAll("{\"version\":2,\"id\":");
     try std.json.Stringify.value(id, .{}, &output.writer);
     try output.writer.writeAll(",\"name\":");
     try std.json.Stringify.value(name, .{}, &output.writer);
@@ -55,12 +65,16 @@ pub fn createPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Dat
     try output.writer.writeAll(",\"modelId\":");
     try std.json.Stringify.value(model_id, .{}, &output.writer);
     try writeOptional(&output.writer, "modelRouteId", optionalString(object, "modelRouteId"));
-    try output.writer.writeAll(",\"cwd\":");
-    try std.json.Stringify.value(cwd, .{}, &output.writer);
-    try writeOptional(&output.writer, "targetSessionId", optionalString(object, "targetSessionId"));
+    try output.writer.writeAll(",\"executionKind\":");
+    try std.json.Stringify.value(execution_kind, .{}, &output.writer);
+    try writeOptional(&output.writer, "cwd", cwd);
     try writeOptional(&output.writer, "nodeId", optionalString(object, "nodeId"));
     try writeOptional(&output.writer, "projectId", optionalString(object, "projectId"));
-    try output.writer.writeAll(",\"harness\":\"pi\",\"schedule\":");
+    try writeOptional(&output.writer, "harness", selected_harness);
+    try output.writer.writeAll(",\"placement\":");
+    try std.json.Stringify.value(placement, .{}, &output.writer);
+    try writeOptional(&output.writer, "sandboxAccountId", sandbox_account_id);
+    try output.writer.writeAll(",\"schedule\":");
     try std.json.Stringify.value(schedule, .{}, &output.writer);
     try output.writer.writeAll(",\"status\":\"active\",\"nextRunAt\":");
     try std.json.Stringify.value(next, .{}, &output.writer);
@@ -84,13 +98,21 @@ pub fn patchPayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Data
     defer allocator.free(stored);
     var automation = try parseObject(allocator, stored);
     defer automation.deinit();
-    const fields = [_][]const u8{ "name", "prompt", "modelId", "modelRouteId", "cwd", "targetSessionId", "nodeId", "projectId", "schedule", "status", "unread" };
+    const fields = [_][]const u8{ "name", "prompt", "modelId", "modelRouteId", "executionKind", "cwd", "harness", "placement", "sandboxAccountId", "nodeId", "projectId", "schedule", "status", "unread" };
     for (fields) |field| if (body.value.object.get(field)) |value| {
-        if ((std.mem.eql(u8, field, "name") or std.mem.eql(u8, field, "prompt") or std.mem.eql(u8, field, "modelId") or std.mem.eql(u8, field, "cwd")) and (value != .string or std.mem.trim(u8, value.string, " \t\r\n").len == 0)) return error.InvalidAutomationPayload;
+        if ((std.mem.eql(u8, field, "name") or std.mem.eql(u8, field, "prompt") or std.mem.eql(u8, field, "modelId")) and (value != .string or std.mem.trim(u8, value.string, " \t\r\n").len == 0)) return error.InvalidAutomationPayload;
         if (std.mem.eql(u8, field, "schedule")) try validateSchedule(value);
         if (std.mem.eql(u8, field, "status") and (value != .string or (!std.mem.eql(u8, value.string, "active") and !std.mem.eql(u8, value.string, "paused")))) return error.InvalidAutomationStatus;
         try automation.value.object.put(automation.arena.allocator(), field, value);
     };
+    const execution_kind = optionalString(automation.value.object, "executionKind") orelse return error.InvalidAutomationRecord;
+    const cwd = optionalString(automation.value.object, "cwd");
+    const selected_harness = optionalString(automation.value.object, "harness");
+    if (std.mem.eql(u8, execution_kind, "chat") and (cwd != null or selected_harness != null)) return error.InvalidChatAutomation;
+    if (std.mem.eql(u8, execution_kind, "project") and (cwd == null or selected_harness == null)) return error.InvalidProjectAutomation;
+    const placement = optionalString(automation.value.object, "placement") orelse "local";
+    if (!std.mem.eql(u8, placement, "local") and !std.mem.eql(u8, placement, "daytona")) return error.InvalidAutomationPlacement;
+    if (std.mem.eql(u8, placement, "daytona") and optionalString(automation.value.object, "sandboxAccountId") == null) return error.SandboxAccountRequired;
     var now_buffer: [24]u8 = undefined;
     const now = formatTimestampAt(io, 0, &now_buffer);
     try automation.value.object.put(automation.arena.allocator(), "updatedAt", .{ .string = try automation.arena.allocator().dupe(u8, now) });
@@ -111,7 +133,7 @@ pub fn deletePayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Dat
     return allocator.dupe(u8, "{\"success\":true}");
 }
 
-pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, automation_id: []const u8) ![]u8 {
+pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, daytona: *daytona_runtime.Manager, automation_id: []const u8) ![]u8 {
     const stored = try lockedGet(allocator, io, database, automation_id) orelse return error.AutomationNotFound;
     defer allocator.free(stored);
     var automation = try parseObject(allocator, stored);
@@ -120,19 +142,20 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     const prompt = requiredString(object, "prompt") orelse return error.InvalidAutomationRecord;
     const model_id = requiredString(object, "modelId") orelse return error.InvalidAutomationRecord;
     const model_route_id = optionalString(object, "modelRouteId") orelse model_id;
-    const cwd = requiredString(object, "cwd") orelse return error.InvalidAutomationRecord;
-    const target_session = optionalString(object, "targetSessionId");
+    const execution_kind = requiredString(object, "executionKind") orelse return error.InvalidAutomationRecord;
+    const cwd = optionalString(object, "cwd");
+    const selected_harness = optionalString(object, "harness");
+    if (std.mem.eql(u8, execution_kind, "project") and (cwd == null or selected_harness == null)) return error.InvalidProjectAutomation;
     const node_id = optionalString(object, "nodeId");
     const project_id = optionalString(object, "projectId");
-    var random: [8]u8 = undefined;
-    io.random(&random);
-    const suffix = std.fmt.bytesToHex(random, .lower);
-    const session_id = try std.fmt.allocPrint(allocator, "automation:{s}:{s}", .{ automation_id, suffix[0..] });
+    const placement = optionalString(object, "placement") orelse "local";
+    const sandbox_account_id = optionalString(object, "sandboxAccountId");
+    const session_id = try std.fmt.allocPrint(allocator, "automation:{s}", .{automation_id});
     defer allocator.free(session_id);
-    const turn = try turnDocument(allocator, session_id, model_id, model_route_id, prompt, cwd, target_session, node_id, project_id);
+    const turn = try turnDocument(allocator, session_id, execution_kind, selected_harness, model_id, model_route_id, prompt, cwd, node_id, project_id, placement, sandbox_account_id);
     defer allocator.free(turn);
     var run_error: ?[]const u8 = null;
-    const response = agent_coordinator.turnPayload(allocator, io, mode, client, database, harness, turn) catch |failure| failed: {
+    const response = agent_coordinator.turnPayloadWithCloud(allocator, io, mode, client, database, harness, daytona, turn) catch |failure| failed: {
         run_error = @errorName(failure);
         break :failed null;
     };
@@ -146,7 +169,7 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     var at_buffer: [24]u8 = undefined;
     const at = formatTimestampAt(io, 0, &at_buffer);
     const completed_error = if (result) |value| value.failure else run_error;
-    const updated = try recordRun(allocator, io, &automation, at, cwd, if (result) |value| value.native_session else target_session, project_id, if (result) |value| value.summary else "", completed_error);
+    const updated = try recordRun(allocator, io, &automation, at, session_id, cwd, if (result) |value| value.native_session else null, project_id, if (result) |value| value.summary else "", completed_error);
     defer allocator.free(updated);
     const status = optionalString(automation.value.object, "status") orelse "active";
     const next = nullableStringValue(automation.value.object.get("nextRunAt"));
@@ -157,14 +180,14 @@ pub fn runPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clien
     return output.toOwnedSlice();
 }
 
-pub fn runScheduler(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) Io.Cancelable!void {
+pub fn runScheduler(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, daytona: *daytona_runtime.Manager) Io.Cancelable!void {
     while (true) {
-        runDue(allocator, io, mode, client, database, harness) catch |failure| std.log.err("automation scheduler pass failed: {t}", .{failure});
+        runDue(allocator, io, mode, client, database, harness, daytona) catch |failure| std.log.err("automation scheduler pass failed: {t}", .{failure});
         try io.sleep(.fromSeconds(30), .awake);
     }
 }
 
-fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager) !void {
+fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, harness: *harness_runtime.Manager, daytona: *daytona_runtime.Manager) !void {
     var now_buffer: [24]u8 = undefined;
     const now = formatTimestampAt(io, 0, &now_buffer);
     try database.lock(io);
@@ -184,7 +207,7 @@ fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http
             std.log.err("due automation is missing id", .{});
             continue;
         };
-        const response = runPayload(allocator, io, mode, client, database, harness, automation_id) catch |failure| {
+        const response = runPayload(allocator, io, mode, client, database, harness, daytona, automation_id) catch |failure| {
             std.log.err("automation {s} dispatch failed: {t}", .{ automation_id, failure });
             continue;
         };
@@ -192,12 +215,13 @@ fn runDue(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http
     }
 }
 
-fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, cwd: []const u8, native_session: ?[]const u8, project_id: ?[]const u8, summary: []const u8, failure: ?[]const u8) ![]u8 {
+fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(std.json.Value), at: []const u8, session_id: []const u8, cwd: ?[]const u8, native_session: ?[]const u8, project_id: ?[]const u8, summary: []const u8, failure: ?[]const u8) ![]u8 {
     const arena = automation.arena.allocator();
     var run: std.json.ObjectMap = .empty;
     try run.put(arena, "at", .{ .string = try arena.dupe(u8, at) });
-    try run.put(arena, "piSessionId", if (native_session) |value| .{ .string = value } else .null);
-    try run.put(arena, "cwd", .{ .string = cwd });
+    try run.put(arena, "sessionId", .{ .string = try arena.dupe(u8, session_id) });
+    try run.put(arena, "nativeSessionId", if (native_session) |value| .{ .string = value } else .null);
+    try run.put(arena, "workspace", if (cwd) |value| .{ .string = value } else .null);
     try run.put(arena, "projectId", if (project_id) |value| .{ .string = value } else .null);
     try run.put(arena, "outcome", .{ .string = if (failure == null) "ok" else "error" });
     try run.put(arena, "summary", .{ .string = try arena.dupe(u8, summary) });
@@ -218,22 +242,26 @@ fn recordRun(allocator: std.mem.Allocator, io: Io, automation: *std.json.Parsed(
     return serialize(allocator, automation.value);
 }
 
-fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, model_id: []const u8, model_route_id: []const u8, prompt: []const u8, cwd: []const u8, native_session: ?[]const u8, node_id: ?[]const u8, project_id: ?[]const u8) ![]u8 {
+fn turnDocument(allocator: std.mem.Allocator, session_id: []const u8, execution_kind: []const u8, selected_harness: ?[]const u8, model_id: []const u8, model_route_id: []const u8, prompt: []const u8, cwd: ?[]const u8, node_id: ?[]const u8, project_id: ?[]const u8, placement: []const u8, sandbox_account_id: ?[]const u8) ![]u8 {
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"sessionId\":");
     try std.json.Stringify.value(session_id, .{}, &output.writer);
+    try output.writer.writeAll(",\"kind\":");
+    try std.json.Stringify.value(execution_kind, .{}, &output.writer);
+    try writeOptional(&output.writer, "harness", selected_harness);
     try output.writer.writeAll(",\"modelId\":");
     try std.json.Stringify.value(model_id, .{}, &output.writer);
     try output.writer.writeAll(",\"modelRouteId\":");
     try std.json.Stringify.value(model_route_id, .{}, &output.writer);
     try output.writer.writeAll(",\"message\":");
     try std.json.Stringify.value(prompt, .{}, &output.writer);
-    try output.writer.writeAll(",\"cwd\":");
-    try std.json.Stringify.value(cwd, .{}, &output.writer);
-    try writeOptional(&output.writer, "piSessionId", native_session);
+    try writeOptional(&output.writer, "cwd", cwd);
     try writeOptional(&output.writer, "nodeId", node_id);
     try writeOptional(&output.writer, "projectId", project_id);
+    try output.writer.writeAll(",\"placement\":");
+    try std.json.Stringify.value(placement, .{}, &output.writer);
+    try writeOptional(&output.writer, "sandboxAccountId", sandbox_account_id);
     try output.writer.writeAll(",\"toolAccess\":\"full\",\"mode\":\"prompt\"}");
     return output.toOwnedSlice();
 }
