@@ -18,7 +18,6 @@ import type {
 
 export const PANE_LAYOUT_KEY = "local-studio.agent.paneLayout";
 export const PANE_STATE_KEY = "local-studio.agent.paneState";
-export const SESSION_PREFS_KEY = "local-studio.agent.sessionPrefs";
 
 export type WorkspaceStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 

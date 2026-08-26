@@ -3,9 +3,7 @@ import type { GitAction, GitBranch, GitState, GitWorktree } from "@/features/age
 import type { GitSummary, Project } from "@/features/agent/projects/types";
 
 type DesktopBridge = {
-  openDirectory?: () => Promise<Project | null>;
-  listProjects?: () => Promise<Project[]>;
-  removeProject?: (id: string) => Promise<{ ok: true }>;
+  openDirectory?: () => Promise<string | null>;
 };
 
 function getDesktopBridge(): DesktopBridge | null {
@@ -13,20 +11,8 @@ function getDesktopBridge(): DesktopBridge | null {
   const candidate = (window as unknown as { localStudioDesktop?: Partial<DesktopBridge> })
     .localStudioDesktop;
   if (!candidate) return null;
-  const hasBridgeMethod =
-    typeof candidate.openDirectory === "function" ||
-    typeof candidate.listProjects === "function" ||
-    typeof candidate.removeProject === "function";
+  const hasBridgeMethod = typeof candidate.openDirectory === "function";
   return hasBridgeMethod ? (candidate as DesktopBridge) : null;
-}
-
-export async function loadProjects(): Promise<Project[]> {
-  const bridge = getDesktopBridge();
-  if (bridge?.listProjects) return bridge.listProjects();
-  const response = await fetch("/api/agent/projects", { cache: "no-store" });
-  const payload = (await response.json()) as { projects?: Project[]; error?: string };
-  if (!response.ok) throw new Error(payload.error || "Failed to load projects");
-  return payload.projects ?? [];
 }
 
 export type OpenProjectDirectoryResult =
@@ -36,7 +22,8 @@ export type OpenProjectDirectoryResult =
 export async function openProjectDirectory(): Promise<OpenProjectDirectoryResult> {
   const bridge = getDesktopBridge();
   if (!bridge?.openDirectory) return { source: "fallback" };
-  return { source: "desktop", project: await bridge.openDirectory() };
+  const path = await bridge.openDirectory();
+  return { source: "desktop", project: path ? await addProjectFromPath(path) : null };
 }
 
 export async function addProjectFromPath(path: string): Promise<Project> {
@@ -53,11 +40,6 @@ export async function addProjectFromPath(path: string): Promise<Project> {
 }
 
 export async function removeProject(id: string): Promise<void> {
-  const bridge = getDesktopBridge();
-  if (bridge?.removeProject) {
-    await bridge.removeProject(id);
-    return;
-  }
   const response = await fetch(`/api/agent/projects?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
   });

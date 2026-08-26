@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { arrayMove } from "@dnd-kit/sortable";
+import { Effect } from "effect";
 import type { AggregatedSession } from "@shared/agent/session-summary";
 import { safeJson } from "@/features/agent/safe-json";
 import {
@@ -13,11 +13,11 @@ import { uniqueOpenSessions, type OpenAgentSession } from "@/features/agent/sess
 import { isChatsProject, type Project as ProjectEntry } from "@/features/agent/projects/types";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { mergeActiveSessionPref } from "./helpers";
+import { orderPinnedEntries } from "./pinned-order";
 import {
-  orderPinnedEntries,
-  readPinnedSessionOrder,
-  writePinnedSessionOrder,
-} from "./pinned-order";
+  dispatchWorkbenchCommand,
+  useWorkbenchProjection,
+} from "@/features/workbench/controller-state";
 import type { PinnedSession } from "./types";
 
 /** Joins id lists into one effect-dependency string; NUL cannot appear in ids. */
@@ -84,7 +84,21 @@ export function usePinnedNav({
   prefs: SessionPrefs;
 }): PinnedNav {
   const [historySessions, setHistorySessions] = useState<PinnedSession[]>([]);
-  const [order, setOrder] = useState(readPinnedSessionOrder);
+  const projection = useWorkbenchProjection();
+  const order = useMemo(
+    () =>
+      [
+        ...projection.projects
+          .filter((project) => project.pinned)
+          .map((project) => ({ id: projectPinKey(project.id), rank: project.rank })),
+        ...projection.tasks
+          .filter((task) => task.pinned)
+          .map((task) => ({ id: task.id, rank: task.rank })),
+      ]
+        .sort((left, right) => left.rank - right.rank)
+        .map((entry) => entry.id),
+    [projection.projects, projection.tasks],
+  );
   const [dragId, setDragId] = useState<string | null>(null);
 
   const pinnedKeys = useMemo(
@@ -198,15 +212,14 @@ export function usePinnedNav({
   }, [activeSessionIds, historySessions, order, pinnedActive, pinnedProjectIds, projects]);
 
   const moveEntry = (draggedId: string, targetId: string) => {
-    setOrder((current) => {
-      const ids = orderPinnedEntries(entries, current).map((entry) => entry.id);
-      const from = ids.indexOf(draggedId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0 || from === to) return current;
-      const next = arrayMove(ids, from, to);
-      writePinnedSessionOrder(next);
-      return next;
-    });
+    if (draggedId === targetId) return;
+    void Effect.runPromise(
+      dispatchWorkbenchCommand({
+        kind: "move_pinned",
+        projectId: draggedId,
+        targetId,
+      }),
+    );
   };
 
   return {
