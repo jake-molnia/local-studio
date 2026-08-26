@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { Database, FolderOpen, Plus, Search } from "@/ui/icon-registry";
 import { useClickOutside } from "@/features/agent/hooks/use-click-outside";
@@ -62,7 +63,7 @@ export function AddProjectMenu({
     if (rect) setPosition({ left: rect.left, top: rect.bottom + 4 });
   }, [anchorRef, open]);
   if (!open) return null;
-  return (
+  const menu = (
     <div
       ref={rootRef}
       style={position}
@@ -172,6 +173,7 @@ export function AddProjectMenu({
       ) : null}
     </div>
   );
+  return typeof document === "undefined" ? null : createPortal(menu, document.body);
 }
 
 function MenuAction({
