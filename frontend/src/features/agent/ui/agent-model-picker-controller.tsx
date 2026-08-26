@@ -27,6 +27,7 @@ import {
   type RouteField,
 } from "./agent-model-picker-data";
 import { useHarnessCatalog } from "./use-harness-catalog";
+import { useSandboxAccounts } from "./use-sandbox-accounts";
 import { hasModelFavorites } from "./model-picker-favorites";
 import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
 import {
@@ -53,6 +54,9 @@ type AgentModelPickerProps = {
   selectedHarness?: string;
   onSelectHarness?: (harness: string) => void;
   harnessDisabled?: boolean;
+  selectedPlacement?: "local" | "daytona";
+  selectedSandboxAccountId?: string;
+  onSelectPlacement?: (placement: "local" | "daytona", accountId?: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
@@ -63,6 +67,7 @@ type PickerView =
   | "reasoning"
   | "provider"
   | "harness"
+  | "placement"
   | "context"
   | "speed"
   | "mode"
@@ -106,6 +111,9 @@ export function AgentModelPicker({
   selectedHarness = "pi",
   onSelectHarness,
   harnessDisabled = false,
+  selectedPlacement = "local",
+  selectedSandboxAccountId,
+  onSelectPlacement,
   open: controlledOpen,
   onOpenChange,
 }: AgentModelPickerProps) {
@@ -116,6 +124,11 @@ export function AgentModelPicker({
   const [selectedCompany, setSelectedCompany] = useState("openai");
   const [openSource, setOpenSource] = useState<"pointer" | "keyboard">("keyboard");
   const harnesses = useHarnessCatalog();
+  const sandboxAccounts = useSandboxAccounts();
+  const daytonaAccounts = useMemo(
+    () => sandboxAccounts.filter((account) => account.provider === "daytona"),
+    [sandboxAccounts],
+  );
   const selectableHarnesses = useMemo(
     () => harnesses.filter((harness) => harness.selectable !== false),
     [harnesses],
@@ -144,6 +157,14 @@ export function AgentModelPicker({
   );
   const harnessLabel =
     harnesses.find((harness) => harness.id === selectedHarness)?.name ?? selectedHarness;
+  const placementLabel = useMemo(
+    () =>
+      selectedPlacement === "daytona"
+        ? (daytonaAccounts.find((account) => account.id === selectedSandboxAccountId)?.label ??
+          "Daytona")
+        : "Local",
+    [daytonaAccounts, selectedPlacement, selectedSandboxAccountId],
+  );
   const pickerRows = useMemo(
     () =>
       buildPickerRows(
@@ -151,6 +172,7 @@ export function AgentModelPicker({
         activeRoute,
         supportsReasoning ? REASONING_LABELS[effectiveReasoning] : null,
         onSelectHarness ? harnessLabel : null,
+        onSelectPlacement ? placementLabel : null,
         modelTriggerLabel(activeChoice, selectedModel, loading, choices.length),
       ),
     [
@@ -161,6 +183,8 @@ export function AgentModelPicker({
       harnessLabel,
       loading,
       onSelectHarness,
+      onSelectPlacement,
+      placementLabel,
       selectedHarness,
       selectedModel,
       supportsReasoning,
@@ -529,6 +553,40 @@ export function AgentModelPicker({
                     />
                   ))}
                 </SimplePickerPanel>
+              ) : view === "placement" && onSelectPlacement ? (
+                <SimplePickerPanel title="Placement">
+                  <SimplePickerOption
+                    label="Local"
+                    selected={selectedPlacement === "local"}
+                    disabled={false}
+                    onSelect={() => {
+                      onSelectPlacement("local");
+                      close(true);
+                    }}
+                  />
+                  {daytonaAccounts.map((account) => (
+                    <SimplePickerOption
+                      key={account.id}
+                      label={`Daytona · ${account.label}`}
+                      selected={
+                        selectedPlacement === "daytona" && selectedSandboxAccountId === account.id
+                      }
+                      disabled={false}
+                      onSelect={() => {
+                        onSelectPlacement("daytona", account.id);
+                        close(true);
+                      }}
+                    />
+                  ))}
+                  {daytonaAccounts.length === 0 ? (
+                    <SimplePickerOption
+                      label="Connect Daytona in Accounts"
+                      selected={false}
+                      disabled
+                      onSelect={() => undefined}
+                    />
+                  ) : null}
+                </SimplePickerPanel>
               ) : activeChoice && activeRoute && isVariantView(view) ? (
                 <VariantPickerPanel
                   view={view}
@@ -562,6 +620,7 @@ function buildPickerRows(
   activeRoute: ModelRoute | null,
   effortLabel: string | null,
   harnessLabel: string | null,
+  placementLabel: string | null,
   modelLabel: string,
 ): PickerRow[] {
   const rows: PickerRow[] = [{ view: "models", label: "Model", value: modelLabel }];
@@ -569,6 +628,7 @@ function buildPickerRows(
   if (choice && activeRoute) {
     rows.push({ view: "provider", label: "Provider", value: activeRoute.label });
     if (harnessLabel) rows.push({ view: "harness", label: "Harness", value: harnessLabel });
+    if (placementLabel) rows.push({ view: "placement", label: "Placement", value: placementLabel });
     rows.push({
       view: "context",
       label: "Context",
@@ -597,6 +657,7 @@ function buildPickerRows(
     }
   } else if (harnessLabel) {
     rows.push({ view: "harness", label: "Harness", value: harnessLabel });
+    if (placementLabel) rows.push({ view: "placement", label: "Placement", value: placementLabel });
   }
   return rows;
 }
