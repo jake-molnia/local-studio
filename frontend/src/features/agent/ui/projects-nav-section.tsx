@@ -23,6 +23,7 @@ import { isProjectPinned, toggleProjectPin, usePinnedNav } from "./projects-nav/
 import { PinnedSection } from "./projects-nav/pinned-section";
 import { RecentSessionsSection } from "./projects-nav/recent-sessions-section";
 import { NewChatPlusButton, ProjectRow, ProjectSessions } from "./projects-nav/session-rows";
+import { AddProjectMenu } from "./projects-nav/add-project-menu";
 
 export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view: NavView }) {
   const projectsContext = useProjects();
@@ -38,13 +39,14 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(new Set());
   const [addError, setAddError] = useState("");
   const [directoryModalOpen, setDirectoryModalOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
   const addProjectButtonRef = useRef<HTMLButtonElement>(null);
   const removal = useProjectRemoval(projectsContext.removeProject, setOpenIds, setAddError);
 
-  const handleAddProject = useCallback(async () => {
+  const handleUseFolder = useCallback(async () => {
     setAddError("");
     try {
       const result = await openProjectDirectory();
@@ -57,7 +59,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
       setAddError(error instanceof Error ? error.message : "Failed to add project");
     }
   }, [upsertProject]);
-  useProjectsNavAddProjectEffect(handleAddProject);
+  useProjectsNavAddProjectEffect(() => setAddMenuOpen(true));
 
   const handleDirectoryPicked = async (directoryPath: string) => {
     setAddError("");
@@ -130,10 +132,10 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
             <button
               type="button"
               ref={addProjectButtonRef}
-              onClick={handleAddProject}
+              onClick={() => setAddMenuOpen((value) => !value)}
               className="flex h-5 w-5 items-center justify-center rounded text-(--dim) transition-colors hover:text-(--fg)"
-              title="Add folder"
-              aria-label="Add folder"
+              title="Add project"
+              aria-label="Add project"
             >
               <PlusIcon className="block h-3.5 w-3.5" />
             </button>
@@ -141,7 +143,7 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         />
         {!projectsExpanded ? null : unpinnedProjects.length === 0 ? (
           <div className="px-2 py-1 text-[length:var(--fs-xs)] leading-relaxed text-(--dim)/65">
-            No projects yet — pick a folder to get started.
+            No projects yet.
           </div>
         ) : (
           <>
@@ -219,6 +221,16 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         onClose={() => setDirectoryModalOpen(false)}
         onSelect={(directoryPath) => void handleDirectoryPicked(directoryPath)}
         anchorRef={addProjectButtonRef}
+      />
+      <AddProjectMenu
+        open={addMenuOpen}
+        anchorRef={addProjectButtonRef}
+        onClose={() => setAddMenuOpen(false)}
+        onAdded={(project) => {
+          upsertProject(project);
+          void refreshProjects();
+        }}
+        onUseFolder={() => void handleUseFolder()}
       />
       <ProjectRemoveConfirmModal
         project={removal.project}
@@ -304,10 +316,7 @@ function ProjectRemoveConfirmModal({
             Remove <span className="font-medium text-(--ui-fg)">{project.name}</span> from the
             sidebar?
           </p>
-          <p className="break-all font-mono text-[length:var(--fs-sm)] text-(--dim)">
-            {project.path}
-          </p>
-          <p>This does not delete files from disk or archive existing sessions.</p>
+          <p>Archive its tasks first. The repository on Code.Storage is kept.</p>
         </div>
       </UiModalBody>
       <UiModalFooter>

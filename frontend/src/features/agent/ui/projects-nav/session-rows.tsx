@@ -388,6 +388,7 @@ export function ActiveSessionRow({
         session.threadId
           ? () => {
               const threadId = session.threadId as string;
+              if (!window.confirm("Archive this task and delete its checkout?")) return;
               void setSessionArchive(threadId, project, label, true)
                 .then(() => patchSessionPref(threadId, { hidden: undefined, pinned: undefined }))
                 .catch((error) => {
@@ -473,6 +474,7 @@ export function SessionRow({
       href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&replace=1`}
       onPatchPref={(patch) => patchSessionPref(session.id, patch)}
       onArchive={() => {
+        if (!window.confirm("Archive this task and delete its checkout?")) return;
         void setSessionArchive(session.id, project, label, true)
           .then(() => patchSessionPref(session.id, { hidden: undefined, pinned: undefined }))
           .catch((error) => {
