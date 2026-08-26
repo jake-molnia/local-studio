@@ -7,13 +7,16 @@ const harness_session_id = @import("session_id.zig");
 const runtime_limits = @import("../runtime/limits.zig");
 const runtime_window = @import("../runtime/window.zig");
 const chat_runtime = @import("../../chat/runtime.zig");
+const fx_gateway = @import("../../providers/fx_gateway.zig");
 
 const Io = std.Io;
 const Harness = enum {
     pi,
     chat,
     fx,
+    opencode,
     codex,
+    claude,
 
     fn name(harness: Harness) []const u8 {
         return @tagName(harness);
@@ -79,6 +82,8 @@ pub const Manager = struct {
     pi: harness_catalog.Installation,
     codex: harness_catalog.Installation,
     fx: harness_catalog.Installation,
+    opencode: harness_catalog.Installation,
+    claude: harness_catalog.Installation,
     model_route: pi_model_route.Config,
     mutex: Io.Mutex = .init,
     tasks: Io.Group = .init,
@@ -92,6 +97,10 @@ pub const Manager = struct {
         errdefer codex.deinit();
         var fx = try harness_catalog.discoverFx(allocator, io, configuration);
         errdefer fx.deinit();
+        var opencode = try harness_catalog.discoverOpenCode(allocator, io, configuration);
+        errdefer opencode.deinit();
+        var claude = try harness_catalog.discoverClaude(allocator, io, configuration);
+        errdefer claude.deinit();
         const data_dir = try allocator.dupe(u8, configuration.data_dir);
         errdefer allocator.free(data_dir);
         const controller_origin = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{configuration.port});
@@ -108,6 +117,8 @@ pub const Manager = struct {
             .pi = pi,
             .codex = codex,
             .fx = fx,
+            .opencode = opencode,
+            .claude = claude,
             .model_route = model_route,
         };
     }
@@ -122,6 +133,8 @@ pub const Manager = struct {
         manager.pi.deinit();
         manager.codex.deinit();
         manager.fx.deinit();
+        manager.opencode.deinit();
+        manager.claude.deinit();
         manager.model_route.deinit();
         manager.* = undefined;
     }
@@ -159,14 +172,39 @@ pub const Manager = struct {
     pub fn fxSource(manager: *const Manager) []const u8 {
         return manager.fx.source;
     }
+    pub fn opencodeIsAvailable(manager: *const Manager) bool {
+        return manager.opencode.available();
+    }
+    pub fn opencodeVersion(manager: *const Manager) ?[]const u8 {
+        return manager.opencode.version;
+    }
+    pub fn opencodeSource(manager: *const Manager) []const u8 {
+        return manager.opencode.source;
+    }
+    pub fn claudeIsAvailable(manager: *const Manager) bool {
+        return manager.claude.available();
+    }
+    pub fn claudeVersion(manager: *const Manager) ?[]const u8 {
+        return manager.claude.version;
+    }
+    pub fn claudeSource(manager: *const Manager) []const u8 {
+        return manager.claude.source;
+    }
     pub fn piSource(manager: *const Manager) []const u8 {
         return manager.pi.source;
     }
     pub fn catalogPayload(manager: *Manager) ![]u8 {
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
-        try harness_catalog.writeCatalog(&output.writer, &manager.pi, &manager.codex, &manager.fx);
+        try harness_catalog.writeCatalog(&output.writer, &manager.pi, &manager.codex, &manager.fx, &manager.opencode, &manager.claude);
         return output.toOwnedSlice();
+    }
+
+    pub fn serveFxGateway(manager: *Manager, client: *std.http.Client, model_id: []const u8, payload: []const u8, request: *std.http.Server.Request) !void {
+        var route = try manager.model_route.prepare(model_id);
+        defer route.deinit();
+        const api_key = route.environment.get("LOCAL_STUDIO_HEAD_API_KEY") orelse return error.HeadCredentialRequired;
+        try fx_gateway.serve(manager.allocator, client, route.base_url, api_key, model_id, payload, request);
     }
     pub fn sessionsPayload(manager: *Manager) ![]u8 {
         try manager.mutex.lock(manager.io);
@@ -375,14 +413,17 @@ pub const Manager = struct {
         if (parsed.value != .object) return error.InvalidTurnPayload;
         const object = parsed.value.object;
         const harness = optionalString(object, "harness") orelse "pi";
-        const harness_kind: Harness = if (std.mem.eql(u8, harness, "pi")) .pi else if (std.mem.eql(u8, harness, "chat")) .chat else if (std.mem.eql(u8, harness, "fx")) .fx else if (std.mem.eql(u8, harness, "codex")) .codex else return error.HarnessDriverUnavailable;
+        const harness_kind: Harness = if (std.mem.eql(u8, harness, "pi")) .pi else if (std.mem.eql(u8, harness, "chat")) .chat else if (std.mem.eql(u8, harness, "fx")) .fx else if (std.mem.eql(u8, harness, "opencode")) .opencode else if (std.mem.eql(u8, harness, "codex")) .codex else if (std.mem.eql(u8, harness, "claude")) .claude else return error.HarnessDriverUnavailable;
         if (harness_kind == .pi and !manager.piIsAvailable()) return error.HarnessUnavailable;
-        if ((harness_kind == .chat or harness_kind == .fx) and !manager.model_route.available()) return error.HarnessUnavailable;
+        if ((harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode or harness_kind == .claude) and !manager.model_route.available()) return error.HarnessUnavailable;
         if (harness_kind == .fx and !manager.fx.available()) return error.HarnessUnavailable;
+        if (harness_kind == .opencode and !manager.opencodeIsAvailable()) return error.HarnessUnavailable;
         if (harness_kind == .codex and !manager.codexIsAvailable()) return error.HarnessUnavailable;
+        if (harness_kind == .claude and !manager.claudeIsAvailable()) return error.HarnessUnavailable;
         const session_id = optionalString(object, "sessionId") orelse "default";
         const model_id = optionalString(object, "modelRouteId") orelse requiredString(object, "modelId") orelse return error.ModelIdRequired;
         const message = requiredString(object, "message") orelse return error.MessageRequired;
+        if (harness_kind == .claude and !std.mem.startsWith(u8, model_id, "openrouter/")) return error.HarnessModelUnsupported;
         if (!harness_session_id.validRuntime(session_id)) return error.InvalidSessionId;
         const mode = optionalString(object, "mode") orelse "prompt";
         if (!std.mem.eql(u8, mode, "prompt") and !std.mem.eql(u8, mode, "steer") and !std.mem.eql(u8, mode, "follow_up")) return error.InvalidTurnMode;
@@ -396,18 +437,20 @@ pub const Manager = struct {
         const session = if (std.mem.eql(u8, mode, "prompt"))
             if (harness_kind == .chat)
                 try manager.ensureChatSession(session_id, requested_native_id, model_id, initial_event_seq)
-            else if (harness_kind == .fx)
+            else if (harness_kind == .fx or harness_kind == .opencode)
                 try manager.ensureAcpSession(harness_kind, session_id, requested_native_id, model_id, cwd, initial_event_seq)
             else if (harness_kind == .codex)
                 try manager.ensureCodexSession(session_id, requested_native_id, model_id, cwd, message, thinking, tool_access, initial_event_seq)
+            else if (harness_kind == .claude)
+                try manager.ensureClaudeSession(session_id, requested_native_id, model_id, cwd, message, thinking, tool_access, initial_event_seq)
             else
                 try manager.ensureSession(session_id, requested_native_id, model_id, cwd, thinking, tool_access)
         else
             try manager.existingActiveSession(session_id);
         if (session.harness != harness_kind) return error.SessionHarnessMismatch;
-        if ((harness_kind == .chat or harness_kind == .fx) and session.active) return error.QueueMutationNotSupported;
+        if ((harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode) and session.active) return error.QueueMutationNotSupported;
         const was_active = session.active;
-        if (harness_kind == .chat or harness_kind == .fx) {
+        if (harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode) {
             if (harness_kind == .chat) {
                 session.active = true;
                 manager.sendChatPrompt(session, message, thinking, browser_tool_enabled) catch |failure| {
@@ -419,10 +462,11 @@ pub const Manager = struct {
                 session.active = true;
             }
         }
-        if (harness_kind == .chat or harness_kind == .fx) return manager.turnResponse(session, was_active);
+        if (harness_kind == .chat or harness_kind == .fx or harness_kind == .opencode) return manager.turnResponse(session, was_active);
         if (harness_kind == .codex) {
             return manager.turnResponse(session, false);
         }
+        if (harness_kind == .claude) return manager.turnResponse(session, false);
         var command: Io.Writer.Allocating = .init(manager.allocator);
         defer command.deinit();
         const command_id = manager.commandId();
@@ -487,7 +531,7 @@ pub const Manager = struct {
         const session_id = try sessionIdFromDocument(manager.allocator, document);
         defer manager.allocator.free(session_id);
         const session = try manager.existingSession(session_id);
-        if (session.harness == .fx) {
+        if (session.harness == .fx or session.harness == .opencode) {
             try manager.send(session, "{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{}}");
             return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
         }
@@ -495,7 +539,7 @@ pub const Manager = struct {
             if (session.chat) |*chat| chat.cancel();
             return manager.allocator.dupe(u8, "{\"ok\":true,\"cleared\":{\"steering\":[],\"followUp\":[]}}");
         }
-        if (session.harness == .codex) {
+        if (session.harness == .codex or session.harness == .claude) {
             try manager.mutex.lock(manager.io);
             defer manager.mutex.unlock(manager.io);
             if (session.child) |*child| if (child.id != null) child.kill(manager.io);
@@ -617,9 +661,12 @@ pub const Manager = struct {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
         if (manager.sessions.get(session_id)) |session| {
-            if (!session.running) return error.HarnessExited;
-            if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
-            return session;
+            if (session.running) {
+                if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+                return session;
+            }
+            _ = manager.sessions.remove(session_id);
+            session.deinit(manager.io);
         }
         const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
         defer if (resolved_cwd) |value| manager.allocator.free(value);
@@ -793,6 +840,116 @@ pub const Manager = struct {
         });
     }
 
+    fn ensureClaudeSession(manager: *Manager, session_id: []const u8, native_session_id: ?[]const u8, model_id: []const u8, cwd_value: ?[]const u8, message: []const u8, thinking: ?[]const u8, tool_access: []const u8, initial_event_seq: u64) !*Session {
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        if (manager.sessions.get(session_id)) |session| {
+            if (session.harness != .claude) return error.SessionHarnessMismatch;
+            if (session.running or session.active) return error.QueueMutationNotSupported;
+            if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+            session.child = try manager.spawnClaude(session.id, session.native_id, session.model_id, session.cwd, session.session_dir, message, thinking, tool_access, true);
+            session.running = true;
+            session.active = true;
+            if (session.last_error) |value| manager.allocator.free(value);
+            session.last_error = null;
+            manager.tasks.concurrent(manager.io, readHarness, .{ manager, session }) catch |failure| {
+                if (session.child) |*child| child.kill(manager.io);
+                session.running = false;
+                session.active = false;
+                return failure;
+            };
+            return session;
+        }
+        const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
+        defer if (resolved_cwd) |value| manager.allocator.free(value);
+        const cwd = cwd_value orelse resolved_cwd.?;
+        if (!std.fs.path.isAbsolute(cwd)) return error.CwdMustBeAbsolute;
+        const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "claude" });
+        errdefer manager.allocator.free(session_dir);
+        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, session_dir, @enumFromInt(0o700));
+        const native_id = if (native_session_id) |value| try manager.allocator.dupe(u8, value) else try manager.uuid();
+        errdefer manager.allocator.free(native_id);
+        var child = try manager.spawnClaude(session_id, native_id, model_id, cwd, session_dir, message, thinking, tool_access, native_session_id != null);
+        errdefer child.kill(manager.io);
+        const session = try manager.allocator.create(Session);
+        errdefer manager.allocator.destroy(session);
+        session.* = .{
+            .allocator = manager.allocator,
+            .harness = .claude,
+            .id = try manager.allocator.dupe(u8, session_id),
+            .native_id = native_id,
+            .harness_version = if (manager.claude.version) |value| try manager.allocator.dupe(u8, value) else null,
+            .model_id = try manager.allocator.dupe(u8, model_id),
+            .cwd = try manager.allocator.dupe(u8, cwd),
+            .session_dir = session_dir,
+            .child = child,
+            .active = true,
+            .event_seq = initial_event_seq,
+        };
+        errdefer {
+            manager.allocator.free(session.id);
+            if (session.harness_version) |value| manager.allocator.free(value);
+            manager.allocator.free(session.model_id);
+            manager.allocator.free(session.cwd);
+        }
+        try manager.sessions.put(manager.allocator, session.id, session);
+        manager.tasks.concurrent(manager.io, readHarness, .{ manager, session }) catch |failure| {
+            _ = manager.sessions.remove(session.id);
+            return failure;
+        };
+        return session;
+    }
+
+    fn spawnClaude(manager: *Manager, session_id: []const u8, native_id: []const u8, model_id: []const u8, cwd: []const u8, session_dir: []const u8, message: []const u8, thinking: ?[]const u8, tool_access: []const u8, resume_session: bool) !std.process.Child {
+        const logs_dir = try std.fs.path.join(manager.allocator, &.{ session_dir, "logs" });
+        defer manager.allocator.free(logs_dir);
+        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, logs_dir, @enumFromInt(0o700));
+        const log_filename = try std.fmt.allocPrint(manager.allocator, "{s}.log", .{session_id});
+        defer manager.allocator.free(log_filename);
+        const log_path = try std.fs.path.join(manager.allocator, &.{ logs_dir, log_filename });
+        defer manager.allocator.free(log_path);
+        var log_file = try Io.Dir.cwd().createFile(manager.io, log_path, .{ .permissions = @enumFromInt(0o600), .truncate = false });
+        defer log_file.close(manager.io);
+        var model_route = try manager.model_route.prepare(model_id);
+        defer model_route.deinit();
+        const api_key = model_route.environment.get("LOCAL_STUDIO_HEAD_API_KEY") orelse return error.HeadCredentialRequired;
+        const origin = if (std.mem.endsWith(u8, model_route.base_url, "/v1")) model_route.base_url[0 .. model_route.base_url.len - 3] else model_route.base_url;
+        try model_route.environment.put("ANTHROPIC_BASE_URL", origin);
+        try model_route.environment.put("ANTHROPIC_AUTH_TOKEN", api_key);
+        try model_route.environment.put("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+        var argv: std.ArrayList([]const u8) = .empty;
+        defer argv.deinit(manager.allocator);
+        try argv.appendSlice(manager.allocator, &.{ manager.claude.executable, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", model_id, "--permission-mode", "dontAsk" });
+        if (thinking) |value| if (!std.mem.eql(u8, value, "auto") and !std.mem.eql(u8, value, "off")) try argv.appendSlice(manager.allocator, &.{ "--effort", value });
+        if (std.mem.eql(u8, tool_access, "full"))
+            try argv.appendSlice(manager.allocator, &.{ "--tools", "default" })
+        else
+            try argv.appendSlice(manager.allocator, &.{ "--tools", "Read,Grep,Glob,WebFetch,WebSearch" });
+        if (resume_session)
+            try argv.appendSlice(manager.allocator, &.{ "--resume", native_id })
+        else
+            try argv.appendSlice(manager.allocator, &.{ "--session-id", native_id });
+        try argv.append(manager.allocator, message);
+        return std.process.spawn(manager.io, .{
+            .argv = argv.items,
+            .environ_map = &model_route.environment,
+            .cwd = .{ .path = cwd },
+            .stdin = .ignore,
+            .stdout = .pipe,
+            .stderr = .{ .file = log_file },
+            .pgid = 0,
+        });
+    }
+
+    fn uuid(manager: *Manager) ![]u8 {
+        var bytes: [16]u8 = undefined;
+        manager.io.random(&bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = std.fmt.bytesToHex(bytes, .lower);
+        return std.fmt.allocPrint(manager.allocator, "{s}-{s}-{s}-{s}-{s}", .{ hex[0..8], hex[8..12], hex[12..16], hex[16..20], hex[20..32] });
+    }
+
     fn addMcpBridgeEnvironment(manager: *Manager, environment: *std.process.Environ.Map, model_id: []const u8, session_id: []const u8) !void {
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_URL", manager.controller_origin);
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_MODEL", model_id);
@@ -800,16 +957,63 @@ pub const Manager = struct {
         try environment.put("LOCAL_STUDIO_MCP_BRIDGE_KEY", manager.controller_api_key orelse "");
     }
 
+    fn configureOpenCode(manager: *Manager, route: *pi_model_route.Route, session_dir: []const u8, model_id: []const u8) !void {
+        const config_home = try std.fs.path.join(manager.allocator, &.{ session_dir, "config" });
+        defer manager.allocator.free(config_home);
+        const data_home = try std.fs.path.join(manager.allocator, &.{ session_dir, "data" });
+        defer manager.allocator.free(data_home);
+        const cache_home = try std.fs.path.join(manager.allocator, &.{ session_dir, "cache" });
+        defer manager.allocator.free(cache_home);
+        const config_dir = try std.fs.path.join(manager.allocator, &.{ config_home, "opencode" });
+        defer manager.allocator.free(config_dir);
+        _ = try Io.Dir.cwd().createDirPathStatus(manager.io, config_dir, @enumFromInt(0o700));
+        const config_path = try std.fs.path.join(manager.allocator, &.{ config_dir, "opencode.json" });
+        defer manager.allocator.free(config_path);
+        var document: Io.Writer.Allocating = .init(manager.allocator);
+        defer document.deinit();
+        try document.writer.writeAll("{\"model\":\"local-studio/selected\",\"providers\":{\"local-studio\":{\"name\":\"Local Studio\",\"env\":[\"LOCAL_STUDIO_HEAD_API_KEY\"],\"package\":\"aisdk:@ai-sdk/openai\",\"settings\":{\"baseURL\":");
+        try std.json.Stringify.value(route.base_url, .{}, &document.writer);
+        try document.writer.writeAll("},\"models\":{\"selected\":{\"modelID\":");
+        try std.json.Stringify.value(model_id, .{}, &document.writer);
+        try document.writer.writeAll(",\"name\":");
+        try std.json.Stringify.value(model_id, .{}, &document.writer);
+        try document.writer.writeAll(",\"capabilities\":{\"tools\":true,\"input\":[\"text\",\"image\"],\"output\":[\"text\"]}}}}},\"permissions\":[{\"action\":\"*\",\"resource\":\"*\",\"effect\":\"allow\"}]}");
+        var file = try Io.Dir.cwd().createFile(manager.io, config_path, .{ .permissions = @enumFromInt(0o600), .truncate = true });
+        defer file.close(manager.io);
+        try file.writeStreamingAll(manager.io, document.writer.buffered());
+        try route.environment.put("XDG_CONFIG_HOME", config_home);
+        try route.environment.put("XDG_DATA_HOME", data_home);
+        try route.environment.put("XDG_CACHE_HOME", cache_home);
+    }
+
+    fn configureFx(manager: *Manager, route: *pi_model_route.Route, model_id: []const u8) !void {
+        const gateway_url = try std.fmt.allocPrint(manager.allocator, "{s}/internal/harness/v1/fx-gateway", .{manager.controller_origin});
+        defer manager.allocator.free(gateway_url);
+        try route.environment.put("AI_GATEWAY_API_KEY", manager.controller_api_key orelse "local-studio");
+        try route.environment.put("FX_GATEWAY_CHAT_URL", gateway_url);
+        try route.environment.put("FX_MODEL", model_id);
+        try route.environment.put("FX_PERMISSION_MODE", "yolo");
+        try route.environment.put("FX_AUTO_UPGRADE", "0");
+    }
+
     fn ensureAcpSession(manager: *Manager, harness_kind: Harness, session_id: []const u8, native_session_id: ?[]const u8, model_id: []const u8, cwd_value: ?[]const u8, initial_event_seq: u64) !*Session {
         try manager.mutex.lock(manager.io);
         defer manager.mutex.unlock(manager.io);
         if (manager.sessions.get(session_id)) |session| {
-            if (!session.running) return error.HarnessExited;
-            if (session.harness != harness_kind) return error.SessionHarnessMismatch;
-            if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
-            return session;
+            if (session.running) {
+                if (session.harness != harness_kind) return error.SessionHarnessMismatch;
+                if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+                return session;
+            }
+            _ = manager.sessions.remove(session_id);
+            session.deinit(manager.io);
         }
-        const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", harness_kind.name() });
+        const harness_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", harness_kind.name() });
+        defer manager.allocator.free(harness_dir);
+        const session_dir = if (harness_kind == .opencode)
+            try std.fs.path.join(manager.allocator, &.{ harness_dir, session_id })
+        else
+            try manager.allocator.dupe(u8, harness_dir);
         errdefer manager.allocator.free(session_dir);
         _ = try Io.Dir.cwd().createDirPathStatus(manager.io, session_dir, @enumFromInt(0o700));
         const resolved_cwd = if (cwd_value == null) try Io.Dir.cwd().realPathFileAlloc(manager.io, ".", manager.allocator) else null;
@@ -829,9 +1033,18 @@ pub const Manager = struct {
         defer manager.allocator.free(controller_executable);
         var model_route = try manager.model_route.prepare(model_id);
         defer model_route.deinit();
-        try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
+        const installation = switch (harness_kind) {
+            .fx => &manager.fx,
+            .opencode => &manager.opencode,
+            else => return error.HarnessDriverUnavailable,
+        };
+        if (harness_kind == .fx) {
+            try model_route.environment.put("LOCAL_STUDIO_FX_HOME", session_dir);
+            try manager.configureFx(&model_route, model_id);
+        }
+        if (harness_kind == .opencode) try manager.configureOpenCode(&model_route, session_dir, model_id);
         var child = try std.process.spawn(manager.io, .{
-            .argv = &.{ manager.fx.executable, "acp" },
+            .argv = &.{ installation.executable, "acp" },
             .environ_map = &model_route.environment,
             .cwd = .{ .path = cwd },
             .stdin = .pipe,
@@ -842,13 +1055,13 @@ pub const Manager = struct {
         errdefer child.kill(manager.io);
         const initialized = try directFxRequest(manager.allocator, manager.io, &child, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":\"initialize\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}");
         defer manager.allocator.free(initialized);
-        const session_request = try acpSessionRequest(manager, "session", controller_executable, model_id, session_id, native_session_id);
+        const session_request = try acpSessionRequest(manager, "session", controller_executable, model_id, session_id, native_session_id, cwd);
         defer manager.allocator.free(session_request);
         const created = try directFxRequest(manager.allocator, manager.io, &child, "session", session_request);
         defer manager.allocator.free(created);
         const native_id = if (native_session_id) |value| resumed: {
             if (fxResponseSucceeded(manager.allocator, created)) break :resumed try manager.allocator.dupe(u8, value);
-            const fallback_request = try acpSessionRequest(manager, "session-fallback", controller_executable, model_id, session_id, null);
+            const fallback_request = try acpSessionRequest(manager, "session-fallback", controller_executable, model_id, session_id, null, cwd);
             defer manager.allocator.free(fallback_request);
             const fallback = try directFxRequest(manager.allocator, manager.io, &child, "session-fallback", fallback_request);
             defer manager.allocator.free(fallback);
@@ -862,7 +1075,7 @@ pub const Manager = struct {
             .harness = harness_kind,
             .id = try manager.allocator.dupe(u8, session_id),
             .native_id = native_id,
-            .harness_version = if (manager.fx.version) |value| try manager.allocator.dupe(u8, value) else null,
+            .harness_version = if (installation.version) |value| try manager.allocator.dupe(u8, value) else null,
             .model_id = try manager.allocator.dupe(u8, model_id),
             .cwd = try manager.allocator.dupe(u8, cwd),
             .session_dir = session_dir,
@@ -1024,7 +1237,9 @@ pub const Manager = struct {
         defer parsed.deinit();
         if (parsed.value != .object) return;
         if (session.harness == .fx) return manager.handleAcpLine(session, line, parsed.value.object);
+        if (session.harness == .opencode) return manager.handleAcpLine(session, line, parsed.value.object);
         if (session.harness == .codex) return manager.handleCodexLine(session, line, parsed.value.object);
+        if (session.harness == .claude) return manager.handleClaudeLine(session, line, parsed.value.object);
         const event_type = optionalString(parsed.value.object, "type") orelse return;
         if (std.mem.eql(u8, event_type, "response")) {
             const response_id = optionalString(parsed.value.object, "id") orelse return;
@@ -1077,6 +1292,92 @@ pub const Manager = struct {
         if (std.mem.eql(u8, event_type, "turn.started")) session.active = true;
         if (std.mem.eql(u8, event_type, "turn.completed") or std.mem.eql(u8, event_type, "turn.failed")) session.active = false;
         try manager.appendEvent(session, line);
+    }
+
+    fn handleClaudeLine(manager: *Manager, session: *Session, _: []const u8, object: std.json.ObjectMap) !void {
+        const event_type = optionalString(object, "type") orelse return;
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        if (std.mem.eql(u8, event_type, "system") and std.mem.eql(u8, optionalString(object, "subtype") orelse "", "init")) {
+            if (optionalString(object, "session_id")) |native_id| {
+                const owned = try manager.allocator.dupe(u8, native_id);
+                manager.allocator.free(session.native_id);
+                session.native_id = owned;
+            }
+            session.active = true;
+            return manager.appendEvent(session, "{\"type\":\"agent_start\"}");
+        }
+        if (std.mem.eql(u8, event_type, "assistant")) return manager.appendClaudeAssistant(session, object);
+        if (std.mem.eql(u8, event_type, "user")) return manager.appendClaudeToolResults(session, object);
+        if (!std.mem.eql(u8, event_type, "result")) return;
+        session.active = false;
+        if (optionalBool(object, "is_error") orelse false) {
+            var failure: Io.Writer.Allocating = .init(manager.allocator);
+            defer failure.deinit();
+            try failure.writer.writeAll("{\"type\":\"extension_error\",\"message\":");
+            try std.json.Stringify.value(optionalString(object, "result") orelse "Claude Code turn failed", .{}, &failure.writer);
+            try failure.writer.writeByte('}');
+            try manager.appendEvent(session, failure.writer.buffered());
+        }
+        try manager.appendEvent(session, "{\"type\":\"agent_settled\"}");
+    }
+
+    fn appendClaudeAssistant(manager: *Manager, session: *Session, object: std.json.ObjectMap) !void {
+        const message = object.get("message") orelse return;
+        if (message != .object) return;
+        const content = message.object.get("content") orelse return;
+        if (content != .array) return;
+        for (content.array.items) |block| {
+            if (block != .object) continue;
+            const block_type = optionalString(block.object, "type") orelse continue;
+            var event: Io.Writer.Allocating = .init(manager.allocator);
+            defer event.deinit();
+            if (std.mem.eql(u8, block_type, "text") or std.mem.eql(u8, block_type, "thinking")) {
+                try event.writer.writeAll("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":");
+                try std.json.Stringify.value(if (std.mem.eql(u8, block_type, "thinking")) "thinking_delta" else "text_delta", .{}, &event.writer);
+                try event.writer.writeAll(",\"delta\":");
+                try std.json.Stringify.value(optionalString(block.object, block_type) orelse "", .{}, &event.writer);
+                try event.writer.writeAll("}}");
+            } else if (std.mem.eql(u8, block_type, "tool_use")) {
+                try event.writer.writeAll("{\"type\":\"tool_execution_start\",\"toolCallId\":");
+                try std.json.Stringify.value(optionalString(block.object, "id") orelse "claude-tool", .{}, &event.writer);
+                try event.writer.writeAll(",\"toolName\":");
+                try std.json.Stringify.value(optionalString(block.object, "name") orelse "tool", .{}, &event.writer);
+                if (block.object.get("input")) |input| {
+                    try event.writer.writeAll(",\"args\":");
+                    try std.json.Stringify.value(input, .{}, &event.writer);
+                }
+                try event.writer.writeByte('}');
+            } else continue;
+            try manager.appendEvent(session, event.writer.buffered());
+        }
+    }
+
+    fn appendClaudeToolResults(manager: *Manager, session: *Session, object: std.json.ObjectMap) !void {
+        const message = object.get("message") orelse return;
+        if (message != .object) return;
+        const content = message.object.get("content") orelse return;
+        if (content != .array) return;
+        for (content.array.items) |block| {
+            if (block != .object or !std.mem.eql(u8, optionalString(block.object, "type") orelse "", "tool_result")) continue;
+            var event: Io.Writer.Allocating = .init(manager.allocator);
+            defer event.deinit();
+            try event.writer.writeAll("{\"type\":\"tool_execution_end\",\"toolCallId\":");
+            try std.json.Stringify.value(optionalString(block.object, "tool_use_id") orelse "claude-tool", .{}, &event.writer);
+            try event.writer.writeAll(",\"isError\":");
+            try event.writer.writeAll(if (optionalBool(block.object, "is_error") orelse false) "true" else "false");
+            if (block.object.get("content")) |result| {
+                try event.writer.writeAll(",\"result\":{\"content\":");
+                if (result == .string) {
+                    try event.writer.writeAll("[{\"type\":\"text\",\"text\":");
+                    try std.json.Stringify.value(result.string, .{}, &event.writer);
+                    try event.writer.writeAll("}]");
+                } else try std.json.Stringify.value(result, .{}, &event.writer);
+                try event.writer.writeByte('}');
+            }
+            try event.writer.writeByte('}');
+            try manager.appendEvent(session, event.writer.buffered());
+        }
     }
 
     fn appendEvent(manager: *Manager, session: *Session, line: []const u8) !void {
@@ -1150,14 +1451,16 @@ fn directFxRequest(allocator: std.mem.Allocator, io: Io, child: *std.process.Chi
     return error.HarnessResponseTooLarge;
 }
 
-fn acpSessionRequest(manager: *Manager, request_id: []const u8, controller_executable: []const u8, model_id: []const u8, session_id: []const u8, native_session_id: ?[]const u8) ![]u8 {
+fn acpSessionRequest(manager: *Manager, request_id: []const u8, controller_executable: []const u8, model_id: []const u8, session_id: []const u8, native_session_id: ?[]const u8, cwd: []const u8) ![]u8 {
     var request: Io.Writer.Allocating = .init(manager.allocator);
     errdefer request.deinit();
     try request.writer.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try std.json.Stringify.value(request_id, .{}, &request.writer);
     try request.writer.writeAll(",\"method\":");
     try std.json.Stringify.value(if (native_session_id == null) "session/new" else "session/load", .{}, &request.writer);
-    try request.writer.writeAll(",\"params\":{");
+    try request.writer.writeAll(",\"params\":{\"cwd\":");
+    try std.json.Stringify.value(cwd, .{}, &request.writer);
+    try request.writer.writeByte(',');
     if (native_session_id) |value| {
         try request.writer.writeAll("\"sessionId\":");
         try std.json.Stringify.value(value, .{}, &request.writer);
