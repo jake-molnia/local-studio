@@ -429,7 +429,7 @@ export function ActiveSessionRow({
       showClearAction
       renameInputClass="text-[length:var(--fs-xs)]"
       card={card}
-      secondaryLabel={project.name}
+      secondaryLabel={session.id.startsWith("message:telegram:") ? "Telegram" : project.name}
     />
   );
 }

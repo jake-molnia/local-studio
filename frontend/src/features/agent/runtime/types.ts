@@ -15,6 +15,10 @@ export type { AgentHarness } from "@shared/agent/harness-id";
 // The session identity string — the same value a pane stores as `sessionId`.
 export type SessionId = string;
 
+export function isMessagingSessionId(value: string | null | undefined): boolean {
+  return Boolean(value?.startsWith("message:telegram:") || value?.startsWith("message:discord:"));
+}
+
 export type SessionStatus = "idle" | "starting" | "running" | "stopping" | "loading";
 
 export type ExtensionUiRequest = {

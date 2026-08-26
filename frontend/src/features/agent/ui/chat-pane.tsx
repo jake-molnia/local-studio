@@ -209,6 +209,7 @@ type Props = {
   onRegisterHandle?: (handle: ChatPaneHandle | null) => void;
   showHeader?: boolean;
   composerOnly?: boolean;
+  readOnly?: boolean;
 };
 
 export type ComposerModelSelectorProps = {
@@ -261,6 +262,7 @@ export function ChatPane({
   onRegisterHandle,
   showHeader = true,
   composerOnly = false,
+  readOnly = false,
 }: Props) {
   const router = useRouter();
   const routeProjectId = useSearchParams().get("project");
@@ -686,91 +688,97 @@ export function ChatPane({
           />
         ) : null}
         {activePiSessionId ? <SubagentChips piSessionId={activePiSessionId} /> : null}
-        <AgentComposerFrame
-          attachments={attachments}
-          banner={composerVisual.banner}
-          composerDragActive={composerDragActive}
-          contextWindow={effectiveContextWindow}
-          currentContextTokens={currentContextTokens}
-          cwd={workspaceCwd}
-          fileInputRef={fileInputRef}
-          gitBranch={chatWorkspace ? null : gitBranch}
-          gitSummary={chatWorkspace ? null : gitSummary}
-          input={composerInput}
-          mention={mention}
-          mentionIndex={mentionIndex}
-          mentionRows={mentionRows}
-          modelSupportsVision={modelSupportsVision}
-          modelSelector={composerModelSelector}
-          contextOpen={contextOpen}
-          contextTriggerRef={contextTriggerRef}
-          onOpenContext={() => {
-            setActiveComposerPopover((current) => (current === "context" ? null : "context"));
-          }}
-          onAbortTurn={() => void abortTurn()}
-          onAttachFiles={(files) => void attachFiles(files)}
-          onComposerChange={handleComposerChange}
-          onComposerDragLeave={handleComposerDragLeave}
-          onComposerDragOver={handleComposerDragOver}
-          onComposerDrop={handleComposerDrop}
-          onComposerKeyDown={(event) => {
-            if (goalModeApi.interceptKeyDown(event)) return;
-            handleComposerKeyDown(event);
-          }}
-          onComposerPaste={handleComposerPaste}
-          onInitGit={chatWorkspace ? undefined : onInitGit}
-          onOpenDiff={chatWorkspace ? () => undefined : openDiffDrawer}
-          onRemoveAttachment={removeAttachment}
-          onRemoveLoadedContext={removeLoadedContext}
-          onSelectMention={(entry) => void handleSelectMention(entry)}
-          onSubmit={handleComposerSubmit}
-          placeholder={goalModeApi.goalPlaceholder ?? composerVisual.placeholder}
-          drawer={
-            <SessionProjectDrawer
-              tabId={activeTabId}
-              piSessionId={activePiSessionId}
-              revision={goalRevision}
-              projectName={chatWorkspace ? null : projectName}
-              cwd={workspaceCwd}
-              gitBranch={chatWorkspace ? null : gitBranch}
-              gitSummary={chatWorkspace ? null : gitSummary}
-              onInitGit={chatWorkspace ? undefined : onInitGit}
-              onOpenDiff={openDiffDrawer}
-              showProjectRow={composerVisual.showProjectRow}
-              open={contextOpen}
-              onOpenChange={(next) => {
-                setActiveComposerPopover((current) => {
-                  if (next) return "context";
-                  return current === "context" ? null : current;
-                });
-              }}
-              contextTriggerRef={contextTriggerRef}
-              onRequestAttach={() => fileInputRef.current?.click()}
-              browserToolEnabled={browserToolEnabled}
-              browserBackend={browserBackend}
-              onToggleBrowserBackend={onToggleBrowserBackend}
-              onToggleBrowserTool={onToggleBrowserTool}
-              running={Boolean(running)}
-              workspaceToolsEnabled={!chatWorkspace}
-              onProjectPicked={handleProjectPicked}
-              queueItems={visibleQueueItems}
-              onEditQueued={editQueued}
-              onRemoveQueued={removeQueued}
-              onSteerQueued={(queueId) => void steerQueued(queueId)}
-            />
-          }
-          showStatusBar={!composerVisual.showProjectRow}
-          promptTemplates={selectedPromptTemplates}
-          readingAttachments={readingAttachments}
-          running={Boolean(running)}
-          selectedSkills={selectedSkills}
-          status={activeTab?.status}
-          textareaRef={textareaRef}
-          goalMode={goalModeApi.goalMode}
-          onExitGoalMode={goalModeApi.exitGoalMode}
-          floating={composerOnly}
-          dense={!showHeader && !composerOnly}
-        />
+        {readOnly ? (
+          <div className="flex min-h-12 items-center justify-center border-t border-(--border)/45 px-4 text-[length:var(--fs-sm)] text-(--dim)">
+            Telegram conversation · Continue in Telegram
+          </div>
+        ) : (
+          <AgentComposerFrame
+            attachments={attachments}
+            banner={composerVisual.banner}
+            composerDragActive={composerDragActive}
+            contextWindow={effectiveContextWindow}
+            currentContextTokens={currentContextTokens}
+            cwd={workspaceCwd}
+            fileInputRef={fileInputRef}
+            gitBranch={chatWorkspace ? null : gitBranch}
+            gitSummary={chatWorkspace ? null : gitSummary}
+            input={composerInput}
+            mention={mention}
+            mentionIndex={mentionIndex}
+            mentionRows={mentionRows}
+            modelSupportsVision={modelSupportsVision}
+            modelSelector={composerModelSelector}
+            contextOpen={contextOpen}
+            contextTriggerRef={contextTriggerRef}
+            onOpenContext={() => {
+              setActiveComposerPopover((current) => (current === "context" ? null : "context"));
+            }}
+            onAbortTurn={() => void abortTurn()}
+            onAttachFiles={(files) => void attachFiles(files)}
+            onComposerChange={handleComposerChange}
+            onComposerDragLeave={handleComposerDragLeave}
+            onComposerDragOver={handleComposerDragOver}
+            onComposerDrop={handleComposerDrop}
+            onComposerKeyDown={(event) => {
+              if (goalModeApi.interceptKeyDown(event)) return;
+              handleComposerKeyDown(event);
+            }}
+            onComposerPaste={handleComposerPaste}
+            onInitGit={chatWorkspace ? undefined : onInitGit}
+            onOpenDiff={chatWorkspace ? () => undefined : openDiffDrawer}
+            onRemoveAttachment={removeAttachment}
+            onRemoveLoadedContext={removeLoadedContext}
+            onSelectMention={(entry) => void handleSelectMention(entry)}
+            onSubmit={handleComposerSubmit}
+            placeholder={goalModeApi.goalPlaceholder ?? composerVisual.placeholder}
+            drawer={
+              <SessionProjectDrawer
+                tabId={activeTabId}
+                piSessionId={activePiSessionId}
+                revision={goalRevision}
+                projectName={chatWorkspace ? null : projectName}
+                cwd={workspaceCwd}
+                gitBranch={chatWorkspace ? null : gitBranch}
+                gitSummary={chatWorkspace ? null : gitSummary}
+                onInitGit={chatWorkspace ? undefined : onInitGit}
+                onOpenDiff={openDiffDrawer}
+                showProjectRow={composerVisual.showProjectRow}
+                open={contextOpen}
+                onOpenChange={(next) => {
+                  setActiveComposerPopover((current) => {
+                    if (next) return "context";
+                    return current === "context" ? null : current;
+                  });
+                }}
+                contextTriggerRef={contextTriggerRef}
+                onRequestAttach={() => fileInputRef.current?.click()}
+                browserToolEnabled={browserToolEnabled}
+                browserBackend={browserBackend}
+                onToggleBrowserBackend={onToggleBrowserBackend}
+                onToggleBrowserTool={onToggleBrowserTool}
+                running={Boolean(running)}
+                workspaceToolsEnabled={!chatWorkspace}
+                onProjectPicked={handleProjectPicked}
+                queueItems={visibleQueueItems}
+                onEditQueued={editQueued}
+                onRemoveQueued={removeQueued}
+                onSteerQueued={(queueId) => void steerQueued(queueId)}
+              />
+            }
+            showStatusBar={!composerVisual.showProjectRow}
+            promptTemplates={selectedPromptTemplates}
+            readingAttachments={readingAttachments}
+            running={Boolean(running)}
+            selectedSkills={selectedSkills}
+            status={activeTab?.status}
+            textareaRef={textareaRef}
+            goalMode={goalModeApi.goalMode}
+            onExitGoalMode={goalModeApi.exitGoalMode}
+            floating={composerOnly}
+            dense={!showHeader && !composerOnly}
+          />
+        )}
       </div>
     </section>
   );

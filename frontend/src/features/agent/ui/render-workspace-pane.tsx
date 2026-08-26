@@ -18,7 +18,7 @@ import { activeSession } from "@/features/agent/runtime/selectors";
 import { terminalOwnerFor } from "@/features/agent/terminal-owners";
 import { collectLeaves } from "@/features/agent/workspace/layout";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
-import type { AgentHarness } from "@/features/agent/runtime/types";
+import { isMessagingSessionId, type AgentHarness } from "@/features/agent/runtime/types";
 import { readAgentDefaults } from "@/features/agent/workspace/model-preference";
 import { openWorkbenchResource } from "@/features/workbench/controller-state";
 
@@ -195,6 +195,7 @@ const WorkspacePane = memo(function WorkspacePane({
     () => ({ tabId: view.pane.sessionId, composerFocusIntent }),
     [view.pane.sessionId, composerFocusIntent],
   );
+  const messagingSession = isMessagingSessionId(view.pane.sessionId);
   return (
     <ComposerFocusContext.Provider value={composerFocus}>
       <ChatPane
@@ -279,6 +280,7 @@ const WorkspacePane = memo(function WorkspacePane({
         onRegisterHandle={(handle) => handles.registerPaneHandle(view.paneId, handle)}
         showHeader={!compact && chatWorkspace}
         composerOnly={composerOnly}
+        readOnly={messagingSession}
       />
     </ComposerFocusContext.Provider>
   );
