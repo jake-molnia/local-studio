@@ -208,7 +208,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     if (use_daytona and target == null) {
         const cloud = daytona orelse return error.DaytonaPlacementUnavailable;
         const account_id = optionalString(object, "sandboxAccountId") orelse return error.SandboxAccountRequired;
-        const configured_image = if (optionalString(object, "sandboxImage")) |value| try allocator.dupe(u8, value) else try cloud.defaultImage(account_id) orelse return error.DaytonaImageRequired;
+        const configured_image = try cloud.defaultImage();
         defer allocator.free(configured_image);
         const image = configured_image;
         const worker_id = try lockedCreateCloudWorker(io, database, session_id, turn_attempt.attempt_id[0..], account_id, requested_harness, image);

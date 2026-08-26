@@ -100,13 +100,8 @@ pub const Manager = struct {
         return cloud_store.listPayload(manager.allocator, database);
     }
 
-    pub fn defaultImage(manager: *Manager, account_id: []const u8) !?[]u8 {
-        _ = account_id;
-        if (manager.environment.get("LOCAL_STUDIO_DAYTONA_IMAGE")) |value| {
-            const trimmed = std.mem.trim(u8, value, " \t\r\n");
-            if (validImage(trimmed)) return @as(?[]u8, try manager.allocator.dupe(u8, trimmed));
-        }
-        return @as(?[]u8, try manager.allocator.dupe(u8, worker_image));
+    pub fn defaultImage(manager: *Manager) ![]u8 {
+        return manager.allocator.dupe(u8, worker_image);
     }
 
     pub fn runReconciler(manager: *Manager, client: *http.Client, database: *sqlite.Database) Io.Cancelable!void {
