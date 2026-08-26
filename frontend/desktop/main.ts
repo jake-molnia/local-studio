@@ -10,6 +10,7 @@ import { isHttpUrl } from "./helpers/url";
 import { createMainWindow } from "./logic/window-manager";
 import { registerNavigationPolicy } from "./logic/security";
 import { startFrontendServer, stopFrontendServer, type ServerHandle } from "./logic/app-server";
+import { releaseController } from "./logic/controller-server";
 import {
   resolveFrontendRestartUrl,
   shouldReloadAfterFrontendRestart,
@@ -21,7 +22,6 @@ import {
   setUpdateChannel,
   startUpdate,
 } from "./logic/update-manager";
-import { addProject, listProjectsWithMeta, removeProject } from "./logic/projects-store";
 import { deployController } from "./logic/controller-deploy";
 import {
   getKittylitterPairingJson,
@@ -72,6 +72,11 @@ const HEALTH_FAILURE_THRESHOLD = 5;
 const RESTART_BACKOFF_STEP_MS = 1_000;
 const RESTART_BACKOFF_MAX_MS = 15_000;
 const RESTART_BACKOFF_WINDOW_MS = 60_000;
+const WorkbenchLifecycleSchema = Schema.Struct({
+  preferences: Schema.Struct({
+    lifecycleMode: Schema.Union([Schema.Literal("embedded"), Schema.Literal("system")]),
+  }),
+});
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -250,11 +255,6 @@ function resolveHomeConfinedPath(target: unknown): string | null {
   if (typeof target !== "string" || !target.trim()) return null;
   const raw = target.trim();
   const candidates = [raw];
-  if (!path.isAbsolute(raw) && !raw.startsWith("~")) {
-    for (const project of listProjectsWithMeta()) {
-      if (project.path) candidates.push(path.join(project.path, raw));
-    }
-  }
   const home = realpathSync.native(app.getPath("home"));
   for (const candidate of candidates) {
     let resolved: string;
@@ -341,12 +341,7 @@ function registerIpcHandlers(): void {
     if (result.canceled) return null;
     const selected = result.filePaths[0];
     if (!selected) return null;
-    try {
-      return addProject(selected);
-    } catch (error) {
-      log.error(`Failed to add project from dialog: ${String(error)}`);
-      throw error;
-    }
+    return selected;
   });
 
   ipcMain.handle(
@@ -362,34 +357,6 @@ function registerIpcHandlers(): void {
       });
     },
   );
-
-  ipcMain.handle("desktop:list-projects", async () => listProjectsWithMeta());
-
-  ipcMain.handle("desktop:add-project", async (_, directoryPath: string) => {
-    if (typeof directoryPath !== "string") {
-      throw new Error("directoryPath must be a string");
-    }
-    return addProject(directoryPath);
-  });
-
-  ipcMain.handle("desktop:remove-project", async (_, id: string) => {
-    if (typeof id !== "string") {
-      throw new Error("id must be a string");
-    }
-    removeProject(id);
-    return { ok: true } as const;
-  });
-
-  ipcMain.handle("desktop:load-session-prefs", async () => {
-    return readSessionPrefsFile();
-  });
-
-  ipcMain.handle("desktop:save-session-prefs", async (_, prefs: unknown) => {
-    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) {
-      throw new Error("prefs must be a plain object");
-    }
-    writeSessionPrefsFile(prefs as Record<string, unknown>);
-  });
 
   ipcMain.handle("desktop:load-ui-preferences", async () => {
     return readUiPreferencesFile();
@@ -563,11 +530,27 @@ async function shutdown(): Promise<void> {
     appState = "stopping";
     stopFrontendHealthMonitor();
     globalShortcut.unregisterAll();
-    killAllPtys();
-    await stopFrontendServer(frontendServer);
+    const keepController = await controllerSurvivesQuit(frontendServer);
+    if (!keepController) killAllPtys();
+    await stopFrontendServer(frontendServer, { stopController: !keepController });
+    if (keepController) releaseController(frontendServer?.controller);
     frontendServer = undefined;
   })();
   return shutdownPromise;
+}
+
+async function controllerSurvivesQuit(handle?: ServerHandle): Promise<boolean> {
+  if (!handle?.controller.process) return false;
+  try {
+    const response = await fetch(`${handle.controller.url}/api/workbench`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    if (!response.ok) return false;
+    const payload = Schema.decodeUnknownSync(WorkbenchLifecycleSchema)(await response.json());
+    return payload.preferences?.lifecycleMode === "system";
+  } catch {
+    return false;
+  }
 }
 
 async function run(): Promise<void> {
@@ -663,30 +646,8 @@ async function run(): Promise<void> {
 
 void run();
 
-function sessionPrefsFilePath(): string {
-  return path.join(app.getPath("userData"), "session-prefs.json");
-}
-
 function uiPreferencesFilePath(): string {
   return path.join(app.getPath("userData"), "ui-preferences.json");
-}
-
-function readSessionPrefsFile(): Record<string, unknown> {
-  const filePath = sessionPrefsFilePath();
-  try {
-    if (!existsSync(filePath)) return {};
-    const raw = readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeSessionPrefsFile(prefs: Record<string, unknown>): void {
-  writeJsonAtomic(sessionPrefsFilePath(), prefs);
 }
 
 function readUiPreferencesFile(): Record<string, string> {

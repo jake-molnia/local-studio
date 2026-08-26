@@ -107,7 +107,7 @@ export async function startController(options: StartControllerOptions): Promise<
     ["--mode", "standalone", "--host", "127.0.0.1", "--port", String(port)],
     {
       stdio: "pipe",
-      detached: false,
+      detached: true,
       env: {
         ...process.env,
         PATH: resolveAugmentedPath(),
@@ -161,4 +161,14 @@ export async function stopController(handle?: ControllerHandle): Promise<void> {
   if (!handle?.process) return;
   await stopChild(handle.process);
   if (currentController === handle.process) currentController = null;
+}
+
+export function releaseController(handle?: ControllerHandle): void {
+  const child = handle?.process;
+  if (!child) return;
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
+  if (currentController === child) currentController = null;
+  handle.process = undefined;
 }

@@ -12,11 +12,6 @@ const bridge: DesktopBridge = {
   setUpdateChannel: (channel) => ipcRenderer.invoke("desktop:set-update-channel", channel),
   openDirectory: () => ipcRenderer.invoke("desktop:open-directory"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
-  listProjects: () => ipcRenderer.invoke("desktop:list-projects"),
-  addProject: (directoryPath) => ipcRenderer.invoke("desktop:add-project", directoryPath),
-  removeProject: (id) => ipcRenderer.invoke("desktop:remove-project", id),
-  loadSessionPrefs: () => ipcRenderer.invoke("desktop:load-session-prefs"),
-  saveSessionPrefs: (prefs) => ipcRenderer.invoke("desktop:save-session-prefs", prefs),
   loadUiPreferences: () => ipcRenderer.invoke("desktop:load-ui-preferences"),
   saveUiPreferences: (prefs) => ipcRenderer.invoke("desktop:save-ui-preferences", prefs),
   windowAppearance: {

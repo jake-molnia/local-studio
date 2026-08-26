@@ -4,21 +4,6 @@ import type {
   WindowAppearanceState,
 } from "./window-appearance-contract";
 
-export interface ProjectEntry {
-  id: string;
-  name: string;
-  path: string;
-  addedAt: string;
-  exists: boolean;
-  hasGit: boolean;
-  branch: string | null;
-}
-
-export type SessionPrefsPayload = Record<
-  string,
-  { title?: string; pinned?: boolean; hidden?: boolean }
->;
-
 export type UiPreferencesPayload = Record<string, string>;
 
 export interface PtyStatus {
@@ -116,14 +101,8 @@ export interface DesktopBridge {
   checkForUpdates(): Promise<DesktopUpdateSnapshot>;
   startUpdate(): Promise<DesktopUpdateSnapshot>;
   setUpdateChannel(channel: DesktopUpdateChannel): Promise<DesktopUpdateSnapshot>;
-  openDirectory(): Promise<ProjectEntry | null>;
+  openDirectory(): Promise<string | null>;
   getPathForFile(file: File): string;
-  listProjects(): Promise<ProjectEntry[]>;
-  addProject(directoryPath: string): Promise<ProjectEntry>;
-  removeProject(id: string): Promise<{ ok: true }>;
-  /** Durable file-backed session prefs that survive process kill. */
-  loadSessionPrefs(): Promise<SessionPrefsPayload>;
-  saveSessionPrefs(prefs: SessionPrefsPayload): Promise<void>;
   /** Durable backup for renderer localStorage UI prefs (theme, font, layout). */
   loadUiPreferences(): Promise<UiPreferencesPayload>;
   saveUiPreferences(prefs: UiPreferencesPayload): Promise<void>;
