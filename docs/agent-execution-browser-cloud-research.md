@@ -4,12 +4,12 @@
 
 This note maps a practical path from Local Studio's current embedded Chat runtime to four related capabilities:
 
-- automations that default to head-owned, headless Chat sessions;
+- conversational automations that can use head-owned, headless Chat sessions and project automations that select an agent harness;
 - an interactive browser suitable for concurrent agent traffic;
 - portable local and cloud agent execution with durable Git handoffs;
 - Discord and Telegram ingress and notifications, with a possible Cloudflare-hosted control plane.
 
-The recommendation is to keep one session and event contract while separating control-plane ownership from execution placement. The Head should own session identity, automation schedules, event ordering, execution leases, credentials, and resumability metadata. A local controller, a sandbox, or a remote container should implement the same executor contract.
+The recommendation is to keep one session and event contract while separating control-plane ownership from execution placement. The Head should own session identity, automation schedules, event ordering, execution leases, credentials, and resumability metadata. A local controller, a sandbox, or a remote container should implement the same executor contract. Embedded Chat is a conversational and orchestration runtime, not an agent harness. Every project task selects exactly one real harness such as Pi, Codex, FX, OpenCode, or Claude Code.
 
 ## Current Local Studio baseline
 
@@ -21,7 +21,7 @@ The repository already has most of the control-plane vocabulary:
 - Automations create sessions, submit turns, wait for completion, and save a bounded result history.
 - The browser service currently performs controller-owned readable HTTP fetches and discovers local browser executables, but interactive browser verbs still fail explicitly.
 
-One immediate mismatch is visible in `controller/src/agent/automations/service.zig`: new automations are currently recorded with `harness: "pi"`, and the automation turn document does not transmit a harness, so the coordinator also defaults the run to Pi. Automations should instead default to the embedded Chat runtime and only use another harness when the automation record explicitly requests one.
+One immediate mismatch is visible in `controller/src/agent/automations/service.zig`: new automations are currently recorded with `harness: "pi"`, and the automation turn document does not transmit a harness, so the coordinator also defaults the run to Pi. Non-project automations should target embedded Chat without representing it as a harness. Project automations should persist and dispatch one explicit harness selection.
 
 ## Recommended system boundary
 
@@ -30,7 +30,7 @@ Use one durable `AgentSession` and one execution protocol for interactive chat, 
 The durable session record should own:
 
 - session, user/account, automation, and conversation identity;
-- requested model, harness override, tool policy, and execution policy;
+- runtime kind, requested model, selected project harness, tool policy, and execution policy;
 - placement state: `local`, `head`, `worker`, `daytona`, `modal`, or a later provider;
 - an execution generation and lease token so an old executor cannot keep writing after migration;
 - canonical transcript and monotonically ordered event cursor;
@@ -40,17 +40,19 @@ The durable session record should own:
 
 Executors should receive a bounded capability grant and emit canonical runtime events. They should not own authoritative schedules, credentials, conversation identity, or the only copy of session progress.
 
-## Automations as owned Chat sessions
+## Automations as owned sessions
 
-The default automation path should be:
+The default conversational automation path should be:
 
 1. The Head claims a due automation with a database lease.
-2. It creates or resumes a canonical session whose harness is `chat` unless explicitly overridden.
-3. It assigns the run to a head-owned Chat executor. In standalone mode this is the in-process runtime; in Head mode it can initially be an in-process head executor and later a remote executor using the same protocol.
+2. It creates or resumes a canonical session whose runtime is embedded Chat.
+3. It assigns the run to the head-owned Chat runtime. In standalone and Head modes this can initially remain in-process and later use a remote runtime placement through the same protocol.
 4. It submits the turn, persists events as they arrive, and records a checkpoint before reporting completion.
 5. It sends configured notifications from the durable result rather than tying delivery to the executor's lifetime.
 
 An automation run should be a normal session with additional scheduling metadata, not a second runtime type. A "smooth session" can be represented by an execution policy: no visible desktop, owned browser context, bounded tools, automatic checkpointing, and automatic stop or pause after completion.
+
+Project automations and project tasks take a different execution path. They must select one actual harness before dispatch. Embedded Chat may collect the request, clarify it, schedule it, and monitor it, but the filesystem and coding work belongs to the selected harness. The selected harness is fixed for an attempt and is not inferred from Chat.
 
 Retries require fencing. Claiming a run should write a unique run ID and lease generation. Every event, checkpoint, and final result must carry both values. A retry can then reject late writes from the abandoned executor without relying on process state.
 
@@ -120,14 +122,14 @@ The same Linux executor image should be usable on Daytona and Modal. The initial
 - the Linux Local Studio controller/executor binary and CA certificates;
 - Git, SSH client, curl, archive tools, and a small process supervisor;
 - pinned Chromium/Chrome for Testing plus compatible browser assets and fonts;
-- the built-in Chat runtime and filesystem tools, with permissions decided at session startup rather than compiled away;
+- the built-in Chat runtime for orchestration and the complete supported harness set, including their drivers and filesystem tools, with one harness selected when a project attempt starts;
 - no organization private keys, provider credentials, browser logins, repository tokens, or user data.
 
 Maintain immutable, digest-pinned image families rather than one unlimited image:
 
-- `agent-core`: Chat runtime, Git, filesystem and shell primitives;
-- `agent-browser`: core plus Chromium and browser dependencies;
-- optional language/toolchain images derived from core;
+- `agent-worker`: controller, Chat orchestration, all supported harness drivers and executables, Git, filesystem and shell primitives;
+- `agent-browser`: worker plus Chromium and browser dependencies;
+- optional language/toolchain images derived from the worker image;
 - optional project initialization snapshots created after dependency installation.
 
 Daytona accepts snapshots from fixed-tag images or Dockerfiles, expects local images built for AMD64, and offers warm pools for snapshots. [Daytona snapshots](https://www.daytona.io/docs/snapshots/)
@@ -197,7 +199,7 @@ The continuation manifest should contain task state, pending approvals, tool-cal
 
 ## Remote Chat and Cloudflare
 
-The native Zig controller cannot simply be placed inside the Workers JavaScript isolate without a separate WASM/ABI adaptation. The lower-risk remote design is an HTTP/event protocol shared by the in-process Chat executor and a containerized executor. Cloudflare can host the public ingress and durable orchestration while the native runtime remains in a Container or an external Head/worker.
+The native Zig controller cannot simply be placed inside the Workers JavaScript isolate without a separate WASM/ABI adaptation. The lower-risk remote design is an HTTP/event protocol shared by the in-process Chat runtime and a containerized agent worker. Cloudflare can host the public ingress and durable orchestration while the native runtime and bundled harnesses remain in a Container or an external Head/worker.
 
 Use Cloudflare components by responsibility:
 
@@ -212,7 +214,7 @@ Durable Objects can hibernate while retaining incoming client WebSockets. In-mem
 
 Cloudflare Containers are managed through Durable Objects and run images in Linux VMs, but their disk is currently ephemeral across sleep and container snapshots are described as forthcoming. Persistent state must live in Durable Object storage, R2/FUSE, Code Storage, or another external store. Containers require Linux AMD64 images. [Cloudflare Container lifecycle](https://developers.cloudflare.com/containers/platform-details/architecture/) [Cloudflare Containers getting started](https://developers.cloudflare.com/containers/get-started/)
 
-This makes Cloudflare a good second-order public control plane now and a possible native Chat executor later. It should not become a second canonical session model.
+This makes Cloudflare a good second-order public control plane now and a possible remote placement for the native Chat runtime and bundled harness workers later. It should not become a second canonical session model.
 
 ## Telegram and Discord
 
@@ -248,9 +250,9 @@ The first Discord slice should therefore support slash commands, explicit thread
 
 ### Phase 1: unify owned execution
 
-- Default automations to Chat and persist an optional explicit harness override.
+- Default non-project automations to Chat and require an explicit harness selection for project automations.
 - Add automation run leases, execution generations, idempotent completion, and an outbox.
-- Make a head-owned Chat executor a first-class placement target.
+- Make the head-owned Chat runtime a first-class non-harness placement target.
 - Keep every automation run visible as a normal canonical session.
 
 ### Phase 2: interactive local browser
@@ -263,7 +265,7 @@ The first Discord slice should therefore support slash commands, explicit thread
 ### Phase 3: portable sandbox executor
 
 - Define the executor protocol and session continuation manifest.
-- Build digest-pinned `agent-core` and `agent-browser` Linux AMD64 images.
+- Build digest-pinned `agent-worker` and `agent-browser` Linux AMD64 images containing the supported harness set.
 - Implement Code Storage ephemeral branch/checkpoint/fencing first.
 - Add Daytona as the first provider, then Modal behind the same provider interface.
 - Implement local-to-cloud and cloud-to-local migration only at safe tool boundaries.
@@ -272,7 +274,7 @@ The first Discord slice should therefore support slash commands, explicit thread
 
 - Add channel accounts, installation ACLs, external-conversation bindings, inbound deduplication, and notification outbox records.
 - Ship Telegram webhooks/polling and Discord interactions/outbound webhooks.
-- Keep all channel-triggered work on the normal Chat session and automation paths.
+- Route channel-triggered conversation through normal Chat sessions and dispatch any project task through an explicitly selected harness.
 
 ### Phase 5: remote control plane
 
@@ -282,7 +284,8 @@ The first Discord slice should therefore support slash commands, explicit thread
 
 ## Key decisions
 
-- Chat is the default runtime for automations; another harness is an explicit override.
+- Chat is an embedded conversational/orchestration runtime, not a harness.
+- Non-project automations may run in Chat; every project task and project automation selects exactly one bundled harness for each attempt.
 - Head owns session truth even when execution is remote.
 - Browser contexts isolate sessions; separate browser processes isolate trust zones.
 - Raw CDP is internal, and model tools are stable, validated semantic operations.
