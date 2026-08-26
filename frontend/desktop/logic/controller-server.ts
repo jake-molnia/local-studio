@@ -41,6 +41,12 @@ function controllerEntry(): string {
       );
 }
 
+function browserHostEntry(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "app", "browser-host.js")
+    : path.resolve(resolveDevelopmentFrontendDir(), "desktop", "dist", "browser-host.js");
+}
+
 async function isControllerHealthy(url: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_000) });
@@ -115,10 +121,7 @@ export async function startController(options: StartControllerOptions): Promise<
         LOCAL_STUDIO_MODELS_DIR: path.join(DESKTOP_CONFIG.userDataDir, "models"),
         LOCAL_STUDIO_RESOURCES_PATH: process.resourcesPath,
         LOCAL_STUDIO_BUNDLED_CHROMIUM_PATH: process.execPath,
-        LOCAL_STUDIO_BROWSER_HOST_SCRIPT: path.join(
-          app.getAppPath(),
-          app.isPackaged ? "desktop/dist/browser-host.js" : "browser-host.js",
-        ),
+        LOCAL_STUDIO_BROWSER_HOST_SCRIPT: browserHostEntry(),
         LOCAL_STUDIO_AGENT_CWD: process.env.LOCAL_STUDIO_AGENT_CWD || app.getPath("home"),
         LOCAL_STUDIO_FRONTEND_BASE: options.frontendUrl,
       },

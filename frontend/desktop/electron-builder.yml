@@ -16,6 +16,8 @@ files:
 extraResources:
   - from: desktop/resources/app-update.yml
     to: app-update.yml
+  - from: desktop/dist/browser-host.js
+    to: app/browser-host.js
   - from: ../controller/zig-out/bin
     to: app/controller
     filter:

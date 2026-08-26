@@ -1,7 +1,7 @@
 const config = {
   entry: [
     "src/app/**/{page,layout,route,error,global-error,loading,not-found,template,default}.{ts,tsx}",
-    "desktop/main.ts",
+    "desktop/entry.ts",
     "desktop/preload.ts",
     "desktop/browser-host.ts",
     "desktop/app-identity.ts",

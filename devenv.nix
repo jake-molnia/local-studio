@@ -205,6 +205,11 @@ in
   processes.head-node = {
     exec = ''
       ${portPreflight [ controllerPort ]}
+      ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        npm --prefix frontend run desktop:build:main
+        export LOCAL_STUDIO_BUNDLED_CHROMIUM_PATH="$PWD/frontend/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+        export LOCAL_STUDIO_BROWSER_HOST_SCRIPT="$PWD/frontend/desktop/dist/browser-host.js"
+      ''}
       node controller/toolchain.mjs build -Doptimize=ReleaseSafe
       exec ${zigController} --mode head --host 127.0.0.1 --port ${toString controllerPort}
     '';
@@ -226,6 +231,8 @@ in
     exec = ''
       set -eu
       ${portPreflight [ localNodePort ]}
+      export LOCAL_STUDIO_BUNDLED_CHROMIUM_PATH="$PWD/frontend/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+      export LOCAL_STUDIO_BROWSER_HOST_SCRIPT="$PWD/frontend/desktop/dist/browser-host.js"
       ${zigController} --mode worker --host 127.0.0.1 --port ${toString localNodePort} &
       local_node_pid=$!
       stop_local_node() {

@@ -169,7 +169,7 @@ pub const Manager = struct {
         const preferred = engineById(engines, manager.preference);
         try output.writer.writeAll("{\"ok\":true,\"data\":{\"preference\":");
         try std.json.Stringify.value(manager.preference, .{}, &output.writer);
-        try output.writer.print(",\"preferenceUnavailable\":{},\"override\":", .{!std.mem.eql(u8, manager.preference, "auto") and (preferred == null or preferred.?.path == null)});
+        try output.writer.print(",\"preferenceUnavailable\":{},\"override\":", .{preferred == null or preferred.?.path == null});
         if (override) |value| try std.json.Stringify.value(value, .{}, &output.writer) else try output.writer.writeAll("null");
         try output.writer.writeAll(",\"active\":");
         if (selected) |entry| {
@@ -204,7 +204,8 @@ pub const Manager = struct {
         var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, document, .{}) catch return error.InvalidBrowserPayload;
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidBrowserPayload;
-        const engine = stringField(parsed.value.object, "engine") orelse return error.BrowserEngineRequired;
+        const requested = stringField(parsed.value.object, "engine") orelse return error.BrowserEngineRequired;
+        const engine = normalizedEngine(requested);
         if (!validEngineId(engine)) return error.UnknownBrowserEngine;
         try manager.mutex.lock(manager.io);
         const replacement = manager.allocator.dupe(u8, engine) catch |failure| {
@@ -347,7 +348,8 @@ pub const Manager = struct {
             manager.allocator.free(engines);
         }
         const selected = selectEngine(manager.io, engines, manager.preference, manager.environment.get("LOCAL_STUDIO_CHROME_PATH")) orelse return error.BrowserInteractiveUnavailable;
-        manager.devtools = try cdp.Client.start(manager.allocator, manager.io, selected.path.?, manager.environment.get("LOCAL_STUDIO_BROWSER_HOST_SCRIPT"), manager.data_dir);
+        const host_script = if (std.mem.eql(u8, selected.id, "bundled")) manager.environment.get("LOCAL_STUDIO_BROWSER_HOST_SCRIPT") else null;
+        manager.devtools = try cdp.Client.start(manager.allocator, manager.io, selected.path.?, host_script, manager.data_dir);
     }
 
     fn evaluate(manager: *Manager, browser_session: *const BrowserSession, expression: []const u8) ![]u8 {
@@ -627,33 +629,22 @@ fn discoverEngines(allocator: std.mem.Allocator, io: Io, environment: *const std
         },
         else => &[_][3][]const u8{},
     };
-    var engines = try allocator.alloc(Engine, candidates.len + 2);
-    engines[0] = .{ .id = try allocator.dupe(u8, "auto"), .label = try allocator.dupe(u8, "Automatic"), .path = null };
+    var engines = try allocator.alloc(Engine, candidates.len + 1);
     const bundled = environment.get("LOCAL_STUDIO_BUNDLED_CHROMIUM_PATH");
-    engines[1] = .{ .id = try allocator.dupe(u8, "bundled"), .label = try allocator.dupe(u8, "Bundled Chromium"), .path = if (bundled) |value| if (pathAvailable(io, value)) try allocator.dupe(u8, value) else null else null };
-    for (candidates, 0..) |candidate, index| engines[index + 2] = .{
+    engines[0] = .{ .id = try allocator.dupe(u8, "bundled"), .label = try allocator.dupe(u8, "Bundled Chromium"), .path = if (bundled) |value| if (pathAvailable(io, value)) try allocator.dupe(u8, value) else null else null };
+    for (candidates, 0..) |candidate, index| engines[index + 1] = .{
         .id = try allocator.dupe(u8, candidate[0]),
         .label = try allocator.dupe(u8, candidate[1]),
         .path = if (pathAvailable(io, candidate[2])) try allocator.dupe(u8, candidate[2]) else null,
-    };
-    for (engines[1..]) |entry| if (entry.path) |value| {
-        engines[0].path = try allocator.dupe(u8, value);
-        break;
     };
     return engines;
 }
 
 fn selectEngine(io: Io, engines: []const Engine, preference: []const u8, override: ?[]const u8) ?ResolvedEngine {
     if (override) |path| if (pathAvailable(io, path)) return .{ .id = "custom", .label = "Custom", .path = path, .source = "override" };
-    if (!std.mem.eql(u8, preference, "auto")) if (engineById(engines, preference)) |entry| if (entry.path != null) return .{ .id = entry.id, .label = entry.label, .path = entry.path, .source = "preference" };
-    const automatic = engineById(engines, "auto") orelse return null;
-    const path = automatic.path orelse return null;
-    for (engines[1..]) |entry| if (entry.path) |candidate| if (std.mem.eql(u8, candidate, path)) return .{
-        .id = entry.id,
-        .label = entry.label,
-        .path = entry.path,
-        .source = if (std.mem.eql(u8, entry.id, "bundled")) "bundled" else "detected",
-    };
+    if (engineById(engines, preference)) |entry| if (entry.path != null) return .{ .id = entry.id, .label = entry.label, .path = entry.path, .source = if (std.mem.eql(u8, entry.id, "bundled")) "bundled" else "preference" };
+    if (engineById(engines, "bundled")) |entry| if (entry.path != null) return .{ .id = entry.id, .label = entry.label, .path = entry.path, .source = "bundled" };
+    for (engines) |entry| if (entry.path != null) return .{ .id = entry.id, .label = entry.label, .path = entry.path, .source = "detected" };
     return null;
 }
 
@@ -680,11 +671,11 @@ fn loadPreference(allocator: std.mem.Allocator, io: Io, environment: *const std.
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, value, .{}) catch null;
         if (parsed) |*body| {
             defer body.deinit();
-            if (body.value == .object) if (stringField(body.value.object, "engine")) |engine| if (validEngineId(engine)) return allocator.dupe(u8, engine);
+            if (body.value == .object) if (stringField(body.value.object, "engine")) |engine| if (validEngineId(normalizedEngine(engine))) return allocator.dupe(u8, normalizedEngine(engine));
         }
     }
-    const configured = environment.get("LOCAL_STUDIO_BROWSER_ENGINE") orelse "auto";
-    return allocator.dupe(u8, if (validEngineId(configured)) configured else "auto");
+    const configured = normalizedEngine(environment.get("LOCAL_STUDIO_BROWSER_ENGINE") orelse "bundled");
+    return allocator.dupe(u8, if (validEngineId(configured)) configured else "bundled");
 }
 
 fn persistPreference(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, engine: []const u8) !void {
@@ -703,8 +694,12 @@ fn persistPreference(allocator: std.mem.Allocator, io: Io, data_dir: []const u8,
 }
 
 fn validEngineId(value: []const u8) bool {
-    for ([_][]const u8{ "auto", "bundled", "chrome", "chromium", "brave", "edge", "arc", "vivaldi" }) |candidate| if (std.mem.eql(u8, value, candidate)) return true;
+    for ([_][]const u8{ "bundled", "chrome", "chromium", "brave", "edge", "arc", "vivaldi" }) |candidate| if (std.mem.eql(u8, value, candidate)) return true;
     return false;
+}
+
+fn normalizedEngine(value: []const u8) []const u8 {
+    return if (std.mem.eql(u8, value, "auto")) "bundled" else value;
 }
 
 fn sessionKey(object: std.json.ObjectMap) []const u8 {
