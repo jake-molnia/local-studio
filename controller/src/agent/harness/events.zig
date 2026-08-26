@@ -191,7 +191,7 @@ fn writeAcpNormalized(writer: *Io.Writer, harness: []const u8, object: std.json.
 }
 
 fn isAcp(harness: []const u8) bool {
-    return std.mem.eql(u8, harness, "fx");
+    return std.mem.eql(u8, harness, "fx") or std.mem.eql(u8, harness, "opencode");
 }
 
 fn normalizedKind(object: std.json.ObjectMap, native_type: []const u8) []const u8 {

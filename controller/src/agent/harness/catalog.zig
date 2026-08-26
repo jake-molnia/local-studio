@@ -88,7 +88,31 @@ pub fn discoverFx(allocator: std.mem.Allocator, io: Io, configuration: *const co
     };
 }
 
-pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const Installation, fx: *const Installation) !void {
+pub fn discoverOpenCode(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Installation {
+    if (configuration.environment.get("LOCAL_STUDIO_OPENCODE_BIN")) |configured| {
+        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+        if (trimmed.len > 0) return probeAcp(allocator, io, configuration.environment, "configured", trimmed);
+    }
+    if (try pathExecutable(allocator, io, configuration.environment, "opencode2")) |executable| {
+        defer allocator.free(executable);
+        return probeAcp(allocator, io, configuration.environment, "system", executable);
+    }
+    return missing(allocator, "opencode2");
+}
+
+pub fn discoverClaude(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Installation {
+    if (configuration.environment.get("LOCAL_STUDIO_CLAUDE_BIN")) |configured| {
+        const trimmed = std.mem.trim(u8, configured, " \t\r\n");
+        if (trimmed.len > 0) return probeClaude(allocator, io, configuration.environment, "configured", trimmed);
+    }
+    if (try pathExecutable(allocator, io, configuration.environment, "claude")) |executable| {
+        defer allocator.free(executable);
+        return probeClaude(allocator, io, configuration.environment, "system", executable);
+    }
+    return missing(allocator, "claude");
+}
+
+pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const Installation, fx: *const Installation, opencode: *const Installation, claude: *const Installation) !void {
     try writer.writeAll("{\"harnesses\":[");
     try writePi(writer, pi);
     try writer.writeAll(",");
@@ -96,11 +120,11 @@ pub fn writeCatalog(writer: *Io.Writer, pi: *const Installation, codex: *const I
     try writer.writeAll(",");
     try writeInstallation(writer, "fx", "FX", "acp", fx);
     try writer.writeAll(",");
-    try writeUnavailable(writer, "opencode", "OpenCode", "http-sse");
+    try writeInstallation(writer, "opencode", "OpenCode", "acp", opencode);
     try writer.writeAll(",");
     try writeInstallation(writer, "codex", "Codex", "app-server", codex);
     try writer.writeAll(",");
-    try writeUnavailable(writer, "claude", "Claude Code", "stream-json");
+    try writeInstallation(writer, "claude", "Claude Code", "stream-json", claude);
     try writer.writeAll("]}");
 }
 
@@ -108,7 +132,9 @@ pub fn writeCapabilities(writer: *Io.Writer, harness: []const u8) !void {
     if (std.mem.eql(u8, harness, "pi")) return writer.writeAll("[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
     if (std.mem.eql(u8, harness, "chat")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]");
     if (std.mem.eql(u8, harness, "fx")) return writer.writeAll("[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    if (std.mem.eql(u8, harness, "opencode")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
     if (std.mem.eql(u8, harness, "codex")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\"]");
+    if (std.mem.eql(u8, harness, "claude")) return writer.writeAll("[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
     try writer.writeAll("[]");
 }
 
@@ -184,6 +210,52 @@ fn probeFx(allocator: std.mem.Allocator, io: Io, environment: *const std.process
     };
 }
 
+fn probeAcp(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, source: []const u8, executable: []const u8) !Installation {
+    const owned_source = try allocator.dupe(u8, source);
+    errdefer allocator.free(owned_source);
+    const owned_executable = try allocator.dupe(u8, executable);
+    errdefer allocator.free(owned_executable);
+    const version = commandOutput(allocator, io, environment, &.{ executable, "--version" });
+    errdefer if (version) |value| allocator.free(value);
+    const help = commandOutput(allocator, io, environment, &.{ executable, "acp", "--help" });
+    defer if (help) |value| allocator.free(value);
+    return .{
+        .allocator = allocator,
+        .source = owned_source,
+        .executable = owned_executable,
+        .version = version,
+        .rpc_supported = help != null,
+    };
+}
+
+fn probeClaude(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, source: []const u8, executable: []const u8) !Installation {
+    const owned_source = try allocator.dupe(u8, source);
+    errdefer allocator.free(owned_source);
+    const owned_executable = try allocator.dupe(u8, executable);
+    errdefer allocator.free(owned_executable);
+    const version = commandOutput(allocator, io, environment, &.{ executable, "--version" });
+    errdefer if (version) |value| allocator.free(value);
+    const help = commandOutput(allocator, io, environment, &.{ executable, "--help" });
+    defer if (help) |value| allocator.free(value);
+    return .{
+        .allocator = allocator,
+        .source = owned_source,
+        .executable = owned_executable,
+        .version = version,
+        .rpc_supported = if (help) |value| std.mem.indexOf(u8, value, "--output-format") != null and std.mem.indexOf(u8, value, "stream-json") != null and std.mem.indexOf(u8, value, "--session-id") != null else false,
+    };
+}
+
+fn missing(allocator: std.mem.Allocator, executable: []const u8) !Installation {
+    return .{
+        .allocator = allocator,
+        .source = try allocator.dupe(u8, "missing"),
+        .executable = try allocator.dupe(u8, executable),
+        .version = null,
+        .rpc_supported = false,
+    };
+}
+
 fn commandOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, argv: []const []const u8) ?[]u8 {
     const result = std.process.run(allocator, io, .{
         .argv = argv,
@@ -238,16 +310,6 @@ fn writeChat(writer: *Io.Writer) !void {
     try writer.writeAll("{\"id\":\"chat\",\"name\":\"Chat\",\"status\":\"available\",\"selectable\":false,\"transport\":\"embedded-acp\",\"installation\":{\"source\":\"embedded\",\"executable\":\"self\",\"version\":\"0.0.0-local-studio\"},\"capabilities\":");
     try writeCapabilities(writer, "chat");
     try writer.writeByte('}');
-}
-
-fn writeUnavailable(writer: *Io.Writer, id: []const u8, name: []const u8, transport: []const u8) !void {
-    try writer.writeAll("{\"id\":");
-    try std.json.Stringify.value(id, .{}, writer);
-    try writer.writeAll(",\"name\":");
-    try std.json.Stringify.value(name, .{}, writer);
-    try writer.writeAll(",\"status\":\"driver-unavailable\",\"transport\":");
-    try std.json.Stringify.value(transport, .{}, writer);
-    try writer.writeAll(",\"installation\":null,\"capabilities\":[]}");
 }
 
 fn knownPiLocations() []const []const u8 {

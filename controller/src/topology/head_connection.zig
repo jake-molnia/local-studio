@@ -89,11 +89,15 @@ fn enrollmentDocument(allocator: std.mem.Allocator, mode: config.Mode, node_id: 
     try output.writer.writeAll(",\"capabilities\":{\"compute\":true,\"harnesses\":[\"chat\"");
     if (harness.piIsAvailable()) try output.writer.writeAll(",\"pi\"");
     if (harness.fxIsAvailable()) try output.writer.writeAll(",\"fx\"");
+    if (harness.opencodeIsAvailable()) try output.writer.writeAll(",\"opencode\"");
     if (harness.codexIsAvailable()) try output.writer.writeAll(",\"codex\"");
+    if (harness.claudeIsAvailable()) try output.writer.writeAll(",\"claude\"");
     try output.writer.writeAll("],\"mcp\":true,\"terminal\":true,\"browser\":true,\"harnessDetails\":[{\"id\":\"chat\",\"version\":\"0.0.0-local-studio\",\"source\":\"embedded\",\"capabilities\":[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]}");
     if (harness.piIsAvailable()) try writeHarnessDetail(&output.writer, "pi", harness.piVersion(), harness.piSource(), "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]");
     if (harness.fxIsAvailable()) try writeHarnessDetail(&output.writer, "fx", harness.fxVersion(), harness.fxSource(), "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]");
+    if (harness.opencodeIsAvailable()) try writeHarnessDetail(&output.writer, "opencode", harness.opencodeVersion(), harness.opencodeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
     if (harness.codexIsAvailable()) try writeHarnessDetail(&output.writer, "codex", harness.codexVersion(), harness.codexSource(), "[\"persistent-session\",\"resume\",\"cancel\"]");
+    if (harness.claudeIsAvailable()) try writeHarnessDetail(&output.writer, "claude", harness.claudeVersion(), harness.claudeSource(), "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]");
     try output.writer.writeAll("]}}");
     return output.toOwnedSlice();
 }
