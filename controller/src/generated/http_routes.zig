@@ -10,7 +10,7 @@ pub const Route = struct {
     streaming: Streaming,
 };
 
-pub const route_count: usize = 262;
+pub const route_count: usize = 271;
 
 pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/docs", .ownership = .shared, .streaming = .never },
@@ -165,6 +165,15 @@ pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/agent/accounts/sandboxes", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/accounts/sandboxes", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/accounts/sandboxes", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/api/agent/accounts/messaging", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/accounts/messaging", .ownership = .head, .streaming = .never },
+    .{ .method = .DELETE, .path = "/api/agent/accounts/messaging", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/api/agent/messaging/access", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/messaging/access", .ownership = .head, .streaming = .never },
+    .{ .method = .DELETE, .path = "/api/agent/messaging/access", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/messaging/discord/:accountId", .ownership = .head, .streaming = .never },
+    .{ .method = .GET, .path = "/api/agent/cloud/workers", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/git/mirror", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/connectors/grants", .ownership = .head, .streaming = .never },
     .{ .method = .PUT, .path = "/api/agent/connectors/grants", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/connectors/grants", .ownership = .head, .streaming = .never },
