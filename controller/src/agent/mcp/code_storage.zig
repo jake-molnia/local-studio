@@ -198,6 +198,98 @@ fn listRepositories(allocator: std.mem.Allocator, io: Io, client: *std.http.Clie
     return allocator.dupe(u8, body.buffered());
 }
 
+pub fn repositories(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8) ![]u8 {
+    const token = try auth.mint(allocator, io, organization, account_id, private_key, null, &.{"org:read"});
+    defer allocator.free(token);
+    const url = try std.fmt.allocPrint(allocator, "https://api.{s}.code.storage/api/v1/repos?limit=100", .{organization});
+    defer allocator.free(url);
+    const uri = try std.Uri.parse(url);
+    const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{token});
+    defer allocator.free(authorization);
+    var request = try client.request(.GET, uri, .{
+        .redirect_behavior = .unhandled,
+        .keep_alive = false,
+        .headers = .{ .authorization = .omit, .accept_encoding = .omit },
+        .extra_headers = &.{.{ .name = "Authorization", .value = authorization }},
+    });
+    defer request.deinit();
+    try request.sendBodiless();
+    var response = try request.receiveHead(&.{});
+    const storage = try allocator.alloc(u8, max_response_bytes);
+    defer allocator.free(storage);
+    var body: Io.Writer = .fixed(storage);
+    var read_buffer: [32 * 1024]u8 = undefined;
+    _ = response.reader(&read_buffer).streamRemaining(&body) catch return error.CodeStorageResponseTooLarge;
+    if (response.head.status.class() != .success) return error.CodeStorageRequestRejected;
+    return allocator.dupe(u8, body.buffered());
+}
+
+pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8, name: []const u8) !void {
+    try auth.validateRepository(name);
+    const token = try auth.mint(allocator, io, organization, account_id, private_key, null, &.{"org:write"});
+    defer allocator.free(token);
+    const url = try std.fmt.allocPrint(allocator, "https://api.{s}.code.storage/api/v1/repos", .{organization});
+    defer allocator.free(url);
+    const uri = try std.Uri.parse(url);
+    const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{token});
+    defer allocator.free(authorization);
+    const body = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\"}}", .{name});
+    defer allocator.free(body);
+    var request = try client.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .keep_alive = false,
+        .headers = .{ .authorization = .omit, .accept_encoding = .omit, .content_type = .omit },
+        .extra_headers = &.{ .{ .name = "Authorization", .value = authorization }, .{ .name = "Content-Type", .value = "application/json" } },
+    });
+    defer request.deinit();
+    request.transfer_encoding = .{ .content_length = body.len };
+    var write_buffer: [4096]u8 = undefined;
+    var request_body = try request.sendBody(&write_buffer);
+    try request_body.writer.writeAll(body);
+    try request_body.end();
+    var response = try request.receiveHead(&.{});
+    if (response.head.status.class() != .success) return error.CodeStorageRequestRejected;
+}
+
+pub fn references(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8) ![]u8 {
+    try auth.validateRepository(repository);
+    const token = try auth.mint(allocator, io, organization, account_id, private_key, repository, &.{"git:read"});
+    defer allocator.free(token);
+    const remote = try std.fmt.allocPrint(allocator, "https://t:{s}@{s}.code.storage/{s}.git", .{ token, organization, repository });
+    defer allocator.free(remote);
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ "git", "ls-remote", "--heads", remote },
+        .cwd = .inherit,
+        .environ_map = environment,
+        .stdout_limit = .limited(max_git_output_bytes),
+        .stderr_limit = .limited(max_git_output_bytes),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    const ok = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!ok) return error.CodeStorageGitFailed;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"refs\":[");
+    var lines = std.mem.splitScalar(u8, result.stdout, '\n');
+    var count: usize = 0;
+    while (lines.next()) |line| {
+        const marker = "refs/heads/";
+        const index = std.mem.indexOf(u8, line, marker) orelse continue;
+        const name = std.mem.trim(u8, line[index + marker.len ..], " \t\r\n");
+        if (name.len == 0) continue;
+        if (count > 0) try output.writer.writeByte(',');
+        try std.json.Stringify.value(name, .{}, &output.writer);
+        count += 1;
+    }
+    try output.writer.writeAll("]}");
+    return output.toOwnedSlice();
+}
+
 fn runGit(allocator: std.mem.Allocator, io: Io, operation: []const u8, organization: []const u8, account_id: []const u8, private_key: []const u8, arguments: std.json.ObjectMap) ![]u8 {
     const repository = stringField(arguments, "repository") orelse return error.CodeStorageRepositoryRequired;
     try auth.validateRepository(repository);

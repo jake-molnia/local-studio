@@ -533,6 +533,28 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/projects/repositories")) {
+        const payload = code_storage.repositoriesPayload(client) catch |failure| return respondCodeStorageFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/projects/workspace")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const payload = code_storage.prepareWorkspacePayload(database, document) catch |failure| return respondProjectFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
+    if (std.mem.eql(u8, route.path, "/api/agent/projects/refs")) {
+        const project_id = try request_tools.queryParameter(allocator, request.head.target, "projectId");
+        defer if (project_id) |value| allocator.free(value);
+        const payload = code_storage.projectRefsPayload(database, project_id orelse return respondProjectFailure(request, error.ProjectIdRequired)) catch |failure| return respondProjectFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/projects")) {
         const node_id = try request_tools.queryParameter(allocator, request.head.target, "nodeId");
         defer if (node_id) |value| allocator.free(value);
@@ -542,7 +564,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer if (document) |value| allocator.free(value);
         const response = switch (request.head.method) {
             .GET => agent_projects.listPayload(allocator, io, mode, configuration, client, database, node_id),
-            .POST => agent_projects.addPayload(allocator, io, mode, configuration, client, database, node_id, document orelse return false),
+            .POST => if (std.mem.indexOf(u8, document orelse return false, "\"create\":true") != null)
+                code_storage.createProjectPayload(client, database, document.?)
+            else if (std.mem.indexOf(u8, document.?, "\"repository\"") != null)
+                code_storage.addProjectPayload(database, document.?)
+            else
+                agent_projects.addPayload(allocator, io, mode, configuration, client, database, node_id, document.?),
             .DELETE => agent_projects.deletePayload(allocator, io, mode, client, database, node_id, id orelse return respondProjectFailure(request, error.ProjectIdRequired)),
             else => unreachable,
         };
@@ -959,8 +986,15 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         if (request.head.method == .PATCH) {
             const document = try readBoundedJsonBody(allocator, request) orelse return false;
             defer allocator.free(document);
+            var archived_session = try agent_sessions.find(allocator, io, database, session_id);
+            defer if (archived_session) |*session| session.deinit();
             const response = agent_sessions.archivePayload(allocator, io, database, session_id, document) catch |failure| return respondSessionFailure(request, failure);
             defer allocator.free(response);
+            if (std.mem.indexOf(u8, document, "\"archived\":true") != null) {
+                if (archived_session) |session| if (session.project_id) |project_id| {
+                    code_storage.archiveWorkspace(database, project_id, session.id) catch |failure| return respondProjectFailure(request, failure);
+                };
+            }
             try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
             return request.head.keep_alive;
         }

@@ -223,6 +223,24 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent/projects/repositories",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/projects/workspace",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/projects/refs",
+      "ownership": "head",
+      "streaming": "never"
+    },
+    {
+      "method": "GET",
       "path": "/api/agent/connectors",
       "ownership": "head",
       "streaming": "never"

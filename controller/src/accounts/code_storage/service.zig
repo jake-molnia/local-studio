@@ -6,6 +6,8 @@ const code_storage_auth = @import("auth.zig");
 const harness_nodes = @import("../../agent/harness/nodes.zig");
 const node_transport = @import("../../topology/node_transport.zig");
 const agent_projects = @import("../../agent/projects/service.zig");
+const project_repository = @import("../../agent/projects/store.zig");
+const project_workspace = @import("../../agent/projects/workspace.zig");
 const code_storage_git = @import("../../agent/mcp/code_storage.zig");
 const agent_execution = @import("../../agent/execution/store.zig");
 
@@ -34,6 +36,242 @@ pub const State = struct {
         var store = try repository.load(state.allocator, state.io, state.data_dir);
         defer store.deinit();
         return writeAccounts(state.allocator, &store);
+    }
+
+    pub fn repositoriesPayload(state: *State, client: *http.Client) ![]u8 {
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
+        var store = try repository.load(state.allocator, state.io, state.data_dir);
+        defer store.deinit();
+        var output: Io.Writer.Allocating = .init(state.allocator);
+        errdefer output.deinit();
+        try output.writer.writeAll("{\"repositories\":[");
+        var count: usize = 0;
+        for (store.accounts.items) |account| {
+            if (!std.mem.eql(u8, account.provider, "code-storage")) continue;
+            const private_key = try repository.resolveSecret(state.allocator, state.io, state.environment, state.data_dir, &store, account.secret_ref, account.secret_provider);
+            defer state.allocator.free(private_key);
+            const document = try code_storage_git.repositories(state.allocator, state.io, client, account.subject, account.id, private_key);
+            defer state.allocator.free(document);
+            var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidCodeStorageRepositoryResponse;
+            defer parsed.deinit();
+            if (parsed.value != .object) return error.InvalidCodeStorageRepositoryResponse;
+            const values = parsed.value.object.get("repos") orelse return error.InvalidCodeStorageRepositoryResponse;
+            if (values != .array) return error.InvalidCodeStorageRepositoryResponse;
+            for (values.array.items) |value| {
+                if (value != .object) continue;
+                const name = stringField(value.object, "repo_id") orelse continue;
+                if (count > 0) try output.writer.writeByte(',');
+                try output.writer.writeAll("{\"accountId\":");
+                try std.json.Stringify.value(account.id, .{}, &output.writer);
+                try output.writer.writeAll(",\"accountLabel\":");
+                try std.json.Stringify.value(account.label, .{}, &output.writer);
+                try output.writer.writeAll(",\"organization\":");
+                try std.json.Stringify.value(account.subject, .{}, &output.writer);
+                try output.writer.writeAll(",\"name\":");
+                try std.json.Stringify.value(name, .{}, &output.writer);
+                try output.writer.writeAll(",\"url\":");
+                if (stringField(value.object, "url")) |url| try std.json.Stringify.value(url, .{}, &output.writer) else {
+                    const url = try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ account.subject, name });
+                    defer state.allocator.free(url);
+                    try std.json.Stringify.value(url, .{}, &output.writer);
+                }
+                try output.writer.writeAll(",\"defaultBranch\":");
+                try std.json.Stringify.value(stringField(value.object, "default_branch") orelse "main", .{}, &output.writer);
+                try output.writer.writeByte('}');
+                count += 1;
+            }
+        }
+        try output.writer.print("],\"accounts\":{d}", .{countCodeStorageAccounts(&store)});
+        for (store.accounts.items) |account| if (std.mem.eql(u8, account.provider, "code-storage")) {
+            try output.writer.writeAll(",\"defaultAccountId\":");
+            try std.json.Stringify.value(account.id, .{}, &output.writer);
+            break;
+        };
+        try output.writer.writeByte('}');
+        return output.toOwnedSlice();
+    }
+
+    pub fn createProjectPayload(state: *State, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidProjectPayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidProjectPayload;
+        const account_id = stringField(parsed.value.object, "accountId") orelse return error.CodeStorageAccountRequired;
+        const name = stringField(parsed.value.object, "repository") orelse return error.CodeStorageRepositoryRequired;
+        try state.mutex.lock(state.io);
+        var accounts = repository.load(state.allocator, state.io, state.data_dir) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        defer accounts.deinit();
+        const account = accounts.find(account_id) orelse {
+            state.mutex.unlock(state.io);
+            return error.CodeStorageAccountNotFound;
+        };
+        const private_key = repository.resolveSecret(state.allocator, state.io, state.environment, state.data_dir, &accounts, account.secret_ref, account.secret_provider) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        const organization = try state.allocator.dupe(u8, account.subject);
+        state.mutex.unlock(state.io);
+        defer state.allocator.free(private_key);
+        defer state.allocator.free(organization);
+        try code_storage_git.createRepository(state.allocator, state.io, client, organization, account_id, private_key, name);
+        var payload: Io.Writer.Allocating = .init(state.allocator);
+        defer payload.deinit();
+        try payload.writer.writeAll("{\"accountId\":");
+        try std.json.Stringify.value(account_id, .{}, &payload.writer);
+        try payload.writer.writeAll(",\"repository\":");
+        try std.json.Stringify.value(name, .{}, &payload.writer);
+        try payload.writer.writeAll(",\"defaultBranch\":\"main\"}");
+        return state.addProjectPayload(database, payload.writer.buffered());
+    }
+
+    pub fn addProjectPayload(state: *State, database: *sqlite.Database, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidProjectPayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidProjectPayload;
+        const account_id = stringField(parsed.value.object, "accountId") orelse return error.CodeStorageAccountRequired;
+        const repository_name = stringField(parsed.value.object, "repository") orelse return error.CodeStorageRepositoryRequired;
+        const default_branch = stringField(parsed.value.object, "defaultBranch") orelse "main";
+        try state.mutex.lock(state.io);
+        var accounts = repository.load(state.allocator, state.io, state.data_dir) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        defer accounts.deinit();
+        const account = accounts.find(account_id) orelse {
+            state.mutex.unlock(state.io);
+            return error.CodeStorageAccountNotFound;
+        };
+        if (!std.mem.eql(u8, account.provider, "code-storage")) {
+            state.mutex.unlock(state.io);
+            return error.CodeStorageAccountNotFound;
+        }
+        const organization = try state.allocator.dupe(u8, account.subject);
+        state.mutex.unlock(state.io);
+        defer state.allocator.free(organization);
+        var random: [12]u8 = undefined;
+        state.io.random(&random);
+        const encoded = std.fmt.bytesToHex(random, .lower);
+        const id = try std.fmt.allocPrint(state.allocator, "proj-{s}", .{encoded[0..]});
+        defer state.allocator.free(id);
+        const path = try agent_projects.managedRepositoryPath(state.allocator, state.environment, id);
+        defer state.allocator.free(path);
+        const url = stringField(parsed.value.object, "repositoryUrl") orelse generated: {
+            break :generated try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ organization, repository_name });
+        };
+        const owned_url = if (stringField(parsed.value.object, "repositoryUrl") == null) url else null;
+        defer if (owned_url) |value| state.allocator.free(value);
+        var timestamp_buffer: [24]u8 = undefined;
+        const added_at = formatTimestamp(state.io, &timestamp_buffer);
+        try database.lock(state.io);
+        defer database.unlock(state.io);
+        if (try project_repository.getByRepository(state.allocator, database, account_id, repository_name)) |existing_value| {
+            var existing = existing_value;
+            defer existing.deinit();
+            return projectJson(state.allocator, &existing);
+        }
+        try project_repository.saveRepository(database, id, repository_name, path, account_id, organization, repository_name, url, default_branch, added_at);
+        var project = (try project_repository.getById(state.allocator, database, id)).?;
+        defer project.deinit();
+        return projectJson(state.allocator, &project);
+    }
+
+    pub fn prepareWorkspacePayload(state: *State, database: *sqlite.Database, document: []const u8) ![]u8 {
+        var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidProjectWorkspacePayload;
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.InvalidProjectWorkspacePayload;
+        const project_id = stringField(parsed.value.object, "projectId") orelse return error.ProjectIdRequired;
+        const session_id = stringField(parsed.value.object, "sessionId") orelse return error.SessionIdRequired;
+        const base_ref = stringField(parsed.value.object, "ref") orelse "main";
+        const branch = stringField(parsed.value.object, "branch");
+        try database.lock(state.io);
+        var project = (try project_repository.getById(state.allocator, database, project_id)) orelse {
+            database.unlock(state.io);
+            return error.ProjectNotFound;
+        };
+        database.unlock(state.io);
+        defer project.deinit();
+        const account_id = project.account_id orelse return error.CodeStorageAccountRequired;
+        const repository_name = project.repository orelse return error.CodeStorageRepositoryRequired;
+        try state.mutex.lock(state.io);
+        var accounts = repository.load(state.allocator, state.io, state.data_dir) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        defer accounts.deinit();
+        const account = accounts.find(account_id) orelse {
+            state.mutex.unlock(state.io);
+            return error.CodeStorageAccountNotFound;
+        };
+        const private_key = repository.resolveSecret(state.allocator, state.io, state.environment, state.data_dir, &accounts, account.secret_ref, account.secret_provider) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        const organization = try state.allocator.dupe(u8, account.subject);
+        state.mutex.unlock(state.io);
+        defer state.allocator.free(private_key);
+        defer state.allocator.free(organization);
+        const token = try code_storage_auth.mint(state.allocator, state.io, organization, account_id, private_key, repository_name, &.{ "git:read", "git:write" });
+        defer state.allocator.free(token);
+        const remote = try std.fmt.allocPrint(state.allocator, "https://t:{s}@{s}.code.storage/{s}.git", .{ token, organization, repository_name });
+        defer state.allocator.free(remote);
+        const path = try project_workspace.prepare(state.allocator, state.io, state.environment, &project, session_id, remote, base_ref, branch);
+        defer state.allocator.free(path);
+        var output: Io.Writer.Allocating = .init(state.allocator);
+        errdefer output.deinit();
+        try output.writer.writeAll("{\"path\":");
+        try std.json.Stringify.value(path, .{}, &output.writer);
+        try output.writer.writeAll(",\"ref\":");
+        try std.json.Stringify.value(base_ref, .{}, &output.writer);
+        try output.writer.writeAll(",\"detached\":");
+        try output.writer.writeAll(if (branch == null) "true" else "false");
+        try output.writer.writeByte('}');
+        return output.toOwnedSlice();
+    }
+
+    pub fn archiveWorkspace(state: *State, database: *sqlite.Database, project_id: []const u8, session_id: []const u8) !void {
+        try database.lock(state.io);
+        var project = (try project_repository.getById(state.allocator, database, project_id)) orelse {
+            database.unlock(state.io);
+            return;
+        };
+        database.unlock(state.io);
+        defer project.deinit();
+        if (project.repository == null) return;
+        try project_workspace.archive(state.allocator, state.io, state.environment, &project, session_id);
+    }
+
+    pub fn projectRefsPayload(state: *State, database: *sqlite.Database, project_id: []const u8) ![]u8 {
+        try database.lock(state.io);
+        var project = (try project_repository.getById(state.allocator, database, project_id)) orelse {
+            database.unlock(state.io);
+            return error.ProjectNotFound;
+        };
+        database.unlock(state.io);
+        defer project.deinit();
+        const account_id = project.account_id orelse return error.CodeStorageAccountRequired;
+        const repository_name = project.repository orelse return error.CodeStorageRepositoryRequired;
+        try state.mutex.lock(state.io);
+        var accounts = repository.load(state.allocator, state.io, state.data_dir) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        defer accounts.deinit();
+        const account = accounts.find(account_id) orelse {
+            state.mutex.unlock(state.io);
+            return error.CodeStorageAccountNotFound;
+        };
+        const private_key = repository.resolveSecret(state.allocator, state.io, state.environment, state.data_dir, &accounts, account.secret_ref, account.secret_provider) catch |failure| {
+            state.mutex.unlock(state.io);
+            return failure;
+        };
+        const organization = try state.allocator.dupe(u8, account.subject);
+        state.mutex.unlock(state.io);
+        defer state.allocator.free(private_key);
+        defer state.allocator.free(organization);
+        return code_storage_git.references(state.allocator, state.io, state.environment, organization, account_id, private_key, repository_name);
     }
 
     pub fn credentialStorePayload(state: *State) ![]u8 {
@@ -362,6 +600,39 @@ pub fn forward(allocator: std.mem.Allocator, io: Io, client: *http.Client, datab
 
 pub fn validAccountId(value: []const u8) bool {
     return repository.validId(value);
+}
+
+fn countCodeStorageAccounts(store: *repository.Store) usize {
+    var count: usize = 0;
+    for (store.accounts.items) |account| if (std.mem.eql(u8, account.provider, "code-storage")) {
+        count += 1;
+    };
+    return count;
+}
+
+fn projectJson(allocator: std.mem.Allocator, project: *const project_repository.Project) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"project\":{\"id\":");
+    try std.json.Stringify.value(project.id, .{}, &output.writer);
+    try output.writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(project.name, .{}, &output.writer);
+    try output.writer.writeAll(",\"path\":");
+    try std.json.Stringify.value(project.path, .{}, &output.writer);
+    try output.writer.writeAll(",\"addedAt\":");
+    try std.json.Stringify.value(project.added_at, .{}, &output.writer);
+    try output.writer.writeAll(",\"exists\":false,\"hasGit\":false,\"branch\":null,\"accountId\":");
+    try std.json.Stringify.value(project.account_id orelse "", .{}, &output.writer);
+    try output.writer.writeAll(",\"organization\":");
+    try std.json.Stringify.value(project.organization orelse "", .{}, &output.writer);
+    try output.writer.writeAll(",\"repository\":");
+    try std.json.Stringify.value(project.repository orelse project.name, .{}, &output.writer);
+    try output.writer.writeAll(",\"repositoryUrl\":");
+    try std.json.Stringify.value(project.repository_url orelse "", .{}, &output.writer);
+    try output.writer.writeAll(",\"defaultBranch\":");
+    try std.json.Stringify.value(project.default_branch, .{}, &output.writer);
+    try output.writer.writeAll("}}");
+    return output.toOwnedSlice();
 }
 
 fn writeAccounts(allocator: std.mem.Allocator, store: *repository.Store) ![]u8 {

@@ -167,6 +167,10 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     if (!is_chat and explicit_harness != null and std.mem.eql(u8, explicit_harness.?, "chat")) return error.InvalidProjectHarness;
     const requested_harness = if (is_chat) "chat" else explicit_harness orelse if (existing) |session| session.harness else return error.ProjectHarnessRequired;
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
+    if (existing) |session| if (!is_chat) {
+        const locked_project = session.project_id orelse return error.SessionProjectMismatch;
+        if (requested_project_id == null or !std.mem.eql(u8, locked_project, requested_project_id.?)) return error.SessionProjectMismatch;
+    };
     var native_owner = if (native_session_id) |value| try lockedGetByNative(allocator, io, database, value) else null;
     defer if (native_owner) |*session| session.deinit();
     const resume_native_session_id = if (native_session_id) |value|
@@ -194,6 +198,10 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const dispatch_document = detached_document orelse routed_document;
     if (!is_chat and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
     const existing_cloud = if (existing) |session| std.mem.startsWith(u8, session.node_id, "daytona-") else false;
+    if (existing != null and requested_placement != null and !is_chat) {
+        const requests_cloud = std.mem.eql(u8, requested_placement.?, "daytona");
+        if (requests_cloud != existing_cloud) return error.SessionPlacementMismatch;
+    }
     const use_daytona = !is_chat and mode == .head and if (requested_placement) |value| std.mem.eql(u8, value, "daytona") else existing_cloud;
     if (requested_placement) |value| if (!std.mem.eql(u8, value, "local") and !std.mem.eql(u8, value, "node") and !std.mem.eql(u8, value, "daytona")) return error.InvalidAgentPlacement;
     if (is_chat and requested_placement != null and !std.mem.eql(u8, requested_placement.?, "head")) return error.InvalidChatPlacement;
