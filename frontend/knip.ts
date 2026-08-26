@@ -3,6 +3,7 @@ const config = {
     "src/app/**/{page,layout,route,error,global-error,loading,not-found,template,default}.{ts,tsx}",
     "desktop/main.ts",
     "desktop/preload.ts",
+    "desktop/browser-host.ts",
     "desktop/app-identity.ts",
   ],
   project: ["src/**/*.{ts,tsx}", "desktop/**/*.{ts,tsx}"],

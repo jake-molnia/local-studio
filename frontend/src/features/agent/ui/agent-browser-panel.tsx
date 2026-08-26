@@ -85,7 +85,7 @@ export function AgentBrowserPanel({
   const workspaceToolsEnabled =
     activeProject?.id !== "chats" &&
     focusedSession?.projectId !== "chats" &&
-    focusedSession?.harness !== "chat";
+    focusedSession?.executionKind !== "chat";
   const sideChatScope =
     focusedSession?.piSessionId ??
     focusedSession?.id ??

@@ -3,9 +3,16 @@ const builtin = @import("builtin");
 const harness_nodes = @import("../harness/nodes.zig");
 const node_transport = @import("../../topology/node_transport.zig");
 const sqlite = @import("../../storage/sqlite.zig");
+const cdp = @import("cdp.zig");
 
 const Io = std.Io;
 const max_response_bytes = 512 * 1024;
+
+const BrowserSession = struct {
+    context_id: []u8,
+    target_id: []u8,
+    session_id: []u8,
+};
 
 pub const Manager = struct {
     allocator: std.mem.Allocator,
@@ -15,6 +22,8 @@ pub const Manager = struct {
     preference: []u8,
     mutex: Io.Mutex = .init,
     sessions: std.StringHashMapUnmanaged([]u8) = .empty,
+    contexts: std.StringHashMapUnmanaged(BrowserSession) = .empty,
+    devtools: ?cdp.Client = null,
     active_session: ?[]u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, data_dir: []const u8) !Manager {
@@ -36,6 +45,15 @@ pub const Manager = struct {
             manager.allocator.free(entry.value_ptr.*);
         }
         manager.sessions.deinit(manager.allocator);
+        var context_iterator = manager.contexts.iterator();
+        while (context_iterator.next()) |entry| {
+            manager.allocator.free(entry.key_ptr.*);
+            manager.allocator.free(entry.value_ptr.context_id);
+            manager.allocator.free(entry.value_ptr.target_id);
+            manager.allocator.free(entry.value_ptr.session_id);
+        }
+        manager.contexts.deinit(manager.allocator);
+        if (manager.devtools) |*client| client.deinit();
         if (manager.active_session) |value| manager.allocator.free(value);
         manager.allocator.free(manager.data_dir);
         manager.allocator.free(manager.preference);
@@ -49,6 +67,7 @@ pub const Manager = struct {
         const session = sessionKey(parsed.value.object);
         if (std.mem.eql(u8, verb, "navigate")) {
             const raw_url = stringField(parsed.value.object, "url") orelse return browserError(manager.allocator, "valid public or localhost http(s) url required");
+            if (manager.cdpPayload(session, verb, parsed.value.object)) |payload| return payload else |failure| std.log.warn("interactive browser navigation failed: {t}", .{failure});
             const page = fetchReadable(manager.allocator, manager.io, client, raw_url) catch return browserError(manager.allocator, "Browser navigation failed");
             defer page.deinit();
             try manager.remember(session, page.url);
@@ -61,8 +80,9 @@ pub const Manager = struct {
             try output.writer.writeAll(",\"readingMode\":true}}");
             return output.toOwnedSlice();
         }
-        if (std.mem.eql(u8, verb, "get-url")) return manager.urlPayload(session);
+        if (std.mem.eql(u8, verb, "get-url")) return manager.cdpPayload(session, verb, parsed.value.object) catch manager.urlPayload(session);
         if (std.mem.eql(u8, verb, "get-text") or std.mem.eql(u8, verb, "get-html")) {
+            if (manager.cdpPayload(session, verb, parsed.value.object)) |payload| return payload else |failure| std.log.warn("interactive browser read failed: {t}", .{failure});
             const url = stringField(parsed.value.object, "url") orelse try manager.remembered(session) orelse return browserError(manager.allocator, "Browser unavailable");
             defer if (stringField(parsed.value.object, "url") == null) manager.allocator.free(url);
             const page = fetchReadable(manager.allocator, manager.io, client, url) catch return browserError(manager.allocator, "Browser fetch failed");
@@ -77,7 +97,7 @@ pub const Manager = struct {
             try output.writer.writeAll(",\"readingMode\":true}}");
             return output.toOwnedSlice();
         }
-        return browserError(manager.allocator, "Interactive browser engine unavailable");
+        return manager.cdpPayload(session, verb, parsed.value.object) catch browserError(manager.allocator, "Interactive browser operation failed");
     }
 
     pub fn fetchPayload(manager: *Manager, client: *std.http.Client, url: []const u8) ![]u8 {
@@ -238,7 +258,205 @@ pub const Manager = struct {
         try output.writer.writeAll(",\"title\":\"\"}}");
         return output.toOwnedSlice();
     }
+
+    fn cdpPayload(manager: *Manager, session_key: []const u8, verb: []const u8, object: std.json.ObjectMap) ![]u8 {
+        try manager.mutex.lock(manager.io);
+        defer manager.mutex.unlock(manager.io);
+        const browser_session = try manager.ensureBrowserSession(session_key);
+        if (std.mem.eql(u8, verb, "navigate")) {
+            const url = stringField(object, "url") orelse return error.InvalidBrowserPayload;
+            try validateUrl(manager.io, url);
+            var params: Io.Writer.Allocating = .init(manager.allocator);
+            defer params.deinit();
+            try params.writer.writeAll("{\"url\":");
+            try std.json.Stringify.value(url, .{}, &params.writer);
+            try params.writer.writeByte('}');
+            const response = try manager.devtools.?.command(manager.allocator, "Page.navigate", params.writer.buffered(), browser_session.session_id);
+            manager.allocator.free(response);
+            for (0..50) |_| {
+                const state = manager.evaluate(browser_session, "document.readyState");
+                if (state) |value| {
+                    defer manager.allocator.free(value);
+                    if (std.mem.eql(u8, value, "complete") or std.mem.eql(u8, value, "interactive")) break;
+                } else |_| {}
+                try manager.io.sleep(.fromMilliseconds(100), .awake);
+            }
+            return manager.evaluatePayload(browser_session, "({url:location.href,title:document.title,readingMode:false})", null);
+        }
+        if (std.mem.eql(u8, verb, "get-url")) return manager.evaluatePayload(browser_session, "({url:location.href,title:document.title})", null);
+        if (std.mem.eql(u8, verb, "get-text")) return manager.evaluatePayload(browser_session, "document.body?.innerText??''", "text");
+        if (std.mem.eql(u8, verb, "get-html")) return manager.evaluatePayload(browser_session, "document.documentElement?.outerHTML??''", "html");
+        if (std.mem.eql(u8, verb, "observe")) return manager.evaluatePayload(browser_session, "Array.from(document.querySelectorAll('a,button,input,textarea,select,[role]')).slice(0,500).map((e,index)=>({index,tag:e.tagName.toLowerCase(),role:e.getAttribute('role'),text:(e.innerText||e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').trim().slice(0,500),name:e.getAttribute('name'),type:e.getAttribute('type'),href:e.href||null,disabled:!!e.disabled}))", "elements");
+        if (std.mem.eql(u8, verb, "click")) {
+            const selector = stringField(object, "selector") orelse return error.InvalidBrowserPayload;
+            const expression = try selectorExpression(manager.allocator, selector, null, .click);
+            defer manager.allocator.free(expression);
+            return manager.evaluatePayload(browser_session, expression, "result");
+        }
+        if (std.mem.eql(u8, verb, "type")) {
+            const selector = stringField(object, "selector") orelse return error.InvalidBrowserPayload;
+            const text = stringField(object, "text") orelse return error.InvalidBrowserPayload;
+            const expression = try selectorExpression(manager.allocator, selector, text, .type_text);
+            defer manager.allocator.free(expression);
+            return manager.evaluatePayload(browser_session, expression, "result");
+        }
+        if (std.mem.eql(u8, verb, "screenshot")) {
+            const response = try manager.devtools.?.command(manager.allocator, "Page.captureScreenshot", "{\"format\":\"png\"}", browser_session.session_id);
+            defer manager.allocator.free(response);
+            return resultFieldPayload(manager.allocator, response, "data", "image");
+        }
+        if (std.mem.eql(u8, verb, "network")) return manager.evaluatePayload(browser_session, "performance.getEntriesByType('resource').slice(-200).map(e=>({name:e.name,initiatorType:e.initiatorType,duration:e.duration,transferSize:e.transferSize}))", "entries");
+        return error.InvalidBrowserPath;
+    }
+
+    fn ensureBrowserSession(manager: *Manager, session_key: []const u8) !*BrowserSession {
+        if (manager.contexts.getPtr(session_key)) |existing| return existing;
+        try manager.ensureDevTools();
+        const context_response = manager.devtools.?.command(manager.allocator, "Target.createBrowserContext", "{}", null) catch null;
+        defer if (context_response) |value| manager.allocator.free(value);
+        const context_id = if (context_response) |value| try resultString(manager.allocator, value, "browserContextId") else try manager.allocator.dupe(u8, "");
+        errdefer manager.allocator.free(context_id);
+        const target_id = try manager.devtools.?.createTarget(manager.allocator, session_key, if (context_id.len > 0) context_id else null);
+        errdefer manager.allocator.free(target_id);
+        var attach_params: Io.Writer.Allocating = .init(manager.allocator);
+        defer attach_params.deinit();
+        try attach_params.writer.writeAll("{\"flatten\":true,\"targetId\":");
+        try std.json.Stringify.value(target_id, .{}, &attach_params.writer);
+        try attach_params.writer.writeByte('}');
+        const attach_response = try manager.devtools.?.command(manager.allocator, "Target.attachToTarget", attach_params.writer.buffered(), null);
+        defer manager.allocator.free(attach_response);
+        const session_id = try resultString(manager.allocator, attach_response, "sessionId");
+        errdefer manager.allocator.free(session_id);
+        const enable_response = try manager.devtools.?.command(manager.allocator, "Page.enable", "{}", session_id);
+        manager.allocator.free(enable_response);
+        const owned_key = try manager.allocator.dupe(u8, session_key);
+        errdefer manager.allocator.free(owned_key);
+        try manager.contexts.put(manager.allocator, owned_key, .{ .context_id = context_id, .target_id = target_id, .session_id = session_id });
+        return manager.contexts.getPtr(session_key).?;
+    }
+
+    fn ensureDevTools(manager: *Manager) !void {
+        if (manager.devtools != null) return;
+        const engines = try discoverEngines(manager.allocator, manager.io, manager.environment);
+        defer {
+            for (engines) |entry| {
+                manager.allocator.free(entry.id);
+                manager.allocator.free(entry.label);
+                if (entry.path) |value| manager.allocator.free(value);
+            }
+            manager.allocator.free(engines);
+        }
+        const selected = selectEngine(manager.io, engines, manager.preference, manager.environment.get("LOCAL_STUDIO_CHROME_PATH")) orelse return error.BrowserInteractiveUnavailable;
+        manager.devtools = try cdp.Client.start(manager.allocator, manager.io, selected.path.?, manager.environment.get("LOCAL_STUDIO_BROWSER_HOST_SCRIPT"), manager.data_dir);
+    }
+
+    fn evaluate(manager: *Manager, browser_session: *const BrowserSession, expression: []const u8) ![]u8 {
+        var params: Io.Writer.Allocating = .init(manager.allocator);
+        defer params.deinit();
+        try params.writer.writeAll("{\"awaitPromise\":true,\"returnByValue\":true,\"expression\":");
+        try std.json.Stringify.value(expression, .{}, &params.writer);
+        try params.writer.writeByte('}');
+        const response = try manager.devtools.?.command(manager.allocator, "Runtime.evaluate", params.writer.buffered(), browser_session.session_id);
+        defer manager.allocator.free(response);
+        return evaluationString(manager.allocator, response);
+    }
+
+    fn evaluatePayload(manager: *Manager, browser_session: *const BrowserSession, expression: []const u8, field: ?[]const u8) ![]u8 {
+        var params: Io.Writer.Allocating = .init(manager.allocator);
+        defer params.deinit();
+        try params.writer.writeAll("{\"awaitPromise\":true,\"returnByValue\":true,\"expression\":");
+        try std.json.Stringify.value(expression, .{}, &params.writer);
+        try params.writer.writeByte('}');
+        const response = try manager.devtools.?.command(manager.allocator, "Runtime.evaluate", params.writer.buffered(), browser_session.session_id);
+        defer manager.allocator.free(response);
+        return evaluationPayload(manager.allocator, response, field);
+    }
 };
+
+const SelectorAction = enum { click, type_text };
+
+fn selectorExpression(allocator: std.mem.Allocator, selector: []const u8, text: ?[]const u8, action: SelectorAction) ![]u8 {
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    if (action == .click) {
+        try output.writer.writeAll("(s=>{const e=document.querySelector(s);if(!e)return {ok:false,error:'element not found'};e.scrollIntoView({block:'center'});e.click();return {ok:true}})(");
+        try std.json.Stringify.value(selector, .{}, &output.writer);
+        try output.writer.writeByte(')');
+    } else {
+        try output.writer.writeAll("((s,v)=>{const e=document.querySelector(s);if(!e)return {ok:false,error:'element not found'};e.focus();const p=Object.getOwnPropertyDescriptor(e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value');if(p?.set)p.set.call(e,v);else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return {ok:true}})(");
+        try std.json.Stringify.value(selector, .{}, &output.writer);
+        try output.writer.writeByte(',');
+        try std.json.Stringify.value(text orelse "", .{}, &output.writer);
+        try output.writer.writeByte(')');
+    }
+    return output.toOwnedSlice();
+}
+
+fn resultString(allocator: std.mem.Allocator, document: []const u8, field: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidDevToolsResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidDevToolsResponse;
+    const result = parsed.value.object.get("result") orelse return error.InvalidDevToolsResponse;
+    if (result != .object) return error.InvalidDevToolsResponse;
+    const value = result.object.get(field) orelse return error.InvalidDevToolsResponse;
+    if (value != .string) return error.InvalidDevToolsResponse;
+    return allocator.dupe(u8, value.string);
+}
+
+fn evaluationValue(document: []const u8, allocator: std.mem.Allocator) !std.json.Parsed(std.json.Value) {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidDevToolsResponse;
+    errdefer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidDevToolsResponse;
+    const command_result = parsed.value.object.get("result") orelse return error.InvalidDevToolsResponse;
+    if (command_result != .object) return error.InvalidDevToolsResponse;
+    const runtime_result = command_result.object.get("result") orelse return error.InvalidDevToolsResponse;
+    if (runtime_result != .object or runtime_result.object.get("exceptionDetails") != null) return error.DevToolsEvaluationFailed;
+    if (runtime_result.object.get("value") == null) return error.InvalidDevToolsResponse;
+    return parsed;
+}
+
+fn evaluationString(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
+    var parsed = try evaluationValue(document, allocator);
+    defer parsed.deinit();
+    const value = parsed.value.object.get("result").?.object.get("result").?.object.get("value").?;
+    if (value != .string) return error.InvalidDevToolsResponse;
+    return allocator.dupe(u8, value.string);
+}
+
+fn evaluationPayload(allocator: std.mem.Allocator, document: []const u8, field: ?[]const u8) ![]u8 {
+    var parsed = try evaluationValue(document, allocator);
+    defer parsed.deinit();
+    const value = parsed.value.object.get("result").?.object.get("result").?.object.get("value").?;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"ok\":true,\"data\":");
+    if (field) |name| {
+        try output.writer.writeByte('{');
+        try std.json.Stringify.value(name, .{}, &output.writer);
+        try output.writer.writeByte(':');
+        try std.json.Stringify.value(value, .{}, &output.writer);
+        try output.writer.writeByte('}');
+    } else try std.json.Stringify.value(value, .{}, &output.writer);
+    try output.writer.writeByte('}');
+    return output.toOwnedSlice();
+}
+
+fn resultFieldPayload(allocator: std.mem.Allocator, document: []const u8, source_field: []const u8, output_field: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidDevToolsResponse;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidDevToolsResponse;
+    const result = parsed.value.object.get("result") orelse return error.InvalidDevToolsResponse;
+    if (result != .object) return error.InvalidDevToolsResponse;
+    const value = result.object.get(source_field) orelse return error.InvalidDevToolsResponse;
+    var output: Io.Writer.Allocating = .init(allocator);
+    errdefer output.deinit();
+    try output.writer.writeAll("{\"ok\":true,\"data\":{");
+    try std.json.Stringify.value(output_field, .{}, &output.writer);
+    try output.writer.writeByte(':');
+    try std.json.Stringify.value(value, .{}, &output.writer);
+    try output.writer.writeAll("}}");
+    return output.toOwnedSlice();
+}
 
 pub fn remotePayload(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, database: *sqlite.Database, target: []const u8, method: std.http.Method, document: ?[]const u8, preferred_node: ?[]const u8) ![]u8 {
     var node = (try harness_nodes.selectCapability(allocator, io, database, "browser", preferred_node)) orelse return error.BrowserNodeRequired;
