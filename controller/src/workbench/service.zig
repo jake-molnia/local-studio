@@ -106,9 +106,11 @@ fn projectionLocked(allocator: std.mem.Allocator, database: *sqlite.Database, vi
 }
 
 fn writeProjects(writer: *Io.Writer, database: *sqlite.Database) !void {
-    try writer.writeAll(",\"projects\":[{\"id\":\"chats\",\"name\":\"Chats\",\"path\":\"\",\"pinned\":false,\"rank\":0}");
+    try writer.writeAll(",\"projects\":[{\"id\":\"chats\",\"name\":\"Chats\",\"path\":\"\",\"defaultBranch\":\"main\",\"pinned\":false,\"rank\":0}");
     var statement = try database.prepare(
-        \\SELECT project.project_id, project.name, project.path, COALESCE(pin.pinned, 0), COALESCE(rank.rank, project.rowid * 1024)
+        \\SELECT project.project_id, project.name, project.path, project.account_id, project.organization,
+        \\       project.repository, project.repository_url, project.default_branch,
+        \\       COALESCE(pin.pinned, 0), COALESCE(rank.rank, project.rowid * 1024)
         \\FROM agent_projects AS project
         \\LEFT JOIN workbench_project_ranks AS rank ON rank.profile_id = 'default' AND rank.project_id = project.project_id
         \\LEFT JOIN workbench_project_pins AS pin ON pin.profile_id = 'default' AND pin.project_id = project.project_id
@@ -123,7 +125,25 @@ fn writeProjects(writer: *Io.Writer, database: *sqlite.Database) !void {
         try std.json.Stringify.value(statement.columnText(1) orelse return error.InvalidWorkbenchProject, .{}, writer);
         try writer.writeAll(",\"path\":");
         try std.json.Stringify.value(statement.columnText(2) orelse return error.InvalidWorkbenchProject, .{}, writer);
-        try writer.print(",\"pinned\":{},\"rank\":{d}}}", .{ statement.columnInt(3) != 0, statement.columnInt(4) });
+        if (statement.columnText(3)) |value| {
+            try writer.writeAll(",\"accountId\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (statement.columnText(4)) |value| {
+            try writer.writeAll(",\"organization\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (statement.columnText(5)) |value| {
+            try writer.writeAll(",\"repository\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (statement.columnText(6)) |value| {
+            try writer.writeAll(",\"repositoryUrl\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        try writer.writeAll(",\"defaultBranch\":");
+        try std.json.Stringify.value(statement.columnText(7) orelse "main", .{}, writer);
+        try writer.print(",\"pinned\":{},\"rank\":{d}}}", .{ statement.columnInt(8) != 0, statement.columnInt(9) });
     }
     try writer.writeByte(']');
 }

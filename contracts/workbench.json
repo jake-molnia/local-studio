@@ -50,6 +50,11 @@
         "id": "string",
         "name": "string",
         "path": "string",
+        "accountId": { "optional": "string" },
+        "organization": { "optional": "string" },
+        "repository": { "optional": "string" },
+        "repositoryUrl": { "optional": "string" },
+        "defaultBranch": "string",
         "pinned": "boolean",
         "rank": "i64"
       }

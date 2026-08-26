@@ -55,10 +55,10 @@ pub fn listLocal(allocator: std.mem.Allocator, io: Io, configuration: *const con
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"projects\":[");
-    try writeProject(&output.writer, io, chats_id, "Chats", chats_path, "1970-01-01T00:00:00.000Z");
+    try writeProject(&output.writer, io, chats_id, "Chats", chats_path, "1970-01-01T00:00:00.000Z", null);
     for (projects.projects) |project| {
         try output.writer.writeByte(',');
-        try writeProject(&output.writer, io, project.id, project.name, project.path, project.added_at);
+        try writeStoredProject(&output.writer, io, &project);
     }
     try output.writer.writeAll("]}");
     return output.toOwnedSlice();
@@ -88,7 +88,7 @@ pub fn addLocal(allocator: std.mem.Allocator, io: Io, configuration: *const conf
     var timestamp_buffer: [24]u8 = undefined;
     const added_at = formatTimestamp(io, &timestamp_buffer);
     try repository.save(database, id, name, canonical, added_at);
-    const project = repository.Project{ .allocator = allocator, .id = try allocator.dupe(u8, id), .name = try allocator.dupe(u8, name), .path = try allocator.dupe(u8, canonical), .added_at = try allocator.dupe(u8, added_at) };
+    const project = repository.Project{ .allocator = allocator, .id = try allocator.dupe(u8, id), .name = try allocator.dupe(u8, name), .path = try allocator.dupe(u8, canonical), .account_id = null, .organization = null, .repository = null, .repository_url = null, .default_branch = try allocator.dupe(u8, "main"), .added_at = try allocator.dupe(u8, added_at) };
     var mutable = project;
     defer mutable.deinit();
     return projectEnvelope(allocator, io, &mutable);
@@ -97,11 +97,22 @@ pub fn addLocal(allocator: std.mem.Allocator, io: Io, configuration: *const conf
 pub fn deleteLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id: []const u8) ![]u8 {
     const trimmed = std.mem.trim(u8, id, " \t\r\n");
     try validateProjectId(trimmed);
+    var managed_path: ?[]u8 = null;
+    defer if (managed_path) |value| allocator.free(value);
     if (!std.mem.eql(u8, trimmed, chats_id)) {
         try database.lock(io);
-        defer database.unlock(io);
-        try repository.delete(database, trimmed);
+        {
+            defer database.unlock(io);
+            if (try repository.hasOpenTasks(database, trimmed)) return error.ProjectHasOpenTasks;
+            if (try repository.getById(allocator, database, trimmed)) |project_value| {
+                var project = project_value;
+                defer project.deinit();
+                if (project.repository != null) managed_path = try allocator.dupe(u8, project.path);
+            }
+            try repository.delete(database, trimmed);
+        }
     }
+    if (managed_path) |path| try Io.Dir.cwd().deleteTree(io, path);
     return allocator.dupe(u8, "{\"ok\":true}");
 }
 
@@ -109,12 +120,16 @@ fn projectEnvelope(allocator: std.mem.Allocator, io: Io, project: *const reposit
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"project\":");
-    try writeProject(&output.writer, io, project.id, project.name, project.path, project.added_at);
+    try writeStoredProject(&output.writer, io, project);
     try output.writer.writeByte('}');
     return output.toOwnedSlice();
 }
 
-fn writeProject(writer: *Io.Writer, io: Io, id: []const u8, name: []const u8, path: []const u8, added_at: []const u8) !void {
+fn writeStoredProject(writer: *Io.Writer, io: Io, project: *const repository.Project) !void {
+    try writeProject(writer, io, project.id, project.name, project.path, project.added_at, project);
+}
+
+fn writeProject(writer: *Io.Writer, io: Io, id: []const u8, name: []const u8, path: []const u8, added_at: []const u8, project: ?*const repository.Project) !void {
     const stat = Io.Dir.cwd().statFile(io, path, .{}) catch null;
     const exists = if (stat) |value| value.kind == .directory else false;
     const git_path = try std.fs.path.join(std.heap.page_allocator, &.{ path, ".git" });
@@ -132,7 +147,38 @@ fn writeProject(writer: *Io.Writer, io: Io, id: []const u8, name: []const u8, pa
     try std.json.Stringify.value(added_at, .{}, writer);
     try writer.print(",\"exists\":{},\"hasGit\":{},\"branch\":", .{ exists, has_git });
     if (branch) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+    if (project) |stored| {
+        if (stored.account_id) |value| {
+            try writer.writeAll(",\"accountId\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (stored.organization) |value| {
+            try writer.writeAll(",\"organization\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (stored.repository) |value| {
+            try writer.writeAll(",\"repository\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        if (stored.repository_url) |value| {
+            try writer.writeAll(",\"repositoryUrl\":");
+            try std.json.Stringify.value(value, .{}, writer);
+        }
+        try writer.writeAll(",\"defaultBranch\":");
+        try std.json.Stringify.value(stored.default_branch, .{}, writer);
+    }
     try writer.writeByte('}');
+}
+
+pub fn managedRepositoryPath(allocator: std.mem.Allocator, environment: *const std.process.Environ.Map, project_id: []const u8) ![]u8 {
+    const home = environment.get("HOME") orelse return error.HomeDirectoryUnavailable;
+    const root = environment.get("LOCAL_STUDIO_WORKSPACE_ROOT") orelse home;
+    const directory = if (environment.get("LOCAL_STUDIO_WORKSPACE_ROOT") != null)
+        try std.fs.path.join(allocator, &.{ root, "Repositories" })
+    else
+        try std.fs.path.join(allocator, &.{ root, "Local Studio", "Repositories" });
+    defer allocator.free(directory);
+    return std.fmt.allocPrint(allocator, "{s}" ++ std.fs.path.sep_str ++ "{s}.git", .{ directory, project_id });
 }
 
 fn gitBranch(allocator: std.mem.Allocator, io: Io, path: []const u8) !?[]u8 {

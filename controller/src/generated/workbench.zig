@@ -20,6 +20,11 @@ pub const SidebarProject = struct {
     id: []const u8,
     name: []const u8,
     path: []const u8,
+    accountId: ?[]const u8 = null,
+    organization: ?[]const u8 = null,
+    repository: ?[]const u8 = null,
+    repositoryUrl: ?[]const u8 = null,
+    defaultBranch: []const u8,
     pinned: bool,
     rank: i64,
 };

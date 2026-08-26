@@ -58,6 +58,11 @@ export const SidebarProjectSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   path: Schema.String,
+  accountId: Schema.optional(Schema.String),
+  organization: Schema.optional(Schema.String),
+  repository: Schema.optional(Schema.String),
+  repositoryUrl: Schema.optional(Schema.String),
+  defaultBranch: Schema.String,
   pinned: Schema.Boolean,
   rank: Schema.Number,
 });
