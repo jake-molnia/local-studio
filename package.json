@@ -21,7 +21,7 @@
     "start": "npm --prefix frontend start",
     "check": "npm run check:automation && npm run check:contracts && npm run check:structure && npm run check:zig && npm run check:frontend",
     "check:automation": "node scripts/project.mjs audit-layout",
-    "check:contracts": "node scripts/project.mjs validate-contracts && node contracts/validate-http-routes.mjs && node contracts/generate-zig-http-routes.mjs --check",
+    "check:contracts": "node scripts/project.mjs validate-contracts && node contracts/validate-http-routes.mjs && node contracts/generate-zig-http-routes.mjs --check && node contracts/generate-workbench.mjs --check",
     "check:structure": "node scripts/project.mjs validate-structure",
     "check:zig": "npm run build:cursor-bridge && node controller/toolchain.mjs build",
     "check:frontend": "npm --prefix frontend run check:quality",
