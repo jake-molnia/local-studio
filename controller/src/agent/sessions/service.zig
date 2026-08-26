@@ -107,8 +107,8 @@ pub fn find(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id
     if (!validSessionId(id)) return error.InvalidSessionId;
     try database.lock(io);
     defer database.unlock(io);
-    if (try records.getByNative(allocator, database, id)) |session| return session;
-    return records.get(allocator, database, id);
+    if (try records.get(allocator, database, id)) |session| return session;
+    return records.getByNative(allocator, database, id);
 }
 
 pub fn archivePayload(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, id: []const u8, document: []const u8) ![]u8 {
@@ -180,7 +180,7 @@ fn writeHistorySummary(writer: *Io.Writer, session: *const records.Session, firs
     const archived = std.mem.eql(u8, session.status, "archived");
     const project_path = if (std.mem.eql(u8, session.harness, "chat")) "" else session.project_path orelse "";
     try writer.writeAll("{\"id\":");
-    try std.json.Stringify.value(if (std.mem.eql(u8, session.harness, "fx")) session.id else session.native_session_id orelse session.id, .{}, writer);
+    try std.json.Stringify.value(session.id, .{}, writer);
     try writer.writeAll(",\"filename\":\"\",\"cwd\":");
     try std.json.Stringify.value(project_path, .{}, writer);
     try writer.writeAll(",\"startedAt\":");

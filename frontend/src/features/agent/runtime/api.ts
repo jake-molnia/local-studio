@@ -19,6 +19,7 @@ import type {
   ComposerPromptTemplateRef,
   ComposerSkillRef,
 } from "@/features/agent/composer-context";
+import type { AgentHarness } from "@shared/agent/harness-id";
 
 import {
   decodeRuntimeEventPayload,
@@ -159,7 +160,7 @@ export type CanonicalSessionMeta = {
   title: string | null;
   modelId: string | null;
   modelRouteId: string | null;
-  harness: "chat" | "codex" | "fx" | "pi" | null;
+  harness: AgentHarness | null;
   startedAt: string | null;
   piSessionId: string | null;
   usage?: SessionUsageTotals | null;

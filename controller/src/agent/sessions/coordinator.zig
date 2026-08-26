@@ -132,13 +132,14 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
     const message = optionalString(object, "message") orelse return error.MessageRequired;
     const project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
-    const native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
+    const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
     var existing = try lockedGet(allocator, io, database, session_id);
     defer if (existing) |*session| session.deinit();
+    const native_session_id = requested_native_session_id orelse if (existing) |session| session.native_session_id else null;
     const model_route_id = optionalString(object, "modelRouteId") orelse if (existing) |session| session.model_route_id orelse model_id else model_id;
     const requested_harness = optionalString(object, "harness") orelse if (existing) |session| session.harness else "pi";
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
@@ -159,7 +160,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         detached_document = try serialize(allocator, parsed.value);
     }
     const dispatch_document = detached_document orelse routed_document;
-    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "codex")) return error.HarnessDriverUnavailable;
+    if (mode == .standalone and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "chat") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
     const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
@@ -170,7 +171,7 @@ pub fn turnPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, clie
         .id = session_id,
         .harness = requested_harness,
         .harness_version = if (mode == .standalone)
-            if (std.mem.eql(u8, requested_harness, "chat")) "0.0.0-local-studio" else if (std.mem.eql(u8, requested_harness, "fx")) harness.fxVersion() else if (std.mem.eql(u8, requested_harness, "codex")) harness.codexVersion() else harness.piVersion()
+            if (std.mem.eql(u8, requested_harness, "chat")) "0.0.0-local-studio" else if (std.mem.eql(u8, requested_harness, "fx")) harness.fxVersion() else if (std.mem.eql(u8, requested_harness, "opencode")) harness.opencodeVersion() else if (std.mem.eql(u8, requested_harness, "codex")) harness.codexVersion() else if (std.mem.eql(u8, requested_harness, "claude")) harness.claudeVersion() else harness.piVersion()
         else
             target.?.harness_version orelse if (existing) |session| session.harness_version else null,
         .capabilities_json = if (mode == .head and target.?.capabilities_json.len > 2) target.?.capabilities_json else if (existing) |session| session.capabilities_json else harnessCapabilities(requested_harness),
@@ -229,6 +230,12 @@ pub fn statusPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, cl
             return storedStatus(allocator, io, database, &session, after);
         };
     };
+    if (!runtimeStatusPresent(allocator, payload)) {
+        allocator.free(payload);
+        try lockedRuntime(io, database, session_id, "interrupted", null, null);
+        try replaceSessionStatus(&session, "interrupted");
+        return storedStatus(allocator, io, database, &session, after);
+    }
     errdefer allocator.free(payload);
     try ingestRuntimeDocument(allocator, io, database, session_id, payload);
     return payload;
@@ -612,6 +619,14 @@ fn serialize(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
     return output.toOwnedSlice();
 }
 
+fn runtimeStatusPresent(allocator: std.mem.Allocator, document: []const u8) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value != .object) return false;
+    const status = parsed.value.object.get("status") orelse return false;
+    return status == .object;
+}
+
 fn commandId(io: Io) [32]u8 {
     var random: [16]u8 = undefined;
     io.random(&random);
@@ -628,7 +643,9 @@ fn harnessCapabilities(harness: []const u8) []const u8 {
     if (std.mem.eql(u8, harness, "pi")) return "[\"persistent-session\",\"resume\",\"steer\",\"follow-up\",\"cancel\",\"images\",\"compact\",\"extension-ui\",\"extension-mcp\"]";
     if (std.mem.eql(u8, harness, "chat")) return "[\"persistent-session\",\"cancel\",\"mcp\",\"browser\",\"filesystem-free\"]";
     if (std.mem.eql(u8, harness, "fx")) return "[\"persistent-session\",\"cancel\",\"mcp\",\"filesystem-free\"]";
+    if (std.mem.eql(u8, harness, "opencode")) return "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]";
     if (std.mem.eql(u8, harness, "codex")) return "[\"persistent-session\",\"resume\",\"cancel\"]";
+    if (std.mem.eql(u8, harness, "claude")) return "[\"persistent-session\",\"resume\",\"cancel\",\"mcp\",\"tools\"]";
     return "[]";
 }
 
