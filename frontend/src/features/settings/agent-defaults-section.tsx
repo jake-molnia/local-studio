@@ -4,6 +4,10 @@ import { Effect, Schema } from "effect";
 import { useMemo, useState } from "react";
 import { ModelCatalogResponseSchema } from "@local-studio/contracts/model-catalog";
 import type { HarnessCatalogEntry } from "@shared/agent/harness-catalog";
+import {
+  MessagingDefaultSchema,
+  type MessagingDefault,
+} from "@shared/agent/messaging-default-contract";
 import { Select, SegmentedControl } from "@/ui";
 import { ArrowUp, ChevronDown } from "@/ui/icon-registry";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
@@ -107,6 +111,34 @@ function loadModels(): Effect.Effect<CatalogAgentModel[], unknown> {
   });
 }
 
+const decodeMessagingDefault = Schema.decodeUnknownSync(MessagingDefaultSchema);
+
+function loadMessagingDefault(): Effect.Effect<MessagingDefault, unknown> {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise(() =>
+      fetch("/api/agent/messaging/defaults", { cache: "no-store" }),
+    );
+    const payload = yield* Effect.tryPromise(() => response.json());
+    if (!response.ok) return yield* Effect.fail(new Error("Failed to load messaging defaults"));
+    return decodeMessagingDefault(payload);
+  });
+}
+
+function saveMessagingDefault(modelId: string, modelRouteId: string) {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise(() =>
+      fetch("/api/agent/messaging/defaults", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelId, modelRouteId }),
+      }),
+    );
+    const payload = yield* Effect.tryPromise(() => response.json());
+    if (!response.ok) return yield* Effect.fail(new Error("Failed to save messaging defaults"));
+    return decodeMessagingDefault(payload);
+  });
+}
+
 function availableHarnesses(harnesses: readonly HarnessCatalogEntry[]): HarnessCatalogEntry[] {
   return harnesses.filter(
     (harness) => harness.selectable !== false && harness.status === "available",
@@ -120,10 +152,19 @@ export function AgentDefaultsSection() {
     readAgentDefaults({ getItem: () => null }),
   );
   const [thinking, setThinking] = useState<AgentThinkingLevel>("high");
+  const [messagingDefault, setMessagingDefault] = useState<MessagingDefault>({
+    modelId: "",
+    modelRouteId: "",
+  });
   useMountSubscription(() => {
     void Effect.runPromise(loadModels().pipe(Effect.catch(() => Effect.succeed([])))).then(
       setModels,
     );
+    void Effect.runPromise(
+      loadMessagingDefault().pipe(
+        Effect.catch(() => Effect.succeed({ modelId: "", modelRouteId: "" })),
+      ),
+    ).then(setMessagingDefault);
     const sync = () => setDefaults(readAgentDefaults(window.localStorage));
     sync();
     setThinking(loadThinkingLevelDefault() ?? "high");
@@ -157,6 +198,11 @@ export function AgentDefaultsSection() {
       (choice) =>
         choice.modelId === defaults.titleModelId && choice.routeId === defaults.titleRouteId,
     ) ?? recommendedTitle;
+  const messagingChoice = choices.find(
+    (choice) =>
+      choice.modelId === messagingDefault.modelId &&
+      choice.routeId === messagingDefault.modelRouteId,
+  );
   const update = (patch: Partial<Omit<AgentDefaults, "version">>) =>
     setDefaults(writeAgentDefaults(window.localStorage, patch));
 
@@ -210,6 +256,24 @@ export function AgentDefaultsSection() {
                 providerId,
                 ...(matchingRoute ? { routeId: matchingRoute.routeId } : {}),
               });
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Chat bot model"
+        description="Default Chat model used by every Telegram and Discord account."
+        control={
+          <AgentModelPicker
+            modelsOnly
+            models={models}
+            selectedModel={messagingChoice?.modelId ?? ""}
+            selectedRoute={messagingChoice?.routeId}
+            loading={models.length === 0}
+            onSelect={(modelId, routeId) => {
+              void Effect.runPromise(saveMessagingDefault(modelId, routeId)).then(
+                setMessagingDefault,
+              );
             }}
           />
         }

@@ -26,21 +26,15 @@ export function MessagingAccountModal({
   onChanged: (accounts: readonly MessagingAccount[]) => void;
 }) {
   const [label, setLabel] = useState("");
-  const [botName, setBotName] = useState("");
   const [token, setToken] = useState("");
   const [applicationId, setApplicationId] = useState("");
   const [publicKey, setPublicKey] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [modelRouteId, setModelRouteId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const connected = accounts.filter((account) => account.provider === provider);
   const valid =
     token.trim().length > 0 &&
-    modelId.trim().length > 0 &&
-    (provider === "telegram"
-      ? botName.trim().length > 0
-      : applicationId.trim().length > 0 && publicKey.trim().length > 0);
+    (provider === "telegram" || (applicationId.trim().length > 0 && publicKey.trim().length > 0));
 
   const connect = async () => {
     setBusy(true);
@@ -53,11 +47,9 @@ export function MessagingAccountModal({
           provider,
           label: label.trim() || undefined,
           token,
-          modelId: modelId.trim(),
-          modelRouteId: modelRouteId.trim() || modelId.trim(),
-          ...(provider === "telegram"
-            ? { botName: botName.trim() }
-            : { applicationId: applicationId.trim(), publicKey: publicKey.trim() }),
+          ...(provider === "discord"
+            ? { applicationId: applicationId.trim(), publicKey: publicKey.trim() }
+            : {}),
         }),
       });
       setToken("");
@@ -97,10 +89,6 @@ export function MessagingAccountModal({
         closeIcon={<X className="h-4 w-4" />}
       />
       <UiModalBody className="space-y-4 pb-5">
-        <Alert variant="info">
-          Direct messages are denied until their pairing request is approved locally. Connected
-          users can access Chat only.
-        </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
         {connected.map((account) => (
           <div
@@ -131,21 +119,8 @@ export function MessagingAccountModal({
         <FormField label="Label">
           <Input value={label} onChange={(event) => setLabel(event.target.value)} />
         </FormField>
-        {provider === "telegram" ? (
-          <FormField label="Bot username" required>
-            <Input
-              value={botName}
-              onChange={(event) => setBotName(event.target.value)}
-              placeholder="local_studio_bot"
-            />
-          </FormField>
-        ) : (
+        {provider === "discord" ? (
           <>
-            <Alert variant="info">
-              Point the Discord application&apos;s Interaction Endpoint URL at this Head&apos;s
-              public URL plus the interaction path shown after connecting. Local Studio registers
-              the private /chat command automatically.
-            </Alert>
             <FormField label="Application ID" required>
               <Input
                 value={applicationId}
@@ -161,28 +136,12 @@ export function MessagingAccountModal({
               />
             </FormField>
           </>
-        )}
+        ) : null}
         <FormField label="Bot token" required>
           <Input
             value={token}
             onChange={(event) => setToken(event.target.value)}
             type="password"
-            className="font-mono"
-          />
-        </FormField>
-        <FormField label="Chat model ID" required>
-          <Input
-            value={modelId}
-            onChange={(event) => setModelId(event.target.value)}
-            placeholder="Model ID from the model picker"
-            className="font-mono"
-          />
-        </FormField>
-        <FormField label="Model route ID">
-          <Input
-            value={modelRouteId}
-            onChange={(event) => setModelRouteId(event.target.value)}
-            placeholder="Defaults to the model ID"
             className="font-mono"
           />
         </FormField>

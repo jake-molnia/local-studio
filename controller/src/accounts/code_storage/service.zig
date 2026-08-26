@@ -83,10 +83,8 @@ pub const State = struct {
         const token = stringField(parsed.value.object, "token") orelse return error.MessagingCredentialRequired;
         const application_id = if (std.mem.eql(u8, provider, "discord")) stringField(parsed.value.object, "applicationId") orelse return error.DiscordApplicationIdRequired else null;
         const public_key = if (std.mem.eql(u8, provider, "discord")) stringField(parsed.value.object, "publicKey") orelse return error.DiscordPublicKeyRequired else null;
-        const model_id = stringField(parsed.value.object, "modelId") orelse return error.ModelIdRequired;
-        const model_route_id = stringField(parsed.value.object, "modelRouteId") orelse model_id;
-        const subject = application_id orelse stringField(parsed.value.object, "botName") orelse "telegram-bot";
-        const label = stringField(parsed.value.object, "label") orelse subject;
+        const subject = application_id orelse "telegram-bot";
+        const label = stringField(parsed.value.object, "label") orelse if (std.mem.eql(u8, provider, "telegram")) "Telegram" else subject;
         if (application_id) |value| try registerDiscordCommand(state.allocator, client, value, token);
         var secret: Io.Writer.Allocating = .init(state.allocator);
         defer secret.deinit();
@@ -99,10 +97,6 @@ pub const State = struct {
         if (application_id) |value| try std.json.Stringify.value(value, .{}, &configuration.writer) else try configuration.writer.writeAll("null");
         try configuration.writer.writeAll(",\"publicKey\":");
         if (public_key) |value| try std.json.Stringify.value(value, .{}, &configuration.writer) else try configuration.writer.writeAll("null");
-        try configuration.writer.writeAll(",\"modelId\":");
-        try std.json.Stringify.value(model_id, .{}, &configuration.writer);
-        try configuration.writer.writeAll(",\"modelRouteId\":");
-        try std.json.Stringify.value(model_route_id, .{}, &configuration.writer);
         try configuration.writer.writeByte('}');
         const id_buffer = repository.accountId(provider, subject, secret.writer.buffered());
         const secret_ref = try std.fmt.allocPrint(state.allocator, "MESSAGING_CREDENTIAL_{s}", .{id_buffer});
@@ -160,30 +154,18 @@ pub const State = struct {
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidSandboxAccountPayload;
         const provider = stringField(parsed.value.object, "provider") orelse return error.SandboxProviderRequired;
-        const label = stringField(parsed.value.object, "label") orelse if (std.mem.eql(u8, provider, "modal")) "Modal" else "Daytona";
-        const endpoint = stringField(parsed.value.object, "endpoint") orelse if (std.mem.eql(u8, provider, "modal")) "modal.com" else "app.daytona.io";
-        const image = if (std.mem.eql(u8, provider, "daytona")) stringField(parsed.value.object, "image") orelse return error.DaytonaImageRequired else null;
+        if (!std.mem.eql(u8, provider, "daytona")) return error.SandboxProviderRequired;
+        const label = stringField(parsed.value.object, "label") orelse "Daytona";
+        const endpoint = stringField(parsed.value.object, "endpoint") orelse "https://app.daytona.io/api";
         var configuration: Io.Writer.Allocating = .init(state.allocator);
         defer configuration.deinit();
-        try configuration.writer.writeAll("{\"image\":");
-        if (image) |value| try std.json.Stringify.value(value, .{}, &configuration.writer) else try configuration.writer.writeAll("null");
-        try configuration.writer.writeByte('}');
+        try configuration.writer.writeAll("{}");
         var secret: Io.Writer.Allocating = .init(state.allocator);
         defer secret.deinit();
-        if (std.mem.eql(u8, provider, "modal")) {
-            const token_id = stringField(parsed.value.object, "tokenId") orelse return error.SandboxCredentialRequired;
-            const token_secret = stringField(parsed.value.object, "tokenSecret") orelse return error.SandboxCredentialRequired;
-            try secret.writer.writeAll("{\"tokenId\":");
-            try std.json.Stringify.value(token_id, .{}, &secret.writer);
-            try secret.writer.writeAll(",\"tokenSecret\":");
-            try std.json.Stringify.value(token_secret, .{}, &secret.writer);
-            try secret.writer.writeByte('}');
-        } else if (std.mem.eql(u8, provider, "daytona")) {
-            const api_key = stringField(parsed.value.object, "apiKey") orelse return error.SandboxCredentialRequired;
-            try secret.writer.writeAll("{\"apiKey\":");
-            try std.json.Stringify.value(api_key, .{}, &secret.writer);
-            try secret.writer.writeByte('}');
-        } else return error.SandboxProviderRequired;
+        const api_key = stringField(parsed.value.object, "apiKey") orelse return error.SandboxCredentialRequired;
+        try secret.writer.writeAll("{\"apiKey\":");
+        try std.json.Stringify.value(api_key, .{}, &secret.writer);
+        try secret.writer.writeByte('}');
         const id_buffer = repository.accountId(provider, endpoint, secret.writer.buffered());
         const secret_ref = try std.fmt.allocPrint(state.allocator, "SANDBOX_CREDENTIAL_{s}", .{id_buffer});
         defer state.allocator.free(secret_ref);
@@ -439,14 +421,6 @@ fn writeSandboxAccounts(allocator: std.mem.Allocator, store: *repository.Store) 
         try std.json.Stringify.value(account.connected_at, .{}, &output.writer);
         try output.writer.writeAll(",\"secretProvider\":");
         try std.json.Stringify.value(account.secret_provider, .{}, &output.writer);
-        if (std.mem.eql(u8, account.provider, "daytona")) {
-            var configuration = std.json.parseFromSlice(std.json.Value, allocator, account.configuration_json, .{}) catch null;
-            defer if (configuration) |*value| value.deinit();
-            try output.writer.writeAll(",\"image\":");
-            if (configuration) |value| {
-                if (value.value == .object and value.value.object.get("image") != null) try std.json.Stringify.value(value.value.object.get("image").?, .{}, &output.writer) else try output.writer.writeAll("null");
-            } else try output.writer.writeAll("null");
-        }
         try output.writer.writeByte('}');
     }
     try output.writer.writeAll("]}");
@@ -481,7 +455,7 @@ fn writeMessagingAccounts(allocator: std.mem.Allocator, store: *repository.Store
 }
 
 fn isSandboxProvider(provider: []const u8) bool {
-    return std.mem.eql(u8, provider, "modal") or std.mem.eql(u8, provider, "daytona");
+    return std.mem.eql(u8, provider, "daytona");
 }
 
 fn isMessagingProvider(provider: []const u8) bool {

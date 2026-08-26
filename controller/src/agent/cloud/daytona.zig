@@ -8,6 +8,7 @@ const Io = std.Io;
 const http = std.http;
 const max_response_bytes = 16 * 1024 * 1024;
 const controller_port = 8080;
+const worker_image = "ghcr.io/jake-molnia/local-studio-controller:v2.1.0";
 
 pub const Provisioned = struct {
     allocator: std.mem.Allocator,
@@ -100,18 +101,12 @@ pub const Manager = struct {
     }
 
     pub fn defaultImage(manager: *Manager, account_id: []const u8) !?[]u8 {
+        _ = account_id;
         if (manager.environment.get("LOCAL_STUDIO_DAYTONA_IMAGE")) |value| {
             const trimmed = std.mem.trim(u8, value, " \t\r\n");
             if (validImage(trimmed)) return @as(?[]u8, try manager.allocator.dupe(u8, trimmed));
         }
-        var accounts = try account_repository.load(manager.allocator, manager.io, manager.data_dir);
-        defer accounts.deinit();
-        const account = accounts.find(account_id) orelse return error.SandboxAccountNotFound;
-        var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, account.configuration_json, .{}) catch return null;
-        defer parsed.deinit();
-        if (parsed.value != .object) return null;
-        const image = stringField(parsed.value.object, "image") orelse return null;
-        return if (validImage(image)) @as(?[]u8, try manager.allocator.dupe(u8, image)) else null;
+        return @as(?[]u8, try manager.allocator.dupe(u8, worker_image));
     }
 
     pub fn runReconciler(manager: *Manager, client: *http.Client, database: *sqlite.Database) Io.Cancelable!void {

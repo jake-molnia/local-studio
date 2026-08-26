@@ -78,7 +78,17 @@ const SETTINGS_SEARCH_ENTRIES: Record<string, readonly SettingsSearchEntry[]> = 
     },
     {
       label: "New threads",
-      terms: ["default model", "provider", "harness", "effort", "title", "order"],
+      terms: [
+        "default model",
+        "chat bot model",
+        "telegram",
+        "discord",
+        "provider",
+        "harness",
+        "effort",
+        "title",
+        "order",
+      ],
     },
     { label: "Application", terms: ["release", "updates", "desktop"] },
     { label: "Update channel", terms: ["stable", "nightly"] },

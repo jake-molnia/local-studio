@@ -94,10 +94,6 @@ export function CodeStorageAccountModal({
         closeIcon={<X className="h-4 w-4" />}
       />
       <UiModalBody className="space-y-4 pb-5">
-        <Alert variant="info">
-          The private key is stored through the credential store selected in Settings. Agents
-          receive short-lived, repository-scoped credentials and never receive the private key.
-        </Alert>
         {error ? <Alert variant="error">{error}</Alert> : null}
         {accounts.length ? (
           <div className="rounded-md border border-(--ui-separator)">

@@ -138,17 +138,17 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
       tone: repositoryCount ? "ok" : "dim",
       action: repositoryCount ? "Manage" : "Connect",
     };
-    const sandboxRows = (["modal", "daytona"] as const).map((id): ProviderRow => {
+    const sandboxRows = (["daytona"] as const).map((id): ProviderRow => {
       const accounts = sandboxes.filter((account) => account.provider === id);
-      const label = id === "modal" ? "Modal" : "Daytona";
+      const label = "Daytona";
       return {
         id,
         label,
-        company: id === "modal" ? "Modal Labs" : "Daytona Platforms",
+        company: "Daytona Platforms",
         summary: accounts.length
           ? accounts.map((account) => account.label).join(", ")
           : "Sandbox provider",
-        access: id === "daytona" ? "Isolated project workers" : "Login stored",
+        access: "Isolated project workers",
         status: accounts.length ? `${accounts.length} connected` : "Not connected",
         tone: accounts.length ? "ok" : "dim",
         action: accounts.length ? "Manage" : "Connect",
@@ -263,9 +263,8 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
           onChanged={setRepositories}
         />
       ) : null}
-      {openProvider === "modal" || openProvider === "daytona" ? (
+      {openProvider === "daytona" ? (
         <SandboxAccountModal
-          initialProvider={openProvider}
           accounts={sandboxes}
           onClose={() => setOpenProvider(null)}
           onChanged={setSandboxes}
