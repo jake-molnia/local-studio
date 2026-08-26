@@ -10,6 +10,8 @@ pub const Message = struct {
     account_id: []u8,
     external_user_id: []u8,
     conversation_id: []u8,
+    external_message_id: []u8,
+    session_id: []u8,
     prompt: []u8,
 
     pub fn deinit(message: *Message) void {
@@ -18,6 +20,8 @@ pub const Message = struct {
         message.allocator.free(message.account_id);
         message.allocator.free(message.external_user_id);
         message.allocator.free(message.conversation_id);
+        message.allocator.free(message.external_message_id);
+        message.allocator.free(message.session_id);
         message.allocator.free(message.prompt);
         message.* = undefined;
     }
@@ -82,7 +86,165 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\  route_id TEXT NOT NULL,
         \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         \\);
+        \\CREATE TABLE IF NOT EXISTS agent_messaging_conversations (
+        \\  provider TEXT NOT NULL CHECK(provider IN ('telegram', 'discord')),
+        \\  account_id TEXT NOT NULL,
+        \\  conversation_id TEXT NOT NULL,
+        \\  external_user_id TEXT NOT NULL,
+        \\  active_session_id TEXT NOT NULL,
+        \\  model_id TEXT,
+        \\  route_id TEXT,
+        \\  effort TEXT,
+        \\  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \\  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \\  PRIMARY KEY(provider, account_id, conversation_id)
+        \\);
+        \\CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messaging_conversations_session ON agent_messaging_conversations(active_session_id);
     );
+    try ensureColumn(database, "agent_messaging_inbox", "session_id", "ALTER TABLE agent_messaging_inbox ADD COLUMN session_id TEXT");
+    try ensureColumn(database, "agent_messaging_inbox", "external_message_id", "ALTER TABLE agent_messaging_inbox ADD COLUMN external_message_id TEXT NOT NULL DEFAULT ''");
+    try database.executeScript(
+        \\INSERT OR IGNORE INTO agent_messaging_conversations (provider, account_id, conversation_id, external_user_id, active_session_id)
+        \\SELECT inbox.provider, inbox.account_id, inbox.conversation_id, inbox.external_user_id,
+        \\       'message:' || inbox.provider || ':' || inbox.account_id || ':' || inbox.external_user_id
+        \\FROM agent_messaging_inbox AS inbox
+        \\WHERE EXISTS (
+        \\  SELECT 1 FROM agent_sessions
+        \\  WHERE session_id = 'message:' || inbox.provider || ':' || inbox.account_id || ':' || inbox.external_user_id
+        \\)
+        \\GROUP BY inbox.provider, inbox.account_id, inbox.conversation_id, inbox.external_user_id;
+        \\UPDATE agent_messaging_inbox
+        \\SET session_id = (
+        \\  SELECT active_session_id FROM agent_messaging_conversations AS conversation
+        \\  WHERE conversation.provider = agent_messaging_inbox.provider
+        \\    AND conversation.account_id = agent_messaging_inbox.account_id
+        \\    AND conversation.conversation_id = agent_messaging_inbox.conversation_id
+        \\)
+        \\WHERE session_id IS NULL;
+    );
+    try database.execute("UPDATE agent_sessions SET project_id = 'chats' WHERE harness = 'chat' AND (project_id IS NULL OR project_id = '')");
+    try database.execute("UPDATE agent_execution_sessions SET project_id = 'chats' WHERE kind = 'chat' AND (project_id IS NULL OR project_id = '')");
+}
+
+pub const Conversation = struct {
+    allocator: std.mem.Allocator,
+    session_id: []u8,
+    model_id: ?[]u8,
+    route_id: ?[]u8,
+    effort: ?[]u8,
+
+    pub fn deinit(state: *Conversation) void {
+        state.allocator.free(state.session_id);
+        if (state.model_id) |value| state.allocator.free(value);
+        if (state.route_id) |value| state.allocator.free(value);
+        if (state.effort) |value| state.allocator.free(value);
+        state.* = undefined;
+    }
+};
+
+pub fn ensureConversation(allocator: std.mem.Allocator, database: *sqlite.Database, io: Io, provider: []const u8, account_id: []const u8, conversation_id: []const u8, external_user_id: []const u8) !Conversation {
+    if (try conversation(allocator, database, provider, account_id, conversation_id)) |value| return value;
+    const random = randomId(io);
+    var session_buffer: [64]u8 = undefined;
+    const session_id = try std.fmt.bufPrint(&session_buffer, "message:{s}:{s}", .{ provider, random[0..] });
+    var statement = try database.prepare("INSERT OR IGNORE INTO agent_messaging_conversations (provider, account_id, conversation_id, external_user_id, active_session_id) VALUES (?, ?, ?, ?, ?)");
+    defer statement.deinit();
+    try statement.bindText(1, provider);
+    try statement.bindText(2, account_id);
+    try statement.bindText(3, conversation_id);
+    try statement.bindText(4, external_user_id);
+    try statement.bindText(5, session_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+    return (try conversation(allocator, database, provider, account_id, conversation_id)) orelse error.InvalidMessagingConversation;
+}
+
+pub fn conversation(allocator: std.mem.Allocator, database: *sqlite.Database, provider: []const u8, account_id: []const u8, conversation_id: []const u8) !?Conversation {
+    var statement = try database.prepare("SELECT active_session_id, model_id, route_id, effort FROM agent_messaging_conversations WHERE provider = ? AND account_id = ? AND conversation_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, provider);
+    try statement.bindText(2, account_id);
+    try statement.bindText(3, conversation_id);
+    if (try statement.step() != .row) return null;
+    return .{
+        .allocator = allocator,
+        .session_id = try allocator.dupe(u8, statement.columnText(0) orelse return error.InvalidMessagingConversation),
+        .model_id = try optionalColumn(allocator, &statement, 1),
+        .route_id = try optionalColumn(allocator, &statement, 2),
+        .effort = try optionalColumn(allocator, &statement, 3),
+    };
+}
+
+pub fn resetConversation(allocator: std.mem.Allocator, database: *sqlite.Database, io: Io, provider: []const u8, account_id: []const u8, conversation_id: []const u8, external_user_id: []const u8) ![]u8 {
+    var current = try ensureConversation(allocator, database, io, provider, account_id, conversation_id, external_user_id);
+    defer current.deinit();
+    var transaction = try database.begin();
+    defer transaction.deinit();
+    var archive_session = try database.prepare("UPDATE agent_sessions SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE session_id = ?");
+    defer archive_session.deinit();
+    try archive_session.bindText(1, current.session_id);
+    if (try archive_session.step() != .done) return error.DatabaseUnexpectedRow;
+    var archive_task = try database.prepare("UPDATE workbench_tasks SET connection_state = 'archived', revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?");
+    defer archive_task.deinit();
+    try archive_task.bindText(1, current.session_id);
+    if (try archive_task.step() != .done) return error.DatabaseUnexpectedRow;
+    const random = randomId(io);
+    var session_buffer: [64]u8 = undefined;
+    const next_session_id = try std.fmt.bufPrint(&session_buffer, "message:{s}:{s}", .{ provider, random[0..] });
+    var update = try database.prepare("UPDATE agent_messaging_conversations SET active_session_id = ?, external_user_id = ?, model_id = NULL, route_id = NULL, effort = NULL, updated_at = CURRENT_TIMESTAMP WHERE provider = ? AND account_id = ? AND conversation_id = ?");
+    defer update.deinit();
+    try update.bindText(1, next_session_id);
+    try update.bindText(2, external_user_id);
+    try update.bindText(3, provider);
+    try update.bindText(4, account_id);
+    try update.bindText(5, conversation_id);
+    if (try update.step() != .done or database.changes() != 1) return error.InvalidMessagingConversation;
+    try transaction.commit();
+    return allocator.dupe(u8, next_session_id);
+}
+
+pub fn setConversationSelection(database: *sqlite.Database, provider: []const u8, account_id: []const u8, conversation_id: []const u8, model_id: ?[]const u8, route_id: ?[]const u8, effort: ?[]const u8) !void {
+    var statement = try database.prepare("UPDATE agent_messaging_conversations SET model_id = COALESCE(?, model_id), route_id = COALESCE(?, route_id), effort = COALESCE(?, effort), updated_at = CURRENT_TIMESTAMP WHERE provider = ? AND account_id = ? AND conversation_id = ?");
+    defer statement.deinit();
+    if (model_id) |value| try statement.bindText(1, value) else try statement.bindNull(1);
+    if (route_id) |value| try statement.bindText(2, value) else try statement.bindNull(2);
+    if (effort) |value| try statement.bindText(3, value) else try statement.bindNull(3);
+    try statement.bindText(4, provider);
+    try statement.bindText(5, account_id);
+    try statement.bindText(6, conversation_id);
+    if (try statement.step() != .done or database.changes() != 1) return error.InvalidMessagingConversation;
+}
+
+pub fn latestExternalMessageId(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?[]u8 {
+    var statement = try database.prepare("SELECT external_message_id FROM agent_messaging_inbox WHERE session_id = ? ORDER BY created_at DESC LIMIT 1");
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    if (try statement.step() != .row) return null;
+    const value = statement.columnText(0) orelse return null;
+    return try allocator.dupe(u8, value);
+}
+
+pub const TelegramTarget = struct {
+    allocator: std.mem.Allocator,
+    account_id: []u8,
+    conversation_id: []u8,
+
+    pub fn deinit(target: *TelegramTarget) void {
+        target.allocator.free(target.account_id);
+        target.allocator.free(target.conversation_id);
+        target.* = undefined;
+    }
+};
+
+pub fn telegramTarget(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?TelegramTarget {
+    var statement = try database.prepare("SELECT account_id, conversation_id FROM agent_messaging_conversations WHERE provider = 'telegram' AND active_session_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    if (try statement.step() != .row) return null;
+    return .{
+        .allocator = allocator,
+        .account_id = try allocator.dupe(u8, statement.columnText(0) orelse return error.InvalidMessagingConversation),
+        .conversation_id = try allocator.dupe(u8, statement.columnText(1) orelse return error.InvalidMessagingConversation),
+    };
 }
 
 pub const Defaults = struct {
@@ -233,9 +395,9 @@ pub fn revoke(database: *sqlite.Database, provider: []const u8, account_id: []co
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
-pub fn enqueue(database: *sqlite.Database, io: Io, provider: []const u8, account_id: []const u8, external_user_id: []const u8, conversation_id: []const u8, external_message_id: []const u8, prompt: []const u8) !void {
+pub fn enqueue(database: *sqlite.Database, io: Io, provider: []const u8, account_id: []const u8, external_user_id: []const u8, conversation_id: []const u8, external_message_id: []const u8, session_id: []const u8, prompt: []const u8) !void {
     const message_id = randomId(io);
-    var statement = try database.prepare("INSERT OR IGNORE INTO agent_messaging_inbox (message_id, provider, account_id, external_user_id, conversation_id, external_message_id, prompt, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')");
+    var statement = try database.prepare("INSERT OR IGNORE INTO agent_messaging_inbox (message_id, provider, account_id, external_user_id, conversation_id, external_message_id, session_id, prompt, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued')");
     defer statement.deinit();
     try statement.bindText(1, message_id[0..]);
     try statement.bindText(2, provider);
@@ -243,7 +405,8 @@ pub fn enqueue(database: *sqlite.Database, io: Io, provider: []const u8, account
     try statement.bindText(4, external_user_id);
     try statement.bindText(5, conversation_id);
     try statement.bindText(6, external_message_id);
-    try statement.bindText(7, prompt);
+    try statement.bindText(7, session_id);
+    try statement.bindText(8, prompt);
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
@@ -260,7 +423,7 @@ pub fn rateAllowed(database: *sqlite.Database, provider: []const u8, account_id:
 pub fn takeNext(allocator: std.mem.Allocator, database: *sqlite.Database) !?Message {
     var transaction = try database.begin();
     defer transaction.deinit();
-    var statement = try database.prepare("SELECT message_id, provider, account_id, external_user_id, conversation_id, prompt FROM agent_messaging_inbox WHERE status = 'queued' ORDER BY created_at LIMIT 1");
+    var statement = try database.prepare("SELECT message_id, provider, account_id, external_user_id, conversation_id, external_message_id, session_id, prompt FROM agent_messaging_inbox WHERE status = 'queued' ORDER BY created_at LIMIT 1");
     defer statement.deinit();
     if (try statement.step() != .row) return null;
     var message = Message{
@@ -270,6 +433,8 @@ pub fn takeNext(allocator: std.mem.Allocator, database: *sqlite.Database) !?Mess
         .account_id = undefined,
         .external_user_id = undefined,
         .conversation_id = undefined,
+        .external_message_id = undefined,
+        .session_id = undefined,
         .prompt = undefined,
     };
     errdefer allocator.free(message.id);
@@ -281,7 +446,11 @@ pub fn takeNext(allocator: std.mem.Allocator, database: *sqlite.Database) !?Mess
     errdefer allocator.free(message.external_user_id);
     message.conversation_id = try allocator.dupe(u8, statement.columnText(4) orelse return error.InvalidMessagingRecord);
     errdefer allocator.free(message.conversation_id);
-    message.prompt = try allocator.dupe(u8, statement.columnText(5) orelse return error.InvalidMessagingRecord);
+    message.external_message_id = try allocator.dupe(u8, statement.columnText(5) orelse return error.InvalidMessagingRecord);
+    errdefer allocator.free(message.external_message_id);
+    message.session_id = try allocator.dupe(u8, statement.columnText(6) orelse return error.InvalidMessagingRecord);
+    errdefer allocator.free(message.session_id);
+    message.prompt = try allocator.dupe(u8, statement.columnText(7) orelse return error.InvalidMessagingRecord);
     errdefer allocator.free(message.prompt);
     var claim = try database.prepare("UPDATE agent_messaging_inbox SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE message_id = ? AND status = 'queued'");
     defer claim.deinit();
@@ -397,4 +566,18 @@ fn jsonColumn(writer: *Io.Writer, statement: *sqlite.Statement, column: u31) !vo
 
 fn nullableJsonColumn(writer: *Io.Writer, statement: *sqlite.Statement, column: u31) !void {
     if (statement.columnText(column)) |value| try std.json.Stringify.value(value, .{}, writer) else try writer.writeAll("null");
+}
+
+fn optionalColumn(allocator: std.mem.Allocator, statement: *sqlite.Statement, column: u31) !?[]u8 {
+    const value = statement.columnText(column) orelse return null;
+    return try allocator.dupe(u8, value);
+}
+
+fn ensureColumn(database: *sqlite.Database, table: []const u8, name: []const u8, migration: []const u8) !void {
+    var buffer: [128]u8 = undefined;
+    const query = try std.fmt.bufPrint(&buffer, "PRAGMA table_info({s})", .{table});
+    var statement = try database.prepare(query);
+    defer statement.deinit();
+    while (try statement.step() == .row) if (std.mem.eql(u8, statement.columnText(1) orelse "", name)) return;
+    try database.execute(migration);
 }

@@ -101,10 +101,18 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\SELECT session_id, project_id, session_id, node_id, CASE WHEN status = 'archived' THEN 'archived' ELSE 'connected' END, rowid * 1024
         \\FROM agent_sessions
         \\WHERE project_id IS NULL OR project_id != '__local_studio_thread_title__';
+        \\UPDATE workbench_tasks
+        \\SET project_id = 'chats'
+        \\WHERE task_id IN (SELECT session_id FROM agent_sessions WHERE harness = 'chat')
+        \\  AND (project_id IS NULL OR project_id = '');
         \\INSERT OR IGNORE INTO workbench_tabs (tab_id, task_id, resource_kind, title, resource_id, rank, closable)
         \\SELECT 'chat:' || session_id, session_id, 'chat', 'Chat', session_id, 0, 0
         \\FROM agent_sessions
         \\WHERE project_id IS NULL OR project_id != '__local_studio_thread_title__';
+        \\UPDATE workbench_tasks
+        \\SET project_id = 'chats'
+        \\WHERE task_id IN (SELECT session_id FROM agent_sessions WHERE harness = 'chat')
+        \\  AND (project_id IS NULL OR project_id = '');
         \\UPDATE workbench_tasks
         \\SET active_tab_id = 'chat:' || task_id
         \\WHERE active_tab_id IS NULL

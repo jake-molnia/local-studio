@@ -13,6 +13,7 @@ const harness_session_id = @import("../harness/session_id.zig");
 const node_transport = @import("../../topology/node_transport.zig");
 const agent_goal_driver = @import("../goals/driver.zig");
 const session_change = @import("change.zig");
+const workbench_change = @import("../../workbench/change.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -141,7 +142,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const model_id = optionalString(object, "modelId") orelse return error.ModelIdRequired;
     const message = optionalString(object, "message") orelse return error.MessageRequired;
     const display_message = optionalString(object, "displayMessage") orelse message;
-    const project_id = optionalString(object, "projectId");
+    const requested_project_id = optionalString(object, "projectId");
     const project_path = optionalString(object, "cwd");
     const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
@@ -160,6 +161,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     else
         project_path == null and (explicit_harness == null or std.mem.eql(u8, explicit_harness.?, "chat"));
     if (kind_value != null and !is_chat and !std.mem.eql(u8, kind_value.?, "project")) return error.InvalidSessionKind;
+    const project_id = if (is_chat) "chats" else requested_project_id;
     if (is_chat and project_path != null) return error.InvalidChatSession;
     if (!is_chat and project_path == null) return error.ProjectWorkspaceRequired;
     if (!is_chat and explicit_harness != null and std.mem.eql(u8, explicit_harness.?, "chat")) return error.InvalidProjectHarness;
@@ -608,6 +610,7 @@ fn lockedSave(_: std.mem.Allocator, io: Io, database: *sqlite.Database, input: r
     defer database.unlock(io);
     try records.save(database, input);
     session_change.notify();
+    workbench_change.notify();
 }
 
 fn lockedEnqueue(io: Io, database: *sqlite.Database, command_id: []const u8, session_id: []const u8, kind: []const u8, document: []const u8) !void {

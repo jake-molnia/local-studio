@@ -1114,7 +1114,28 @@ pub const Manager = struct {
         if (manager.sessions.get(session_id)) |session| {
             if (!session.running) return error.HarnessExited;
             if (session.harness != .chat) return error.SessionHarnessMismatch;
-            if (!std.mem.eql(u8, session.model_id, model_id)) return error.ModelChangeRequiresNewSession;
+            if (!std.mem.eql(u8, session.model_id, model_id)) {
+                if (session.active) return error.SessionAlreadyActive;
+                var model_route = try manager.model_route.prepare(model_id);
+                defer model_route.deinit();
+                const api_key = model_route.environment.get("LOCAL_STUDIO_CHAT_API_KEY") orelse return error.ChatCredentialRequired;
+                const gateway_url = model_route.environment.get("LOCAL_STUDIO_CHAT_GATEWAY_URL") orelse return error.ChatGatewayRequired;
+                const replacement = try chat_runtime.Runtime.init(manager.allocator, manager.io, .{
+                    .api_key = api_key,
+                    .model = model_id,
+                    .gateway_url = gateway_url,
+                    .home = session.session_dir,
+                    .session_id = session.native_id,
+                    .bridge_url = manager.controller_origin,
+                    .bridge_key = manager.controller_api_key,
+                    .bridge_model = model_id,
+                    .bridge_session = session_id,
+                });
+                session.chat.?.deinit();
+                session.chat = replacement;
+                manager.allocator.free(session.model_id);
+                session.model_id = try manager.allocator.dupe(u8, model_id);
+            }
             return session;
         }
         const session_dir = try std.fs.path.join(manager.allocator, &.{ manager.data_dir, "harness", "chat" });
