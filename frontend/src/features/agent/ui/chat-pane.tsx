@@ -18,7 +18,7 @@ import { builtinCommandProvider } from "@/features/agent/composer/builtin-comman
 import { AutomationDrawer } from "@/features/agent/ui/automation-drawer";
 import { ComposerProjectDrawer } from "@/features/agent/ui/composer-project-drawer";
 import { TaskSetupBar } from "@/features/agent/ui/task-setup-bar";
-import { SubagentChips } from "@/features/agent/ui/subagent-chips";
+import { useSubagentRuns, type SubagentRun } from "@/features/agent/ui/subagent-activity";
 import { GitDiffDrawer } from "@/features/agent/ui/git-diff-drawer";
 import {
   promptTemplateCommandProvider,
@@ -140,6 +140,7 @@ function ChatTranscript({
   running,
   cwd,
   loadEarlierHistory,
+  subagents,
 }: {
   composerOnly: boolean;
   terminalView: boolean;
@@ -150,6 +151,7 @@ function ChatTranscript({
   running: boolean;
   cwd: string;
   loadEarlierHistory: () => Promise<void>;
+  subagents: readonly SubagentRun[];
 }) {
   const viewKey = activeTab?.piSessionId ?? activeTab?.id ?? null;
   const viewAlias = activeTab?.piSessionId ? activeTab.id : null;
@@ -170,6 +172,7 @@ function ChatTranscript({
           viewAlias={viewAlias}
           hasEarlier={activeTab?.historyCursor != null}
           onLoadEarlier={loadEarlierHistory}
+          subagents={subagents}
         />
       )}
     </div>
@@ -212,6 +215,7 @@ type Props = {
   showHeader?: boolean;
   composerOnly?: boolean;
   readOnly?: boolean;
+  readOnlyVariant?: "telegram" | "subagent";
 };
 
 export type ComposerModelSelectorProps = {
@@ -265,6 +269,7 @@ export function ChatPane({
   showHeader = true,
   composerOnly = false,
   readOnly = false,
+  readOnlyVariant = "telegram",
 }: Props) {
   const router = useRouter();
   const routeProjectId = useSearchParams().get("project");
@@ -408,6 +413,10 @@ export function ChatPane({
   const activePiSessionId = activeTab?.piSessionId?.startsWith("tab-")
     ? null
     : (activeTab?.piSessionId ?? null);
+  const subagents = useSubagentRuns(readOnlyVariant === "subagent" ? null : activePiSessionId);
+  const taskTokenTotal =
+    (activeTab?.usageTotals?.total ?? activeTab?.tokenStats?.current ?? 0) +
+    subagents.reduce((total, run) => total + (run.usageTotal ?? 0), 0);
   const { goalRevision, goalAction, flushPendingGoal } = useGoalCommand(
     activePiSessionId,
     activeTabId,
@@ -691,6 +700,7 @@ export function ChatPane({
         running={Boolean(running)}
         cwd={workspaceCwd}
         loadEarlierHistory={loadEarlierHistory}
+        subagents={subagents}
       />
       <div className={terminalView && !chatWorkspace ? "hidden" : "contents"}>
         {diffDrawerOpen && !chatWorkspace ? (
@@ -710,11 +720,12 @@ export function ChatPane({
             onClose={() => setAutomationDrawerOpen(false)}
           />
         ) : null}
-        {activePiSessionId ? <SubagentChips piSessionId={activePiSessionId} /> : null}
         {readOnly ? (
-          <div className="flex min-h-12 items-center justify-center border-t border-(--border)/45 px-4 text-[length:var(--fs-sm)] text-(--dim)">
-            Telegram conversation · Continue in Telegram
-          </div>
+          readOnlyVariant === "telegram" ? (
+            <div className="flex min-h-12 items-center justify-center border-t border-(--border)/45 px-4 text-[length:var(--fs-sm)] text-(--dim)">
+              Telegram conversation · Continue in Telegram
+            </div>
+          ) : null
         ) : (
           <AgentComposerFrame
             attachments={attachments}
@@ -722,6 +733,7 @@ export function ChatPane({
             composerDragActive={composerDragActive}
             contextWindow={effectiveContextWindow}
             currentContextTokens={currentContextTokens}
+            taskTokenTotal={taskTokenTotal}
             cwd={workspaceCwd}
             projectName={selectedProject?.name ?? projectName}
             fileInputRef={fileInputRef}

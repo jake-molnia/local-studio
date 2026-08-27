@@ -8,6 +8,7 @@ import type { AgentHarness, Session, UpdateSession } from "@/features/agent/runt
 import type { AgentModel } from "@/features/agent/workspace/types";
 import { AgentModelPicker } from "@/features/agent/ui/agent-model-picker";
 import { ChatPane } from "@/features/agent/ui/chat-pane";
+import { piSessionIdFromSubagentResource } from "@/features/agent/ui/subagent-activity";
 
 const LazyAgentBrowser = lazy(() =>
   import("@/features/agent/ui/agent-browser").then(({ AgentBrowser }) => ({
@@ -101,6 +102,7 @@ function SideChatTab({
   sideChatSession,
   tools,
 }: ComputerTabPanelProps) {
+  const subagent = Boolean(piSessionIdFromSubagentResource(sideChatSession.id));
   const modelId = sideChatSession.modelId ?? focusedSession?.modelId ?? activeModelId;
   const selectedModel = models.find((model) => model.id === modelId) ?? activeModel;
   const modelRouteId =
@@ -171,6 +173,8 @@ function SideChatTab({
         rightPanelOpen
         onToggleRightPanel={() => tools.setComputerOpen(false)}
         showHeader={false}
+        readOnly={subagent}
+        readOnlyVariant={subagent ? "subagent" : "telegram"}
       />
     </section>
   );
