@@ -63,6 +63,8 @@ const entries = [_]Entry{
     remote("railway", "Railway", "Railway", "Projects, services, deployments, variables, logs, and infrastructure", "https://mcp.railway.com", "auto", true),
     remote("supabase", "Supabase", "Supabase", "Projects, databases, SQL, migrations, logs, and edge functions", "https://mcp.supabase.com/mcp", "auto", true),
     remote("stripe", "Stripe", "Stripe", "Customers, payments, subscriptions, products, invoices, and balance data", "https://mcp.stripe.com", "auto", true),
+    remote("x-api", "X API", "X", "Search posts and users, inspect trends and news, and use app-authorized X API tools", "https://api.x.com/mcp", "modern", true),
+    publicRemote("x-docs", "X Developer Documentation", "X", "Search and read current X API documentation, references, examples, and guides", "https://docs.x.com/mcp", "modern"),
     publicRemote("mcp-docs", "MCP Documentation", "Model Context Protocol", "Search the official Model Context Protocol specification and documentation", "https://modelcontextprotocol.io/mcp", "modern"),
     publicRemote("code-storage-docs", "Code.Storage Documentation", "The Pierre Computer Company", "Search and read Code.Storage documentation and submit documentation feedback", "https://code.storage/docs/mcp", "auto"),
     .{
