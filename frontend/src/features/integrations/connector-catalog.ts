@@ -1,4 +1,4 @@
-import type { ConnectorView, McpCatalogEntry } from "@shared/agent/connector-contract";
+import type { McpCatalogEntry } from "@shared/agent/connector-contract";
 import {
   oauthConnectorProvider,
   type OAuthConnectorAuthDefinition,
@@ -46,27 +46,4 @@ export function renderCatalogCommand(entry: CatalogEntry): string {
     ]);
   }
   return renderCommandLine(entry.command ?? "", entry.args ?? []);
-}
-
-export function renderConnectorCommand(connector: ConnectorView): string {
-  if (connector.transport === "http") return connector.url ?? "HTTP endpoint not set";
-  if (connector.runtime?.kind === "node") {
-    return renderCommandLine("npx", [
-      "--yes",
-      "--package",
-      `${connector.runtime.package}@${connector.runtime.version}`,
-      connector.runtime.executable,
-      ...(connector.args ?? []),
-    ]);
-  }
-  if (connector.runtime?.kind === "python") {
-    return renderCommandLine("uvx", [
-      ...(connector.runtime.with ?? []).flatMap((requirement) => ["--with", requirement]),
-      "--from",
-      `${connector.runtime.package}==${connector.runtime.version}`,
-      connector.runtime.executable,
-      ...(connector.args ?? []),
-    ]);
-  }
-  return renderCommandLine(connector.command ?? "", connector.args ?? []);
 }
