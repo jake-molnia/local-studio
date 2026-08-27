@@ -426,10 +426,19 @@ export function ModelProvidersSection({ searchQuery }: { searchQuery?: string } 
       head
         ? requestJson("/api/proxy/studio/model-providers", decodeControllerProviders, {
             headers: headProxyHeaders(head),
-          })
-        : Promise.resolve({ providers: [] }),
+          }).catch(() => null)
+        : Promise.resolve(null),
     ])
       .then(([agentProviders, controllerProviders]) => {
+        if (!controllerProviders) {
+          setProviders(agentProviders.providers);
+          setSelectedProvider((current) =>
+            current
+              ? (agentProviders.providers.find((provider) => provider.id === current.id) ?? current)
+              : null,
+          );
+          return;
+        }
         const controllerIds = new Set(controllerProviders.providers.map((provider) => provider.id));
         const list = [
           ...controllerProviders.providers,
