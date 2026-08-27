@@ -113,12 +113,6 @@ pub const State = struct {
         return output.toOwnedSlice();
     }
 
-    pub fn cancelPayload(state: *State, document: []const u8) ![]u8 {
-        const connector_id = try connectorFromDocument(state.allocator, document);
-        defer state.allocator.free(connector_id);
-        return state.cancelConnectorPayload(connector_id);
-    }
-
     pub fn cancelConnectorPayload(state: *State, connector_id: []const u8) ![]u8 {
         if (!std.mem.eql(u8, connector_id, "github")) return state.remote.cancelProviderPayload(connector_id);
         try state.mutex.lock(state.io);
@@ -339,10 +333,6 @@ pub const State = struct {
         state.last_error = try state.allocator.dupe(u8, message);
     }
 };
-
-pub fn connectorIdFromPayload(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
-    return connectorFromDocument(allocator, document);
-}
 
 pub fn forward(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, path: []const u8, method: http.Method, document: ?[]const u8) ![]u8 {
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", null)) orelse return error.ConnectorNodeRequired;

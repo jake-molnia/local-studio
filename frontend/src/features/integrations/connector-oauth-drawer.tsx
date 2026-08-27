@@ -289,10 +289,11 @@ async function connectAction(context: ActionContext): Promise<void> {
 async function cancelConnectAction(context: ActionContext): Promise<void> {
   context.setBusy(true);
   try {
-    await requestAgentJson("/api/agent/oauth/authorize", () => true, {
-      ...jsonBody({ connectorId: context.entryId }),
-      method: "DELETE",
-    });
+    await requestAgentJson(
+      `/api/agent/oauth/authorize?connectorId=${encodeURIComponent(context.entryId)}`,
+      () => true,
+      { method: "DELETE" },
+    );
   } catch {
     // Cancelling a flow that already ended is a success, not a failure.
   } finally {
@@ -373,7 +374,8 @@ export function ConnectorOAuthDrawer({
 
   const connected = Boolean(status?.connected);
   const needsClient = Boolean(status) && !status?.configured;
-  const showClientSetup = Boolean(entry.auth && status && (needsClient || editingClient));
+  const canEditClient = Boolean(entry.auth?.clientIdEnv);
+  const showClientSetup = Boolean(canEditClient && status && (needsClient || editingClient));
 
   return (
     <ResourceDrawer
@@ -408,6 +410,7 @@ export function ConnectorOAuthDrawer({
         waiting={waiting}
         connected={connected}
         showClientSetup={showClientSetup}
+        canEditClient={canEditClient}
         seededDraft={seededDraft}
         editingClient={editingClient}
         onClientDraft={setClientDraft}
@@ -426,6 +429,7 @@ function DrawerBody({
   waiting,
   connected,
   showClientSetup,
+  canEditClient,
   seededDraft,
   editingClient,
   onClientDraft,
@@ -439,6 +443,7 @@ function DrawerBody({
   waiting: boolean;
   connected: boolean;
   showClientSetup: boolean;
+  canEditClient: boolean;
   seededDraft: string;
   editingClient: boolean;
   onClientDraft: (next: string) => void;
@@ -493,7 +498,7 @@ function DrawerBody({
 
       <GrantFacts entry={entry} status={status} />
 
-      {status?.configured && !editingClient && !connected && !waiting ? (
+      {canEditClient && status?.configured && !editingClient && !connected && !waiting ? (
         <button
           type="button"
           onClick={onEditClient}

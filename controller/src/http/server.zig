@@ -640,10 +640,10 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const authorize_route = std.mem.eql(u8, route.path, "/api/agent/oauth/authorize");
         const remote_suffix = if (mode != .standalone) try allocator.dupe(u8, request.head.target["/api/agent/oauth".len..]) else null;
         defer if (remote_suffix) |value| allocator.free(value);
-        const document = if (method == .POST or method == .PUT or authorize_route) try readBoundedJsonBody(allocator, request) else null;
+        const document = if (method == .POST or method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const response = if (mode != .standalone) remote: {
-            const connector_id = if (authorize_route and method == .DELETE) try agent_oauth.connectorIdFromPayload(allocator, document orelse return false) else null;
+            const connector_id = if (authorize_route and method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "connectorId") else null;
             defer if (connector_id) |value| allocator.free(value);
             const internal_path = if (connector_id) |value|
                 try std.fmt.allocPrint(allocator, "/internal/node/v1/oauth/authorize?connectorId={s}", .{value})
@@ -652,7 +652,11 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             defer allocator.free(internal_path);
             break :remote agent_oauth.forward(allocator, io, client, database, internal_path, method, if (connector_id == null) document else null);
         } else if (authorize_route)
-            if (method == .POST) oauth.authorizePayload(client, database, document orelse return false) else oauth.cancelPayload(document orelse return false)
+            if (method == .POST) oauth.authorizePayload(client, database, document orelse return false) else local: {
+                const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
+                defer if (connector_id) |value| allocator.free(value);
+                break :local oauth.cancelConnectorPayload(connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
+            }
         else if (std.mem.eql(u8, route.path, "/api/agent/oauth/status")) local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
