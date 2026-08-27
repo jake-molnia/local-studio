@@ -1113,6 +1113,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/projects/cloud-checkout")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const payload = code_storage.cloudCheckoutPayload(database, document) catch |failure| return respondProjectFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/projects/refs")) {
         const project_id = try request_tools.queryParameter(allocator, request.head.target, "projectId");
         defer if (project_id) |value| allocator.free(value);
