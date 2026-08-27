@@ -24,7 +24,12 @@ export function useSandboxAccounts(): readonly SandboxAccountEntry[] {
         Effect.flatMap((response) =>
           Effect.tryPromise({ try: () => response.json(), catch: (cause) => cause }),
         ),
-        Effect.map(Schema.decodeUnknownSync(SandboxAccountsResponseSchema)),
+        Effect.flatMap((payload) =>
+          Effect.try({
+            try: () => Schema.decodeUnknownSync(SandboxAccountsResponseSchema)(payload),
+            catch: (cause) => cause,
+          }),
+        ),
         Effect.catch(() => Effect.succeed({ accounts: [] })),
       ),
     ).then((response) => setAccounts(response.accounts));

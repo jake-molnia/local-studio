@@ -172,7 +172,12 @@ function defaultSandboxAccount(): Effect.Effect<string | null, never> {
       response.json(),
     ),
   ).pipe(
-    Effect.map((payload) => Schema.decodeUnknownSync(SandboxAccountsResponseSchema)(payload)),
+    Effect.flatMap((payload) =>
+      Effect.try({
+        try: () => Schema.decodeUnknownSync(SandboxAccountsResponseSchema)(payload),
+        catch: (cause) => cause,
+      }),
+    ),
     Effect.map((payload) => payload.accounts[0]?.id ?? null),
     Effect.catch(() => Effect.succeed(null)),
   );

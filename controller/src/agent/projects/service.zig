@@ -229,7 +229,7 @@ fn withinRoot(root: []const u8, candidate: []const u8) bool {
     return candidate[root.len] == std.fs.path.sep;
 }
 
-fn validateProjectId(id: []const u8) !void {
+pub fn validateProjectId(id: []const u8) !void {
     if (id.len == 0) return error.ProjectIdRequired;
     if (id.len > 128) return error.InvalidProjectId;
     for (id) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_') return error.InvalidProjectId;

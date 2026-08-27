@@ -60,7 +60,8 @@ pub const State = struct {
             if (values != .array) return error.InvalidCodeStorageRepositoryResponse;
             for (values.array.items) |value| {
                 if (value != .object) continue;
-                const name = stringField(value.object, "repo_id") orelse continue;
+                const source_url = stringField(value.object, "url") orelse continue;
+                const name = repositoryName(source_url) orelse continue;
                 if (count > 0) try output.writer.writeByte(',');
                 try output.writer.writeAll("{\"accountId\":");
                 try std.json.Stringify.value(account.id, .{}, &output.writer);
@@ -71,11 +72,9 @@ pub const State = struct {
                 try output.writer.writeAll(",\"name\":");
                 try std.json.Stringify.value(name, .{}, &output.writer);
                 try output.writer.writeAll(",\"url\":");
-                if (stringField(value.object, "url")) |url| try std.json.Stringify.value(url, .{}, &output.writer) else {
-                    const url = try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ account.subject, name });
-                    defer state.allocator.free(url);
-                    try std.json.Stringify.value(url, .{}, &output.writer);
-                }
+                const url = try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ account.subject, name });
+                defer state.allocator.free(url);
+                try std.json.Stringify.value(url, .{}, &output.writer);
                 try output.writer.writeAll(",\"defaultBranch\":");
                 try std.json.Stringify.value(stringField(value.object, "default_branch") orelse "main", .{}, &output.writer);
                 try output.writer.writeByte('}');
@@ -608,6 +607,14 @@ fn countCodeStorageAccounts(store: *repository.Store) usize {
         count += 1;
     };
     return count;
+}
+
+fn repositoryName(source_url: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, source_url, " \t\r\n/");
+    if (trimmed.len == 0) return null;
+    const separator = std.mem.lastIndexOfScalar(u8, trimmed, '/') orelse return trimmed;
+    if (separator + 1 >= trimmed.len) return null;
+    return trimmed[separator + 1 ..];
 }
 
 fn projectJson(allocator: std.mem.Allocator, project: *const project_repository.Project) ![]u8 {

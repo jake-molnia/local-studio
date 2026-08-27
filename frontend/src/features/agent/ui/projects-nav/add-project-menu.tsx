@@ -45,7 +45,13 @@ export function AddProjectMenu({
     );
   }, [query, repositories]);
   useMountSubscription(() => {
-    if (!open || accounts !== null) return;
+    if (!open) {
+      setAccounts(null);
+      setDefaultAccountId(null);
+      setRepositories([]);
+      return;
+    }
+    if (accounts !== null) return;
     setLoading(true);
     setError("");
     void listRepositoryOptions()
