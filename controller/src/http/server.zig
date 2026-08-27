@@ -48,6 +48,7 @@ const agent_models = @import("../agent/models/service.zig");
 const model_catalog = @import("../inference/models/catalog.zig");
 const agent_projects = @import("../agent/projects/service.zig");
 const agent_connectors = @import("../agent/connectors/service.zig");
+const agent_mcp_runtime = @import("../agent/mcp/runtime.zig");
 const agent_oauth = @import("../accounts/oauth/service.zig");
 const agent_google = @import("../accounts/google/service.zig");
 const agent_code_storage = @import("../accounts/code_storage/service.zig");
@@ -116,6 +117,7 @@ pub const HttpServer = struct {
     harness: harness_runtime.Manager,
     pty: agent_pty.Manager,
     browser: agent_browser.Manager,
+    mcp: agent_mcp_runtime.Manager,
     daytona: agent_daytona.Manager,
     messaging: agent_messaging.Manager,
     connection_limiter: ConnectionLimiter = .{},
@@ -140,6 +142,8 @@ pub const HttpServer = struct {
         errdefer pty.deinit();
         var browser = try agent_browser.Manager.init(allocator, io, config.environment, config.data_dir);
         errdefer browser.deinit();
+        var mcp = try agent_mcp_runtime.Manager.init(allocator, io, config.environment, config.data_dir);
+        errdefer mcp.deinit();
         var daytona = try agent_daytona.Manager.init(allocator, io, config.data_dir, config.environment);
         errdefer daytona.deinit();
         var messaging = try agent_messaging.Manager.init(allocator, io, &config);
@@ -162,6 +166,7 @@ pub const HttpServer = struct {
             .harness = harness,
             .pty = pty,
             .browser = browser,
+            .mcp = mcp,
             .daytona = daytona,
             .messaging = messaging,
         };
@@ -177,6 +182,7 @@ pub const HttpServer = struct {
         server.harness.deinit();
         server.pty.deinit();
         server.browser.deinit();
+        server.mcp.deinit();
         server.daytona.deinit();
         server.messaging.deinit();
         server.downloads.deinit();
@@ -189,6 +195,8 @@ pub const HttpServer = struct {
     pub fn run(server: *HttpServer, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache) !void {
         var group: Io.Group = .init;
         defer group.cancel(server.io);
+        server.browser.start() catch |failure| std.log.warn("bundled browser failed to start: {t}", .{failure});
+        try group.concurrent(server.io, warmMcpRuntime, .{ &server.mcp, database });
         if (server.config.mode != .head) try group.concurrent(server.io, runComputeSupervisor, .{&server.compute});
         if (server.config.mode != .worker) try group.concurrent(server.io, automations.runScheduler, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness, &server.daytona });
         if (server.config.mode != .worker) try group.concurrent(server.io, agent_coordinator.runEventPump, .{ server.allocator, server.io, server.config.mode, &server.client, database, &server.harness });
@@ -204,7 +212,7 @@ pub const HttpServer = struct {
                 rejectOverloadedConnection(server.io, &stream);
                 continue;
             }
-            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.oauth, &server.google, &server.code_storage, &server.harness, &server.pty, &server.browser, &server.daytona, &server.messaging, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
+            group.concurrent(server.io, serveConnection, .{ server.allocator, server.io, server.config.mode, &server.config, &server.studio, &server.model_index_cache, &server.runtime_jobs, &server.downloads, &server.compute, &server.head_provider_state, &server.oauth, &server.google, &server.code_storage, &server.harness, &server.pty, &server.browser, &server.mcp, &server.daytona, &server.messaging, &server.client, database, recipe_column, server.config.llm_instance_path, server.config.inference_port, server.config.inference_origin, server.config.default_trust_remote_code, server.config.environment, system, worker_pool, supervisor, runtime_cache, server.config.spike_upstream, server.config.spike_fallback_upstream, &server.connection_limiter, stream }) catch {
                 server.connection_limiter.release();
                 stream.close(server.io);
             };
@@ -216,7 +224,11 @@ fn runComputeSupervisor(manager: *compute_lifecycle.Manager) Io.Cancelable!void 
     return manager.run();
 }
 
-fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, code_storage: *agent_code_storage.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, daytona: *agent_daytona.Manager, messaging: *agent_messaging.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
+fn warmMcpRuntime(manager: *agent_mcp_runtime.Manager, database: *sqlite.Database) void {
+    manager.warm(database);
+}
+
+fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, code_storage: *agent_code_storage.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, mcp: *agent_mcp_runtime.Manager, daytona: *agent_daytona.Manager, messaging: *agent_messaging.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, connection_limiter: *ConnectionLimiter, stream: net.Stream) void {
     defer {
         connection_limiter.release();
         var connection = stream;
@@ -238,7 +250,7 @@ fn serveConnection(allocator: std.mem.Allocator, io: Io, mode: Mode, configurati
             }
             return;
         };
-        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, oauth, google, code_storage, harness, pty, browser, daytona, messaging, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
+        const keep_connection = serveRequest(allocator, io, mode, configuration, studio, model_index_cache, runtime_jobs, download_state, compute, head_provider_state, oauth, google, code_storage, harness, pty, browser, mcp, daytona, messaging, client, database, recipe_column, llm_instance_path, inference_port, inference_origin, default_trust_remote_code, environment, system, worker_pool, supervisor, runtime_cache, spike_upstream, spike_fallback_upstream, &request) catch return;
         if (!keep_connection) return;
     }
 }
@@ -255,7 +267,7 @@ fn rejectOverloadedConnection(io: Io, stream: *net.Stream) void {
     writeProtocolError(&writer.interface, "503 Service Unavailable");
 }
 
-fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, code_storage: *agent_code_storage.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, daytona: *agent_daytona.Manager, messaging: *agent_messaging.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
+fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration: *const Config, studio: *studio_settings.State, model_index_cache: *model_index.Cache, runtime_jobs: *runtime_jobs_service.State, download_state: *download_manager.State, compute: *compute_lifecycle.Manager, head_provider_state: *head_providers.State, oauth: *agent_oauth.State, google: *agent_google.State, code_storage: *agent_code_storage.State, harness: *harness_runtime.Manager, pty: *agent_pty.Manager, browser: *agent_browser.Manager, mcp: *agent_mcp_runtime.Manager, daytona: *agent_daytona.Manager, messaging: *agent_messaging.Manager, client: *http.Client, database: *sqlite.Database, recipe_column: recipes.PayloadColumn, llm_instance_path: []const u8, inference_port: u16, inference_origin: []const u8, default_trust_remote_code: bool, environment: *const std.process.Environ.Map, system: *const system_info.Snapshot, worker_pool: *worker_service.Pool, supervisor: *lifecycle.Supervisor, runtime_cache: *runtime_info.Cache, spike_upstream: ?[]const u8, spike_fallback_upstream: ?[]const u8, request: *http.Server.Request) !bool {
     if (request.head.method.requestHasBody() and request.head.transfer_encoding == .none and request.head.content_length == null) request.head.keep_alive = false;
     const route = route_registry.find(request.head.method, request.head.target) orelse {
         try request.respond("{\"detail\":\"Not Found\"}", .{
@@ -615,6 +627,11 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
+        if (mode == .standalone and request.head.method != .GET) {
+            const changed_id = if (id) |value| value else connectorIdFromDocument(allocator, document orelse "") catch null;
+            defer if (id == null) if (changed_id) |value| allocator.free(value);
+            if (changed_id) |value| mcp.remove(value);
+        }
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
@@ -755,7 +772,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const connector_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
-            .GET => agent_connectors.grantsPayload(allocator, io, mode, configuration, client, database, node_id, probe_id),
+            .GET => agent_connectors.grantsPayload(allocator, io, mode, configuration, mcp, client, database, node_id, probe_id),
             .PUT => agent_connectors.putGrantPayload(allocator, io, mode, client, database, node_id, document orelse return false),
             .DELETE => agent_connectors.deleteGrantPayload(allocator, io, mode, client, database, node_id, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
             else => unreachable,
@@ -773,9 +790,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const response = if (request.head.method == .GET)
-            agent_connectors.inventoryPayload(allocator, io, mode, configuration, client, database, node_id, model_id orelse "")
+            agent_connectors.inventoryPayload(allocator, io, mode, configuration, mcp, client, database, node_id, model_id orelse "")
         else
-            agent_connectors.callPayload(allocator, io, mode, configuration, client, database, node_id, document orelse return false);
+            agent_connectors.callPayload(allocator, io, mode, configuration, mcp, client, database, node_id, document orelse return false);
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -786,7 +803,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer if (node_id) |value| allocator.free(value);
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = agent_connectors.testPayload(allocator, io, mode, configuration, client, database, node_id, document) catch |failure| return respondConnectorFailure(request, failure);
+        const response = agent_connectors.testPayload(allocator, io, mode, configuration, mcp, client, database, node_id, document) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -1162,6 +1179,11 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         };
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
+        if (request.head.method != .GET) {
+            const changed_id = if (id) |value| value else connectorIdFromDocument(allocator, document orelse "") catch null;
+            defer if (id == null) if (changed_id) |value| allocator.free(value);
+            if (changed_id) |value| mcp.remove(value);
+        }
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
@@ -1257,7 +1279,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const connector_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "connectorId") else null;
         defer if (connector_id) |value| allocator.free(value);
         const response = switch (request.head.method) {
-            .GET => agent_connectors.grantsLocal(allocator, io, configuration, client, database, probe_id),
+            .GET => agent_connectors.grantsLocal(allocator, io, configuration, mcp, client, database, probe_id),
             .PUT => agent_connectors.putGrantLocal(allocator, io, database, document orelse return false),
             .DELETE => agent_connectors.deleteGrantLocal(allocator, io, database, model_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired), connector_id orelse return respondConnectorFailure(request, error.ConnectorGrantFieldsRequired)),
             else => unreachable,
@@ -1273,9 +1295,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const document = if (request.head.method == .POST) try readBoundedAgentBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const response = if (request.head.method == .GET)
-            agent_connectors.inventoryLocal(allocator, io, configuration, client, database, model_id orelse "")
+            agent_connectors.inventoryLocal(allocator, io, configuration, mcp, client, database, model_id orelse "")
         else
-            agent_connectors.callLocal(allocator, io, configuration, client, database, document orelse return false);
+            agent_connectors.callLocal(allocator, io, configuration, mcp, client, database, document orelse return false);
         const payload = response catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(payload);
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
@@ -1284,7 +1306,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
     if (std.mem.eql(u8, route.path, "/internal/node/v1/connector-test")) {
         const document = try readBoundedJsonBody(allocator, request) orelse return false;
         defer allocator.free(document);
-        const response = agent_connectors.testLocal(allocator, io, configuration, client, database, document) catch |failure| return respondConnectorFailure(request, failure);
+        const response = agent_connectors.testLocal(allocator, io, configuration, mcp, client, database, document) catch |failure| return respondConnectorFailure(request, failure);
         defer allocator.free(response);
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
@@ -4136,4 +4158,14 @@ fn eventTimestamp(io: Io, buffer: *[24]u8) []const u8 {
         day_seconds.getMinutesIntoHour(),
         day_seconds.getSecondsIntoMinute(),
     }) catch unreachable;
+}
+
+fn connectorIdFromDocument(allocator: std.mem.Allocator, document: []const u8) !?[]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidConnectorRecord;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidConnectorRecord;
+    const value = parsed.value.object.get("id") orelse return null;
+    if (value != .string) return error.InvalidConnectorRecord;
+    const id = std.mem.trim(u8, value.string, " \t\r\n");
+    return if (id.len == 0) null else try allocator.dupe(u8, id);
 }

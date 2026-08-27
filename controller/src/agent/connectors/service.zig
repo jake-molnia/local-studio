@@ -6,6 +6,7 @@ const harness_nodes = @import("../harness/nodes.zig");
 const node_transport = @import("../../topology/node_transport.zig");
 const connector_runtime = @import("runtime.zig");
 const mcp_client = @import("../mcp/client.zig");
+const mcp_runtime = @import("../mcp/runtime.zig");
 const mcp_catalog = @import("../mcp/catalog.zig");
 const google_workspace = @import("../../accounts/google/workspace.zig");
 
@@ -137,6 +138,10 @@ pub fn upsertLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     const stored_value = try stringify(allocator, incoming.value);
     defer allocator.free(stored_value);
     try repository.save(database, id, enabled, stored_value);
+    if (enabled) {
+        var timestamp_buffer: [24]u8 = undefined;
+        try repository.seedGrant(database, id, formatTimestamp(io, &timestamp_buffer));
+    }
     return listLocked(allocator, database);
 }
 
@@ -163,15 +168,15 @@ pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite
     const name = if (account) |value| try std.fmt.allocPrint(arena, "GitHub · {s}", .{value}) else "GitHub";
     try object.put(arena, "name", .{ .string = name });
     try object.put(arena, "transport", .{ .string = "stdio" });
-    _ = object.orderedRemove("command");
-    _ = object.orderedRemove("args");
-    var runtime: std.json.ObjectMap = .empty;
-    try runtime.put(arena, "kind", .{ .string = "node" });
-    try runtime.put(arena, "package", .{ .string = mcp_catalog.github_package });
-    try runtime.put(arena, "version", .{ .string = mcp_catalog.github_version });
-    try runtime.put(arena, "executable", .{ .string = mcp_catalog.github_executable });
-    try object.put(arena, "runtime", .{ .object = runtime });
-    try object.put(arena, "protocolEra", .{ .string = "legacy" });
+    const executable = try std.process.executablePathAlloc(io, arena);
+    try object.put(arena, "command", .{ .string = executable });
+    var arguments: std.json.Array = .init(arena);
+    try arguments.append(.{ .string = "mcp-forward" });
+    try arguments.append(.{ .string = mcp_catalog.github_url });
+    try arguments.append(.{ .string = "auto" });
+    try object.put(arena, "args", .{ .array = arguments });
+    _ = object.orderedRemove("runtime");
+    try object.put(arena, "protocolEra", .{ .string = "modern" });
     var auth: std.json.ObjectMap = .empty;
     try auth.put(arena, "type", .{ .string = "oauth" });
     try auth.put(arena, "provider", .{ .string = "github" });
@@ -309,9 +314,9 @@ fn removeOAuthEnv(object: *std.json.ObjectMap) void {
     }
 }
 
-pub fn grantsPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, probe_id: ?[]const u8) ![]u8 {
+pub fn grantsPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, probe_id: ?[]const u8) ![]u8 {
     if (probe_id) |value| if (!validId(value)) return error.InvalidConnectorId;
-    if (mode == .standalone) return grantsLocal(allocator, io, configuration, client, database, probe_id);
+    if (mode == .standalone) return grantsLocal(allocator, io, configuration, runtime, client, database, probe_id);
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
     defer target.deinit();
     const path = if (probe_id) |value| try std.fmt.allocPrint(allocator, "/internal/node/v1/connector-grants?connector={s}", .{value}) else try allocator.dupe(u8, "/internal/node/v1/connector-grants");
@@ -322,8 +327,8 @@ pub fn grantsPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, co
     };
 }
 
-pub fn inventoryPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, model_id: []const u8) ![]u8 {
-    if (mode == .standalone) return inventoryLocal(allocator, io, configuration, client, database, model_id);
+pub fn inventoryPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, model_id: []const u8) ![]u8 {
+    if (mode == .standalone) return inventoryLocal(allocator, io, configuration, runtime, client, database, model_id);
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
     defer target.deinit();
     const encoded_model = try encodeQuery(allocator, model_id);
@@ -336,8 +341,8 @@ pub fn inventoryPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode,
     };
 }
 
-pub fn callPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
-    if (mode == .standalone) return callLocal(allocator, io, configuration, client, database, document);
+pub fn callPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
+    if (mode == .standalone) return callLocal(allocator, io, configuration, runtime, client, database, document);
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
     defer target.deinit();
     return node_transport.send(allocator, client, &target, "/internal/node/v1/connector-call", .POST, document) catch |failure| switch (failure) {
@@ -346,8 +351,8 @@ pub fn callPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, conf
     };
 }
 
-pub fn testPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
-    if (mode == .standalone) return testLocal(allocator, io, configuration, client, database, document);
+pub fn testPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8, document: []const u8) ![]u8 {
+    if (mode == .standalone) return testLocal(allocator, io, configuration, runtime, client, database, document);
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
     defer target.deinit();
     return node_transport.send(allocator, client, &target, "/internal/node/v1/connector-test", .POST, document) catch |failure| switch (failure) {
@@ -384,12 +389,18 @@ pub fn deleteGrantPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mod
     };
 }
 
-pub fn grantsLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, probe_id: ?[]const u8) ![]u8 {
+pub fn grantsLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, probe_id: ?[]const u8) ![]u8 {
     try database.lock(io);
-    defer database.unlock(io);
-    var grants = try repository.listGrants(allocator, database);
+    var grants = repository.listGrants(allocator, database) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
     defer grants.deinit();
-    var connectors = try repository.listEnabled(allocator, database);
+    var connectors = repository.listEnabled(allocator, database) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
+    database.unlock(io);
     defer connectors.deinit();
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
@@ -409,7 +420,7 @@ pub fn grantsLocal(allocator: std.mem.Allocator, io: Io, configuration: *const c
         try std.json.Stringify.value(name, .{}, &output.writer);
         try output.writer.writeAll(",\"tools\":[");
         if (probe_id) |probe| if (std.mem.eql(u8, probe, id)) {
-            const tools_result = executeConnector(allocator, io, configuration, client, parsed.value.object, .tools) catch null;
+            const tools_result = executeConnector(allocator, io, configuration, runtime, client, parsed.value.object, .tools) catch null;
             if (tools_result) |result| {
                 defer allocator.free(result);
                 var tools_document = std.json.parseFromSlice(std.json.Value, allocator, result, .{}) catch null;
@@ -461,15 +472,20 @@ pub fn deleteGrantLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.
     return grantsOnlyLocked(allocator, database);
 }
 
-pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, model_id: []const u8) ![]u8 {
+pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, model_id: []const u8) ![]u8 {
     if (model_id.len > 512) return error.InvalidConnectorCallPayload;
     try database.lock(io);
     var connectors = repository.listEnabled(allocator, database) catch |failure| {
         database.unlock(io);
         return failure;
     };
+    var grants = repository.listGrants(allocator, database) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
     database.unlock(io);
     defer connectors.deinit();
+    defer grants.deinit();
     var output: Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.writeAll("{\"connectors\":[");
@@ -479,13 +495,14 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
         defer parsed.deinit();
         if (parsed.value != .object) continue;
         const id = stringField(parsed.value.object, "id") orelse continue;
+        const grant = grantDocument(grants.grants, model_id, id) orelse continue;
         if (wrote) try output.writer.writeByte(',');
         const name = stringField(parsed.value.object, "name") orelse id;
         try output.writer.writeAll("{\"id\":");
         try std.json.Stringify.value(id, .{}, &output.writer);
         try output.writer.writeAll(",\"name\":");
         try std.json.Stringify.value(name, .{}, &output.writer);
-        const tools_result = executeConnector(allocator, io, configuration, client, parsed.value.object, .tools) catch |failure| {
+        const tools_result = executeConnector(allocator, io, configuration, runtime, client, parsed.value.object, .tools) catch |failure| {
             try output.writer.writeAll(",\"tools\":[],\"error\":");
             try std.json.Stringify.value(@errorName(failure), .{}, &output.writer);
             try output.writer.writeByte('}');
@@ -494,7 +511,7 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
         };
         defer allocator.free(tools_result);
         try output.writer.writeAll(",\"tools\":");
-        try writeTools(allocator, &output.writer, tools_result);
+        try writeTools(allocator, &output.writer, tools_result, grant);
         try output.writer.writeByte('}');
         wrote = true;
     }
@@ -502,7 +519,7 @@ pub fn inventoryLocal(allocator: std.mem.Allocator, io: Io, configuration: *cons
     return output.toOwnedSlice();
 }
 
-pub fn callLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
+pub fn callLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
     var body = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidConnectorCallPayload;
     defer body.deinit();
     if (body.value != .object) return error.InvalidConnectorCallPayload;
@@ -510,24 +527,31 @@ pub fn callLocal(allocator: std.mem.Allocator, io: Io, configuration: *const con
     const tool = stringField(body.value.object, "tool") orelse return error.ConnectorCallFieldsRequired;
     const model_id = stringField(body.value.object, "model_id") orelse "";
     const arguments = body.value.object.get("args") orelse std.json.Value{ .object = .empty };
-    if (!validId(connector_id) or tool.len > 512 or model_id.len > 512 or arguments != .object) return error.InvalidConnectorCallPayload;
+    if (!validId(connector_id) or tool.len > 512 or model_id.len == 0 or model_id.len > 512 or arguments != .object) return error.InvalidConnectorCallPayload;
     try database.lock(io);
     const stored = repository.get(allocator, database, connector_id) catch |failure| {
         database.unlock(io);
         return failure;
     };
-    database.unlock(io);
     defer if (stored) |value| allocator.free(value);
+    var grants = repository.listGrants(allocator, database) catch |failure| {
+        database.unlock(io);
+        return failure;
+    };
+    database.unlock(io);
+    defer grants.deinit();
+    const grant = grantDocument(grants.grants, model_id, connector_id) orelse return error.ConnectorToolNotGranted;
+    if (!toolGranted(allocator, grant, tool)) return error.ConnectorToolNotGranted;
     const connector_document = stored orelse return error.ConnectorNotFound;
     var connector = std.json.parseFromSlice(std.json.Value, allocator, connector_document, .{}) catch return error.InvalidConnectorRecord;
     defer connector.deinit();
     if (connector.value != .object or !(booleanField(connector.value.object, "enabled") orelse false)) return error.ConnectorDisabled;
-    const result = try executeConnector(allocator, io, configuration, client, connector.value.object, .{ .call = .{ .name = tool, .arguments = arguments } });
+    const result = try executeConnector(allocator, io, configuration, runtime, client, connector.value.object, .{ .call = .{ .name = tool, .arguments = arguments } });
     defer allocator.free(result);
     return std.fmt.allocPrint(allocator, "{{\"ok\":true,\"result\":{s}}}", .{result});
 }
 
-pub fn testLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
+pub fn testLocal(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
     var body = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidConnectorPayload;
     defer body.deinit();
     if (body.value != .object) return error.InvalidConnectorPayload;
@@ -543,7 +567,7 @@ pub fn testLocal(allocator: std.mem.Allocator, io: Io, configuration: *const con
     var connector = std.json.parseFromSlice(std.json.Value, allocator, stored orelse return error.ConnectorNotFound, .{}) catch return error.InvalidConnectorRecord;
     defer connector.deinit();
     if (connector.value != .object) return error.InvalidConnectorRecord;
-    const result = try executeConnector(allocator, io, configuration, client, connector.value.object, .tools);
+    const result = try executeConnector(allocator, io, configuration, runtime, client, connector.value.object, .tools);
     defer allocator.free(result);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, result, .{}) catch return error.InvalidMcpResponse;
     defer parsed.deinit();
@@ -611,15 +635,15 @@ fn validateGrantIds(model_id: []const u8, connector_id: []const u8) !void {
     if (model_id.len == 0 or model_id.len > 512 or !validId(connector_id)) return error.InvalidConnectorGrantPayload;
 }
 
-fn executeConnector(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, client: *http.Client, connector: std.json.ObjectMap, operation: mcp_client.Operation) ![]u8 {
+fn executeConnector(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config, runtime: *mcp_runtime.Manager, client: *http.Client, connector: std.json.ObjectMap, operation: mcp_client.Operation) ![]u8 {
     if (google_workspace.owns(connector)) return google_workspace.execute(allocator, io, client, configuration.data_dir, connector, operation);
     const transport = stringField(connector, "transport") orelse return error.InvalidConnectorRecord;
-    if (std.mem.eql(u8, transport, "stdio")) return mcp_client.executeStdio(allocator, io, configuration.environment, configuration.data_dir, connector, operation);
+    if (std.mem.eql(u8, transport, "stdio")) return runtime.execute(connector, operation);
     if (std.mem.eql(u8, transport, "http")) return mcp_client.executeHttp(allocator, io, client, connector, operation);
     return error.UnsupportedMcpTransport;
 }
 
-fn writeTools(allocator: std.mem.Allocator, writer: *Io.Writer, document: []const u8) !void {
+fn writeTools(allocator: std.mem.Allocator, writer: *Io.Writer, document: []const u8, grant: []const u8) !void {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidMcpResponse;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidMcpResponse;
@@ -629,12 +653,32 @@ fn writeTools(allocator: std.mem.Allocator, writer: *Io.Writer, document: []cons
     var wrote = false;
     for (tools.array.items) |tool_value| {
         if (tool_value != .object) continue;
-        _ = stringField(tool_value.object, "name") orelse continue;
+        const name = stringField(tool_value.object, "name") orelse continue;
+        if (!toolGranted(allocator, grant, name)) continue;
         if (wrote) try writer.writeByte(',');
         try std.json.Stringify.value(tool_value, .{}, writer);
         wrote = true;
     }
     try writer.writeByte(']');
+}
+
+fn grantDocument(grants: []const repository.Grant, model_id: []const u8, connector_id: []const u8) ?[]const u8 {
+    var wildcard: ?[]const u8 = null;
+    for (grants) |grant| {
+        if (!std.mem.eql(u8, grant.connector_id, connector_id)) continue;
+        if (std.mem.eql(u8, grant.model_id, model_id)) return grant.tools_json;
+        if (std.mem.eql(u8, grant.model_id, "*")) wildcard = grant.tools_json;
+    }
+    return wildcard;
+}
+
+fn toolGranted(allocator: std.mem.Allocator, document: []const u8, tool: []const u8) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return false;
+    defer parsed.deinit();
+    if (parsed.value == .string) return std.mem.eql(u8, parsed.value.string, "all");
+    if (parsed.value != .array) return false;
+    for (parsed.value.array.items) |value| if (value == .string and std.mem.eql(u8, value.string, tool)) return true;
+    return false;
 }
 
 fn listLocked(allocator: std.mem.Allocator, database: *sqlite.Database) ![]u8 {
