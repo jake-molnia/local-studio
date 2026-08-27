@@ -138,13 +138,13 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
       tone: repositoryCount ? "ok" : "dim",
       action: repositoryCount ? "Manage" : "Connect",
     };
-    const sandboxRows = (["daytona"] as const).map((id): ProviderRow => {
+    const sandboxRows = (["daytona", "vercel"] as const).map((id): ProviderRow => {
       const accounts = sandboxes.filter((account) => account.provider === id);
-      const label = "Daytona";
+      const label = id === "daytona" ? "Daytona" : "Vercel";
       return {
         id,
         label,
-        company: "Daytona Platforms",
+        company: id === "daytona" ? "Daytona Platforms" : "Vercel",
         summary: accounts.length
           ? accounts.map((account) => account.label).join(", ")
           : "Sandbox provider",
@@ -263,8 +263,9 @@ export function AccountsSection({ searchQuery = "" }: { searchQuery?: string } =
           onChanged={setRepositories}
         />
       ) : null}
-      {openProvider === "daytona" ? (
+      {openProvider === "daytona" || openProvider === "vercel" ? (
         <SandboxAccountModal
+          provider={openProvider}
           accounts={sandboxes}
           onClose={() => setOpenProvider(null)}
           onChanged={setSandboxes}
