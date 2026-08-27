@@ -82,11 +82,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install --global \
     "@mariozechner/pi-coding-agent@${PI_VERSION}" \
     "@openai/codex@${CODEX_VERSION}" \
-    "@yarnpkg/cli-dist@${YARN_VERSION}" \
     "bun@${BUN_VERSION}" \
     "deno@${DENO_VERSION}" \
-    "pnpm@${PNPM_VERSION}" \
     && npm cache clean --force
+RUN corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+    && corepack prepare "yarn@${YARN_VERSION}" --activate
 RUN python3 -m pip install --break-system-packages --no-cache-dir "uv==${UV_VERSION}"
 RUN set -eu; \
     case "$TARGETARCH" in \
