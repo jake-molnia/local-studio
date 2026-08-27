@@ -8,6 +8,7 @@ const RepositoryOptionSchema = Schema.Struct({
   accountLabel: Schema.String,
   organization: Schema.String,
   name: Schema.String,
+  repository: Schema.String,
   url: Schema.String,
   defaultBranch: Schema.String,
 });
@@ -69,8 +70,11 @@ export async function listRepositoryOptions(): Promise<{
   defaultAccountId?: string;
 }> {
   const response = await fetch("/api/agent/projects/repositories", { cache: "no-store" });
-  const payload = await response.json();
-  if (!response.ok) throw new Error("Failed to load repositories");
+  const payload = (await response.json()) as unknown;
+  if (!response.ok) {
+    const failure = payload as { error?: string };
+    throw new Error(failure.error || "Failed to load repositories");
+  }
   return Schema.decodeUnknownSync(RepositoriesPayloadSchema)(payload);
 }
 
@@ -95,7 +99,7 @@ export async function addRepositoryProject(repository: RepositoryOption): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       accountId: repository.accountId,
-      repository: repository.name,
+      repository: repository.repository,
       repositoryUrl: repository.url,
       defaultBranch: repository.defaultBranch,
     }),

@@ -61,7 +61,8 @@ pub const State = struct {
             for (values.array.items) |value| {
                 if (value != .object) continue;
                 const source_url = stringField(value.object, "url") orelse continue;
-                const name = repositoryName(source_url) orelse continue;
+                const repository_name = repositoryName(source_url) orelse continue;
+                const name = stringField(value.object, "repo_name") orelse repository_name;
                 if (count > 0) try output.writer.writeByte(',');
                 try output.writer.writeAll("{\"accountId\":");
                 try std.json.Stringify.value(account.id, .{}, &output.writer);
@@ -71,8 +72,10 @@ pub const State = struct {
                 try std.json.Stringify.value(account.subject, .{}, &output.writer);
                 try output.writer.writeAll(",\"name\":");
                 try std.json.Stringify.value(name, .{}, &output.writer);
+                try output.writer.writeAll(",\"repository\":");
+                try std.json.Stringify.value(repository_name, .{}, &output.writer);
                 try output.writer.writeAll(",\"url\":");
-                const url = try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ account.subject, name });
+                const url = try std.fmt.allocPrint(state.allocator, "https://{s}.code.storage/{s}.git", .{ account.subject, repository_name });
                 defer state.allocator.free(url);
                 try std.json.Stringify.value(url, .{}, &output.writer);
                 try output.writer.writeAll(",\"defaultBranch\":");

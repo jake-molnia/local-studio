@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Button, UiModal, UiModalBody, UiModalFooter, UiModalHeader } from "@/ui";
 import { PlusIcon } from "@/ui/icons";
 import {
@@ -26,6 +27,7 @@ import { NewChatPlusButton, ProjectRow, ProjectSessions } from "./projects-nav/s
 import { AddProjectMenu } from "./projects-nav/add-project-menu";
 
 export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view: NavView }) {
+  const router = useRouter();
   const projectsContext = useProjects();
   const projects = projectsContext.projects;
   const { moveProjectBefore, refresh: refreshProjects, upsertProject } = projectsContext;
@@ -228,7 +230,9 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         onClose={() => setAddMenuOpen(false)}
         onAdded={(project) => {
           upsertProject(project);
+          projectsContext.selectProject(project);
           void refreshProjects();
+          router.push(`/agent?project=${encodeURIComponent(project.id)}&new=1&replace=1`);
         }}
         onUseFolder={() => void handleUseFolder()}
       />

@@ -88,7 +88,7 @@ export function AddProjectMenu({
       <div className="max-h-[160px] overflow-y-auto py-1">
         {visible.map((repository) => (
           <button
-            key={`${repository.accountId}:${repository.name}`}
+            key={`${repository.accountId}:${repository.url}`}
             type="button"
             onClick={() => {
               setError("");

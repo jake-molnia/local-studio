@@ -26,6 +26,7 @@ export type RepositoryOption = {
   accountLabel: string;
   organization: string;
   name: string;
+  repository: string;
   url: string;
   defaultBranch: string;
 };

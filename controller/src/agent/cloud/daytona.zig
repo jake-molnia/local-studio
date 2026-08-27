@@ -8,7 +8,7 @@ const Io = std.Io;
 const http = std.http;
 const max_response_bytes = 16 * 1024 * 1024;
 const controller_port = 8080;
-const worker_image = "ghcr.io/jake-molnia/local-studio-controller:v2.1.0";
+const worker_image = "ghcr.io/jake-molnia/local-studio-controller:main";
 
 pub const Provisioned = struct {
     allocator: std.mem.Allocator,
