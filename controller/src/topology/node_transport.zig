@@ -18,6 +18,8 @@ pub const Response = struct {
 };
 
 pub fn fetch(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8, method: http.Method, payload: ?[]const u8) !Response {
+    var transport_client: http.Client = .{ .allocator = allocator, .io = client.io };
+    defer transport_client.deinit();
     const url = try std.fmt.allocPrint(allocator, "{s}{s}", .{ target.address, path });
     defer allocator.free(url);
     const authorization = if (target.api_key.len > 0) try std.fmt.allocPrint(allocator, "Bearer {s}", .{target.api_key}) else null;
@@ -30,32 +32,20 @@ pub fn fetch(allocator: std.mem.Allocator, client: *http.Client, target: *const 
         headers[count] = .{ .name = "Authorization", .value = value };
         count += 1;
     }
-    const uri = try std.Uri.parse(url);
-    var request = try client.request(method, uri, .{
+    const storage = try allocator.alloc(u8, max_response_bytes);
+    errdefer allocator.free(storage);
+    var output: Io.Writer = .fixed(storage);
+    const response = try transport_client.fetch(.{
+        .location = .{ .url = url },
+        .method = method,
+        .payload = payload,
         .redirect_behavior = .unhandled,
         .keep_alive = false,
         .headers = .{ .accept_encoding = .omit },
         .extra_headers = headers[0..count],
+        .response_writer = &output,
     });
-    defer request.deinit();
-    if (payload) |body| {
-        request.transfer_encoding = .{ .content_length = body.len };
-        var request_buffer: [16 * 1024]u8 = undefined;
-        var request_body = try request.sendBody(&request_buffer);
-        try request_body.writer.writeAll(body);
-        try request_body.end();
-    } else {
-        try request.sendBodiless();
-    }
-    var redirect_buffer: [8 * 1024]u8 = undefined;
-    var response = try request.receiveHead(&redirect_buffer);
-    const storage = try allocator.alloc(u8, max_response_bytes);
-    errdefer allocator.free(storage);
-    var output: Io.Writer = .fixed(storage);
-    var response_buffer: [16 * 1024]u8 = undefined;
-    const reader = response.reader(&response_buffer);
-    _ = try reader.streamRemaining(&output);
-    return .{ .allocator = allocator, .status = response.head.status, .storage = storage, .body = output.buffered() };
+    return .{ .allocator = allocator, .status = response.status, .storage = storage, .body = output.buffered() };
 }
 
 pub fn get(allocator: std.mem.Allocator, client: *http.Client, target: *const harness_nodes.Target, path: []const u8) ![]u8 {

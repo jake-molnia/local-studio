@@ -34,6 +34,7 @@ pub const Manager = struct {
     data_dir: []u8,
     daytona: daytona.Manager,
     vercel: vercel.Manager,
+    lifecycle_mutex: Io.Mutex = .init,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Manager {
         var daytona_manager = try daytona.Manager.init(allocator, io, configuration.data_dir, configuration.environment, configuration.port, configuration.api_key);
@@ -95,10 +96,45 @@ pub const Manager = struct {
         return cloud_store.listPayload(manager.allocator, database);
     }
 
+    pub fn resumeSession(manager: *Manager, client: *http.Client, database: *sqlite.Database, session_id: []const u8) !void {
+        try manager.lifecycle_mutex.lock(manager.io);
+        defer manager.lifecycle_mutex.unlock(manager.io);
+        var worker = blk: {
+            try database.lock(manager.io);
+            defer database.unlock(manager.io);
+            break :blk (try cloud_store.latest(manager.allocator, database, session_id)) orelse return;
+        };
+        defer worker.deinit();
+        if (!std.mem.eql(u8, worker.status, "paused") and !std.mem.eql(u8, worker.status, "stopped")) return;
+        if (std.mem.eql(u8, worker.provider, "daytona")) return manager.daytona.@"resume"(client, database, &worker);
+        return error.SandboxResumeUnavailable;
+    }
+
+    pub fn archiveSession(manager: *Manager, client: *http.Client, database: *sqlite.Database, session_id: []const u8) !void {
+        try manager.lifecycle_mutex.lock(manager.io);
+        defer manager.lifecycle_mutex.unlock(manager.io);
+        {
+            try database.lock(manager.io);
+            defer database.unlock(manager.io);
+            try cloud_store.requestDelete(database, session_id);
+        }
+        try manager.reconcileProviders(client, database);
+    }
+
+    pub fn reconcile(manager: *Manager, client: *http.Client, database: *sqlite.Database) !void {
+        try manager.lifecycle_mutex.lock(manager.io);
+        defer manager.lifecycle_mutex.unlock(manager.io);
+        try manager.reconcileProviders(client, database);
+    }
+
+    fn reconcileProviders(manager: *Manager, client: *http.Client, database: *sqlite.Database) !void {
+        try manager.daytona.reconcile(client, database);
+        try manager.vercel.reconcile(client, database);
+    }
+
     pub fn runReconciler(manager: *Manager, client: *http.Client, database: *sqlite.Database) Io.Cancelable!void {
         while (true) {
-            manager.daytona.reconcile(client, database) catch |failure| std.log.warn("Daytona reconciliation failed: {t}", .{failure});
-            manager.vercel.reconcile(client, database) catch |failure| std.log.warn("Vercel reconciliation failed: {t}", .{failure});
+            manager.reconcile(client, database) catch |failure| std.log.warn("Sandbox reconciliation failed: {t}", .{failure});
             try manager.io.sleep(.fromSeconds(30), .awake);
         }
     }

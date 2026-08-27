@@ -17,6 +17,7 @@ const session_change = @import("change.zig");
 const workbench_change = @import("../../workbench/change.zig");
 
 const Io = std.Io;
+const sandbox_idle_seconds = 120;
 const http = std.http;
 
 const EventSnapshot = struct {
@@ -217,6 +218,10 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
         .model_id = model_id,
         .model_route_id = model_route_id,
     });
+    if (use_sandbox and existing_cloud) {
+        const cloud = sandboxes orelse return error.SandboxPlacementUnavailable;
+        try cloud.resumeSession(client, database, session_id);
+    }
     const preferred_node = if (existing) |session| session.node_id else requested_node;
     var target = if (mode == .head and !is_chat and (!use_sandbox or existing_cloud)) try selectHarnessNode(allocator, io, database, requested_harness, preferred_node) else null;
     defer if (target) |*node| node.deinit();
@@ -260,7 +265,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
         .project_path = project_path,
         .model_id = model_id,
         .model_route_id = model_route_id,
-        .status = "queued",
+        .status = "starting",
         .event_cursor = if (existing) |session| session.event_cursor else 0,
         .sharing_policy = if (existing) |session| session.sharing_policy else "private",
     });
@@ -557,6 +562,7 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
     try records.updateRuntime(database, session_id, phase, native_session_id, committed_cursor);
     try records.updateDriver(database, session_id, harness_version, capabilities_json);
     try execution.setLatestStatus(database, session_id, phase, native_session_id, failure);
+    if (!active) try cloud_store.requestPause(database, session_id, sandbox_idle_seconds);
     try transaction.commit();
 }
 

@@ -45,7 +45,7 @@ pub const WorkerList = struct {
 };
 
 pub fn initialize(database: *sqlite.Database) !void {
-    try migrateProvider(database);
+    try migrateSchema(database);
     try database.executeScript(
         \\CREATE TABLE IF NOT EXISTS agent_cloud_workers (
         \\  worker_id TEXT PRIMARY KEY,
@@ -58,7 +58,7 @@ pub fn initialize(database: *sqlite.Database) !void {
         \\  provider_id TEXT,
         \\  node_id TEXT,
         \\  address TEXT,
-        \\  status TEXT NOT NULL CHECK(status IN ('provisioning', 'starting', 'ready', 'stopping', 'stopped', 'failed', 'deleting', 'deleted')),
+        \\  status TEXT NOT NULL CHECK(status IN ('provisioning', 'starting', 'ready', 'pausing', 'paused', 'stopping', 'stopped', 'resuming', 'failed', 'deleting', 'deleted')),
         \\  last_error TEXT,
         \\  lease_expires_at TEXT NOT NULL,
         \\  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -69,13 +69,13 @@ pub fn initialize(database: *sqlite.Database) !void {
     );
 }
 
-fn migrateProvider(database: *sqlite.Database) !void {
+fn migrateSchema(database: *sqlite.Database) !void {
     const needs_migration = check: {
         var statement = try database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_cloud_workers'");
         defer statement.deinit();
         if (try statement.step() != .row) break :check false;
         const definition = statement.columnText(0) orelse break :check false;
-        break :check std.mem.indexOf(u8, definition, "CHECK(provider = 'daytona')") != null;
+        break :check std.mem.indexOf(u8, definition, "CHECK(provider = 'daytona')") != null or std.mem.indexOf(u8, definition, "'pausing'") == null;
     };
     if (!needs_migration) return;
     try database.executeScript(
@@ -92,7 +92,7 @@ fn migrateProvider(database: *sqlite.Database) !void {
         \\  provider_id TEXT,
         \\  node_id TEXT,
         \\  address TEXT,
-        \\  status TEXT NOT NULL CHECK(status IN ('provisioning', 'starting', 'ready', 'stopping', 'stopped', 'failed', 'deleting', 'deleted')),
+        \\  status TEXT NOT NULL CHECK(status IN ('provisioning', 'starting', 'ready', 'pausing', 'paused', 'stopping', 'stopped', 'resuming', 'failed', 'deleting', 'deleted')),
         \\  last_error TEXT,
         \\  lease_expires_at TEXT NOT NULL,
         \\  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -154,12 +154,49 @@ pub fn setStatus(database: *sqlite.Database, worker_id: []const u8, status: []co
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
+pub fn setReady(database: *sqlite.Database, worker_id: []const u8, lease_seconds: u64) !void {
+    var modifier_buffer: [32]u8 = undefined;
+    const modifier = try std.fmt.bufPrint(&modifier_buffer, "+{d} seconds", .{lease_seconds});
+    var statement = try database.prepare("UPDATE agent_cloud_workers SET status = 'ready', last_error = NULL, lease_expires_at = datetime('now', ?), updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, modifier);
+    try statement.bindText(2, worker_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn requestPause(database: *sqlite.Database, session_id: []const u8, delay_seconds: u64) !void {
+    var modifier_buffer: [32]u8 = undefined;
+    const modifier = try std.fmt.bufPrint(&modifier_buffer, "+{d} seconds", .{delay_seconds});
+    var statement = try database.prepare(
+        \\UPDATE agent_cloud_workers
+        \\SET lease_expires_at = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+        \\WHERE worker_id = (SELECT worker_id FROM agent_cloud_workers WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1)
+        \\  AND status = 'ready'
+    );
+    defer statement.deinit();
+    try statement.bindText(1, modifier);
+    try statement.bindText(2, session_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
+pub fn requestDelete(database: *sqlite.Database, session_id: []const u8) !void {
+    var statement = try database.prepare(
+        \\UPDATE agent_cloud_workers
+        \\SET status = 'deleting', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+        \\WHERE worker_id = (SELECT worker_id FROM agent_cloud_workers WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1)
+        \\  AND status NOT IN ('deleted', 'deleting')
+    );
+    defer statement.deinit();
+    try statement.bindText(1, session_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
 pub fn latest(allocator: std.mem.Allocator, database: *sqlite.Database, session_id: []const u8) !?Worker {
     var statement = try database.prepare("SELECT worker_id, session_id, attempt_id, provider, account_id, harness, image, provider_id, node_id, address, status FROM agent_cloud_workers WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1");
     defer statement.deinit();
     try statement.bindText(1, session_id);
     if (try statement.step() != .row) return null;
-    return readWorker(allocator, &statement);
+    return try readWorker(allocator, &statement);
 }
 
 pub fn reconciliationCandidates(allocator: std.mem.Allocator, database: *sqlite.Database) !WorkerList {
@@ -167,8 +204,7 @@ pub fn reconciliationCandidates(allocator: std.mem.Allocator, database: *sqlite.
         \\SELECT worker_id, session_id, attempt_id, provider, account_id, harness, image, provider_id, node_id, address, status
         \\FROM agent_cloud_workers
         \\WHERE (status = 'ready' AND lease_expires_at <= CURRENT_TIMESTAMP)
-        \\   OR (status = 'stopped' AND EXISTS (SELECT 1 FROM agent_execution_checkpoints checkpoint WHERE checkpoint.session_id = agent_cloud_workers.session_id))
-        \\   OR status = 'failed'
+        \\   OR status = 'deleting'
         \\ORDER BY created_at
     );
     defer statement.deinit();

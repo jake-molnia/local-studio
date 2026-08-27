@@ -1050,6 +1050,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             const response = agent_sessions.archivePayload(allocator, io, database, session_id, document) catch |failure| return respondSessionFailure(request, failure);
             defer allocator.free(response);
             if (std.mem.indexOf(u8, document, "\"archived\":true") != null) {
+                sandboxes.archiveSession(client, database, session_id) catch |failure| return respondSessionFailure(request, failure);
                 if (archived_session) |session| if (session.project_id) |project_id| {
                     code_storage.archiveWorkspace(database, project_id, session.id) catch |failure| return respondProjectFailure(request, failure);
                 };

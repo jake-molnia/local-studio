@@ -145,13 +145,14 @@ pub const Manager = struct {
 const ClientLink = struct {
     allocator: std.mem.Allocator,
     io: Io,
-    client: *http.Client,
+    client: http.Client,
     worker_origin: []u8,
     worker_api_key: []u8,
     head_origin: []u8,
     head_api_key: ?[]u8,
 
     fn deinit(link: *ClientLink) void {
+        link.client.deinit();
         link.allocator.free(link.worker_origin);
         link.allocator.free(link.worker_api_key);
         link.allocator.free(link.head_origin);
@@ -160,13 +161,13 @@ const ClientLink = struct {
     }
 };
 
-pub fn startClient(tasks: *Io.Group, allocator: std.mem.Allocator, io: Io, client: *http.Client, worker_origin: []const u8, worker_api_key: []const u8, head_origin: []const u8, head_api_key: ?[]const u8) !void {
+pub fn startClient(tasks: *Io.Group, allocator: std.mem.Allocator, io: Io, worker_origin: []const u8, worker_api_key: []const u8, head_origin: []const u8, head_api_key: ?[]const u8) !void {
     const link = try allocator.create(ClientLink);
     errdefer allocator.destroy(link);
     link.* = .{
         .allocator = allocator,
         .io = io,
-        .client = client,
+        .client = .{ .allocator = allocator, .io = io },
         .worker_origin = try allocator.dupe(u8, std.mem.trimEnd(u8, worker_origin, "/")),
         .worker_api_key = try allocator.dupe(u8, worker_api_key),
         .head_origin = try allocator.dupe(u8, std.mem.trimEnd(u8, head_origin, "/")),
@@ -186,7 +187,7 @@ fn runClientLoop(link: *ClientLink) !void {
     while (consecutive_failures < 30) {
         const poll_url = try std.fmt.allocPrint(link.allocator, "{s}/internal/head-link/v1/poll", .{link.worker_origin});
         defer link.allocator.free(poll_url);
-        const polled = fetchBuffered(link.allocator, link.client, poll_url, .POST, "{}", link.worker_api_key) catch {
+        const polled = fetchBuffered(link.allocator, &link.client, poll_url, .POST, "{}", link.worker_api_key) catch {
             consecutive_failures += 1;
             try link.io.sleep(.fromSeconds(1), .awake);
             continue;
@@ -206,7 +207,7 @@ fn runClientLoop(link: *ClientLink) !void {
         };
         const head_url = try std.fmt.allocPrint(link.allocator, "{s}{s}", .{ link.head_origin, public_target });
         defer link.allocator.free(head_url);
-        const response = fetchBufferedOptionalKey(link.allocator, link.client, head_url, .POST, request.body, link.head_api_key) catch {
+        const response = fetchBufferedOptionalKey(link.allocator, &link.client, head_url, .POST, request.body, link.head_api_key) catch {
             try completeError(link, request.id, .bad_gateway, "Head model gateway is unavailable");
             continue;
         };
@@ -263,7 +264,7 @@ fn complete(link: *ClientLink, id: []const u8, status: http.Status, content_type
     try document.writer.writeByte('}');
     const url = try std.fmt.allocPrint(link.allocator, "{s}/internal/head-link/v1/complete", .{link.worker_origin});
     defer link.allocator.free(url);
-    const response = try fetchBuffered(link.allocator, link.client, url, .POST, document.writer.buffered(), link.worker_api_key);
+    const response = try fetchBuffered(link.allocator, &link.client, url, .POST, document.writer.buffered(), link.worker_api_key);
     defer link.allocator.free(response.body);
     if (response.status.class() != .success) return error.ModelRelayCompletionRejected;
 }
