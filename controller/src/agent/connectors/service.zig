@@ -133,18 +133,20 @@ pub fn deleteLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
     return listLocked(allocator, database);
 }
 
-pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account: ?[]const u8) !void {
+pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account: []const u8) !void {
     try database.lock(io);
     defer database.unlock(io);
-    const stored_document = try repository.get(allocator, database, "github");
+    const id = try githubConnectorId(allocator, account);
+    defer allocator.free(id);
+    const stored_document = try repository.get(allocator, database, id);
     defer if (stored_document) |value| allocator.free(value);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, stored_document orelse "{}", .{}) catch return error.InvalidConnectorRecord;
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidConnectorRecord;
     const arena = parsed.arena.allocator();
     const object = &parsed.value.object;
-    try object.put(arena, "id", .{ .string = "github" });
-    const name = if (account) |value| try std.fmt.allocPrint(arena, "GitHub · {s}", .{value}) else "GitHub";
+    try object.put(arena, "id", .{ .string = try arena.dupe(u8, id) });
+    const name = try std.fmt.allocPrint(arena, "GitHub · {s}", .{account});
     try object.put(arena, "name", .{ .string = name });
     try object.put(arena, "transport", .{ .string = "stdio" });
     const executable = try std.process.executablePathAlloc(io, arena);
@@ -159,32 +161,50 @@ pub fn connectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite
     var auth: std.json.ObjectMap = .empty;
     try auth.put(arena, "type", .{ .string = "oauth" });
     try auth.put(arena, "provider", .{ .string = "github" });
-    try auth.put(arena, "account", .{ .string = account orelse "github" });
+    try auth.put(arena, "account", .{ .string = try arena.dupe(u8, account) });
     try object.put(arena, "auth", .{ .object = auth });
-    const enabled = booleanField(object.*, "enabled") orelse false;
+    var origin: std.json.ObjectMap = .empty;
+    try origin.put(arena, "kind", .{ .string = "account-adapter" });
+    try origin.put(arena, "id", .{ .string = try arena.dupe(u8, account) });
+    try origin.put(arena, "binding", .{ .string = "github" });
+    try object.put(arena, "origin", .{ .object = origin });
+    const enabled = booleanField(object.*, "enabled") orelse true;
     try object.put(arena, "enabled", .{ .bool = enabled });
     removeOAuthEnv(object);
     const document = try stringify(allocator, parsed.value);
     defer allocator.free(document);
-    try repository.save(database, "github", enabled, document);
+    try repository.save(database, id, enabled, document);
+    try repository.delete(database, "github");
 }
 
-pub fn disconnectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !void {
+pub fn disconnectOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, account: []const u8) !void {
     try database.lock(io);
     defer database.unlock(io);
-    const stored_document = (try repository.get(allocator, database, "github")) orelse return;
-    defer allocator.free(stored_document);
-    var parsed = std.json.parseFromSlice(std.json.Value, allocator, stored_document, .{}) catch return error.InvalidConnectorRecord;
-    defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidConnectorRecord;
-    const object = &parsed.value.object;
-    _ = object.orderedRemove("auth");
-    try object.put(parsed.arena.allocator(), "name", .{ .string = "GitHub" });
-    try object.put(parsed.arena.allocator(), "enabled", .{ .bool = false });
-    removeOAuthEnv(object);
-    const document = try stringify(allocator, parsed.value);
-    defer allocator.free(document);
-    try repository.save(database, "github", false, document);
+    const id = try githubConnectorId(allocator, account);
+    defer allocator.free(id);
+    try repository.delete(database, id);
+    try repository.deleteConnectorGrants(database, id);
+}
+
+pub fn disconnectAllOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database) !void {
+    try database.lock(io);
+    defer database.unlock(io);
+    var connectors = try repository.list(allocator, database);
+    defer connectors.deinit();
+    for (connectors.documents) |document| {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch continue;
+        defer parsed.deinit();
+        if (parsed.value != .object) continue;
+        const id = stringField(parsed.value.object, "id") orelse continue;
+        const auth = parsed.value.object.get("auth") orelse continue;
+        if (auth != .object) continue;
+        const provider = stringField(auth.object, "provider") orelse continue;
+        if (!std.mem.eql(u8, provider, "github")) continue;
+        try repository.delete(database, id);
+        try repository.deleteConnectorGrants(database, id);
+    }
+    try repository.delete(database, "github");
+    try repository.deleteConnectorGrants(database, "github");
 }
 
 pub fn connectGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, service: []const u8, account_key: []const u8, email: []const u8) !void {
@@ -763,6 +783,18 @@ fn validId(value: []const u8) bool {
     if (value.len == 0 or value.len > 64 or !std.ascii.isLower(value[0]) and !std.ascii.isDigit(value[0])) return false;
     for (value) |character| if (!std.ascii.isLower(character) and !std.ascii.isDigit(character) and character != '-' and character != '_') return false;
     return true;
+}
+
+fn githubConnectorId(allocator: std.mem.Allocator, account: []const u8) ![]u8 {
+    const prefix = "account-github-";
+    const length = @min(account.len, 64 - prefix.len);
+    const id = try allocator.alloc(u8, prefix.len + length);
+    @memcpy(id[0..prefix.len], prefix);
+    for (account[0..length], prefix.len..) |character, index| {
+        id[index] = if (std.ascii.isAlphanumeric(character)) std.ascii.toLower(character) else '-';
+    }
+    if (!validId(id)) return error.InvalidConnectorId;
+    return id;
 }
 
 fn stringField(object: std.json.ObjectMap, name: []const u8) ?[]const u8 {

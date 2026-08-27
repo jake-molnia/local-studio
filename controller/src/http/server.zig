@@ -654,7 +654,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
-            break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
+            const account = try request_tools.queryParameter(allocator, request.head.target, "account");
+            defer if (account) |value| allocator.free(value);
+            break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired), account);
         };
         const payload = response catch |failure| return respondOAuthFailure(request, failure);
         defer allocator.free(payload);
@@ -1193,7 +1195,9 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         else local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
-            break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
+            const account = try request_tools.queryParameter(allocator, request.head.target, "account");
+            defer if (account) |value| allocator.free(value);
+            break :local oauth.disconnectPayload(database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired), account);
         };
         const payload = response catch |failure| return respondOAuthFailure(request, failure);
         defer allocator.free(payload);
