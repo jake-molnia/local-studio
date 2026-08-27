@@ -6,8 +6,10 @@ import {
   SandboxAccountsResponseSchema,
   type SandboxAccountEntry,
 } from "@shared/agent/sandbox-account-contract";
-import { Alert, Button, FormField, Input, UiModal, UiModalBody, UiModalHeader } from "@/ui";
-import { Boxes, Eye, EyeOff, X } from "@/ui/icon-registry";
+import { Alert, Button, FormField, Input } from "@/ui";
+import { Eye, EyeOff } from "@/ui/icon-registry";
+import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resource-drawer";
+import { ResourceLogo } from "@/ui/resource-logo";
 import { requestJson } from "./google-account-model";
 
 const ACCOUNT_URL = "/api/agent/accounts/sandboxes";
@@ -72,42 +74,51 @@ export function SandboxAccountModal({
   };
 
   return (
-    <UiModal isOpen onClose={busy ? () => undefined : onClose} maxWidth="max-w-lg">
-      <UiModalHeader
-        title="Connect Daytona"
-        icon={<Boxes className="h-4 w-4 text-(--ui-info)" />}
-        onClose={onClose}
-        showCloseButton={!busy}
-        closeIcon={<X className="h-4 w-4" />}
-      />
-      <UiModalBody className="space-y-4 pb-5">
+    <ResourceDrawer
+      title="Daytona"
+      icon={<ResourceLogo identity="daytona" label="Daytona" />}
+      status={connected.length ? `${connected.length} connected` : "Not connected"}
+      onClose={busy ? () => undefined : onClose}
+      footer={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Close
+          </Button>
+          <Button loading={busy} disabled={!valid} onClick={() => void connect()}>
+            Add account
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
         {error ? <Alert variant="error">{error}</Alert> : null}
-        {connected.length ? (
-          <div className="rounded-md border border-(--ui-separator)">
-            {connected.map((account) => (
-              <div
-                key={account.id}
-                className="flex items-center gap-3 border-b border-(--ui-separator) px-3 py-2 last:border-b-0"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[length:var(--fs-sm)] text-(--ui-fg)">
-                    {account.label}
-                  </div>
-                  <div className="truncate font-mono text-[length:var(--fs-xs)] text-(--ui-muted)">
-                    {account.endpoint}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => void disconnect(account.id)}
-                >
-                  Disconnect
-                </Button>
-              </div>
-            ))}
+        <ResourceDrawerSection title="Tools">
+          <div className="py-2.5 text-[length:var(--fs-sm)] text-(--ui-fg)">
+            Create and manage isolated project workers
           </div>
+        </ResourceDrawerSection>
+        {connected.length ? (
+          <ResourceDrawerSection title="Accounts">
+            {connected.map((account) => (
+              <ResourceFact
+                key={account.id}
+                label={account.label}
+                value={
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="truncate font-mono">{account.endpoint}</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void disconnect(account.id)}
+                    >
+                      Disconnect
+                    </Button>
+                  </span>
+                }
+              />
+            ))}
+          </ResourceDrawerSection>
         ) : null}
         <FormField label="Label" description="Optional name for distinguishing several accounts.">
           <Input
@@ -137,16 +148,8 @@ export function SandboxAccountModal({
             <SecretVisibility visible={showSecrets} onToggle={() => setShowSecrets(!showSecrets)} />
           </div>
         </FormField>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button loading={busy} disabled={!valid} onClick={() => void connect()}>
-            Connect account
-          </Button>
-        </div>
-      </UiModalBody>
-    </UiModal>
+      </div>
+    </ResourceDrawer>
   );
 }
 function SecretVisibility({ visible, onToggle }: { visible: boolean; onToggle: () => void }) {
