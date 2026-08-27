@@ -206,7 +206,7 @@ function startPromptCommand(
     if (
       context.selected.executionKind === "project" &&
       context.selected.managedProject &&
-      context.selected.placement !== "daytona" &&
+      context.selected.placement !== "sandbox" &&
       !context.selected.cwd
     ) {
       setSetupTool(deps, context, {
@@ -244,12 +244,12 @@ function startPromptCommand(
         detached: workspace.detached,
       }));
     }
-    setDaytonaSetupTools(deps, context, "running");
+    setSandboxSetupTools(deps, context, "running");
     const result = yield* Effect.tryPromise({
       try: () => api.submitTurnCommand(promptTurnRequest(deps, context, args)),
       catch: (error) => ({ _tag: "SubmitFailed" as const, error }),
     });
-    setDaytonaSetupTools(deps, context, "done");
+    setSandboxSetupTools(deps, context, "done");
     const canonicalSessionId =
       result.nativeSessionId || result.piSessionId || result.runtimeSessionId || context.runtime;
     deps.updateSession(context.sessionId, (session) => ({
@@ -287,7 +287,7 @@ function startPromptCommand(
             status?.eventSeq,
           );
           if (status?.piSessionId) deps.onPiSessionIdChange?.(status?.piSessionId);
-          setDaytonaSetupTools(deps, context, "done");
+          setSandboxSetupTools(deps, context, "done");
           return;
         }
         const message = error instanceof Error ? error.message : "Agent request failed";
@@ -357,12 +357,12 @@ function setSetupTool(
   }));
 }
 
-function setDaytonaSetupTools(
+function setSandboxSetupTools(
   deps: PromptStreamDeps,
   context: PromptTurnContext,
   status: ToolBlock["status"],
 ): void {
-  if (context.selected.placement !== "daytona") return;
+  if (context.selected.placement !== "sandbox") return;
   setSetupTool(deps, context, {
     name: "local_studio_start_sandbox",
     status,

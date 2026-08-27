@@ -1,6 +1,7 @@
 const std = @import("std");
 const account_repository = @import("../../accounts/store.zig");
 const cloud_store = @import("store.zig");
+const cloud_types = @import("types.zig");
 const enrollments = @import("../../topology/enrollments.zig");
 const sqlite = @import("../../storage/sqlite.zig");
 
@@ -8,22 +9,6 @@ const Io = std.Io;
 const http = std.http;
 const max_response_bytes = 16 * 1024 * 1024;
 const controller_port = 8080;
-
-pub const Provisioned = struct {
-    allocator: std.mem.Allocator,
-    provider_id: []u8,
-    node_id: []u8,
-    address: []u8,
-    workspace: []u8,
-
-    pub fn deinit(worker: *Provisioned) void {
-        worker.allocator.free(worker.provider_id);
-        worker.allocator.free(worker.node_id);
-        worker.allocator.free(worker.address);
-        worker.allocator.free(worker.workspace);
-        worker.* = undefined;
-    }
-};
 
 const Credential = struct {
     allocator: std.mem.Allocator,
@@ -57,13 +42,13 @@ pub const Manager = struct {
         manager.* = undefined;
     }
 
-    pub fn provision(manager: *Manager, client: *http.Client, database: *sqlite.Database, worker_id: []const u8, session_id: []const u8, account_id: []const u8, requested_harness: []const u8, snapshot: []const u8, checkout: []const u8) !Provisioned {
+    pub fn provision(manager: *Manager, client: *http.Client, database: *sqlite.Database, worker_id: []const u8, session_id: []const u8, account_id: []const u8, requested_harness: []const u8, snapshot: []const u8, vcpus: u8, memory_gib: u16, storage_gib: u16, checkout: []const u8) !cloud_types.Provisioned {
         var account_credential = try manager.loadCredential(account_id);
         defer account_credential.deinit();
         var controller_key_bytes: [32]u8 = undefined;
         manager.io.random(&controller_key_bytes);
         const controller_key = std.fmt.bytesToHex(controller_key_bytes, .lower);
-        const create_document = try manager.createDocument(worker_id, session_id, snapshot, controller_key[0..]);
+        const create_document = try manager.createDocument(worker_id, session_id, snapshot, vcpus, memory_gib, storage_gib, controller_key[0..]);
         defer manager.allocator.free(create_document);
         const created = manager.request(client, account_credential.endpoint, account_credential.api_key, "/sandbox", .POST, create_document) catch return error.DaytonaSandboxCreateRejected;
         defer manager.allocator.free(created);
@@ -108,7 +93,8 @@ pub const Manager = struct {
         return cloud_store.listPayload(manager.allocator, database);
     }
 
-    pub fn defaultSnapshot(manager: *Manager) ![]u8 {
+    pub fn defaultSnapshot(manager: *Manager, profile_id: []const u8) ![]u8 {
+        _ = profile_id;
         if (manager.environment.get("LOCAL_STUDIO_DAYTONA_SNAPSHOT")) |configured| {
             const snapshot = std.mem.trim(u8, configured, " \t\r\n");
             if (!validSnapshot(snapshot)) return error.DaytonaSnapshotRequired;
@@ -128,7 +114,7 @@ pub const Manager = struct {
         }
     }
 
-    fn reconcile(manager: *Manager, client: *http.Client, database: *sqlite.Database) !void {
+    pub fn reconcile(manager: *Manager, client: *http.Client, database: *sqlite.Database) !void {
         var candidates = blk: {
             try database.lock(manager.io);
             defer database.unlock(manager.io);
@@ -136,6 +122,7 @@ pub const Manager = struct {
         };
         defer candidates.deinit();
         for (candidates.items.items) |*worker| {
+            if (!try manager.ownsAccount(worker.account_id)) continue;
             const provider_id = worker.provider_id orelse {
                 try lockedWorkerStatus(manager.io, database, worker.id, "deleted", "Sandbox was never created");
                 continue;
@@ -167,6 +154,13 @@ pub const Manager = struct {
         }
     }
 
+    pub fn ownsAccount(manager: *Manager, account_id: []const u8) !bool {
+        var accounts = try account_repository.load(manager.allocator, manager.io, manager.data_dir);
+        defer accounts.deinit();
+        const account = accounts.find(account_id) orelse return false;
+        return std.mem.eql(u8, account.provider, "daytona");
+    }
+
     fn loadCredential(manager: *Manager, account_id: []const u8) !Credential {
         var accounts = try account_repository.load(manager.allocator, manager.io, manager.data_dir);
         defer accounts.deinit();
@@ -185,13 +179,14 @@ pub const Manager = struct {
         };
     }
 
-    fn createDocument(manager: *Manager, worker_id: []const u8, session_id: []const u8, snapshot: []const u8, controller_key: []const u8) ![]u8 {
+    fn createDocument(manager: *Manager, worker_id: []const u8, session_id: []const u8, snapshot: []const u8, vcpus: u8, memory_gib: u16, storage_gib: u16, controller_key: []const u8) ![]u8 {
         if (!validSnapshot(snapshot)) return error.DaytonaSnapshotRequired;
+        if (vcpus == 0 or memory_gib == 0 or storage_gib == 0) return error.InvalidSandboxProfile;
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"snapshot\":");
         try std.json.Stringify.value(snapshot, .{}, &output.writer);
-        try output.writer.writeAll(",\"public\":true,\"autoStopInterval\":60,\"autoDeleteInterval\":30,\"ttlMinutes\":1440,\"name\":");
+        try output.writer.print(",\"cpu\":{d},\"memory\":{d},\"disk\":{d},\"public\":true,\"autoStopInterval\":60,\"autoDeleteInterval\":30,\"ttlMinutes\":1440,\"name\":", .{ vcpus, memory_gib, storage_gib });
         const name = try std.fmt.allocPrint(manager.allocator, "local-studio-{s}", .{worker_id[0..@min(worker_id.len, 20)]});
         defer manager.allocator.free(name);
         try std.json.Stringify.value(name, .{}, &output.writer);
