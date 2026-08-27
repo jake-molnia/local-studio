@@ -4,8 +4,6 @@ import {
   type OAuthConnectorAuthDefinition,
 } from "@shared/agent/oauth-connector-contract";
 
-export const SSH_SERVER_PLACEHOLDER = "{{LOCAL_STUDIO_CONTROLLER}}";
-
 export type CatalogEntry = Omit<McpCatalogEntry, "command" | "args"> & {
   command: string;
   args: readonly string[];

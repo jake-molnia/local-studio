@@ -33,7 +33,6 @@ import {
   draftFromCatalog,
   draftFromConnector,
   emptyDraft,
-  resolveSshServerPath,
   type ConnectorDraft,
 } from "./connector-editor-drawer";
 import { ConnectorOAuthDrawer } from "./connector-oauth-drawer";
@@ -250,11 +249,7 @@ export function ConnectorsSection({ searchQuery }: { searchQuery?: string } = {}
       setCatalogEntry(entry);
       return;
     }
-    void resolveSshServerPath()
-      .catch(() => null)
-      .then((path) =>
-        setEditing({ draft: draftFromCatalog(entry, path), mode: "create", secretKeys: [] }),
-      );
+    setEditing({ draft: draftFromCatalog(entry), mode: "create", secretKeys: [] });
   };
 
   const query = searchQuery ?? localQuery;

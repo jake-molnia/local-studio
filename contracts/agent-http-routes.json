@@ -324,12 +324,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/agent/connectors/ssh-server-path",
-      "ownership": "head",
-      "streaming": "never"
-    },
-    {
-      "method": "GET",
       "path": "/api/agent/skills",
       "ownership": "head",
       "streaming": "never"
@@ -644,12 +638,6 @@
       "method": "POST",
       "path": "/internal/node/v1/messaging/react",
       "ownership": "head",
-      "streaming": "never"
-    },
-    {
-      "method": "GET",
-      "path": "/internal/node/v1/connectors/ssh-server-path",
-      "ownership": "worker",
       "streaming": "never"
     },
     {

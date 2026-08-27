@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Schema } from "effect";
 import {
-  ConnectorSshPathResponseSchema,
   ConnectorTestResponseSchema,
   ConnectorsResponseSchema,
   type ConnectorView,
@@ -14,7 +13,7 @@ import { ResourceDrawer, ResourceDrawerSection, ResourceFact } from "@/ui/resour
 import { ResourceLogo } from "@/ui/resource-logo";
 import { StatusText } from "@/features/recipes/recipes-content/catalog-table-shell";
 import { jsonBody, requestAgentJson } from "./agent-json";
-import { SSH_SERVER_PLACEHOLDER, renderCommandLine, type CatalogEntry } from "./connector-catalog";
+import { renderCommandLine, type CatalogEntry } from "./connector-catalog";
 
 /**
  * The one place an MCP server is written.
@@ -134,26 +133,14 @@ export function emptyDraft(): ConnectorDraft {
   };
 }
 
-export function draftFromCatalog(
-  entry: CatalogEntry,
-  sshServerPath: string | null,
-): ConnectorDraft {
-  const legacySshServer = entry.id === "computer" && sshServerPath?.endsWith(".mjs");
+export function draftFromCatalog(entry: CatalogEntry): ConnectorDraft {
   return {
     ...emptyDraft(),
     id: entry.id,
     name: entry.name,
     transport: entry.transport === "builtin" ? "stdio" : entry.transport,
-    command: legacySshServer
-      ? "node"
-      : entry.command === SSH_SERVER_PLACEHOLDER
-        ? (sshServerPath ?? entry.command)
-        : (entry.command ?? ""),
-    args: legacySshServer
-      ? (sshServerPath ?? "")
-      : (entry.args ?? [])
-          .map((arg) => (arg === SSH_SERVER_PLACEHOLDER ? (sshServerPath ?? arg) : arg))
-          .join("\n"),
+    command: entry.command ?? "",
+    args: (entry.args ?? []).join("\n"),
     env: entry.envFields.map((field) => ({
       key: field.key,
       value: "",
@@ -163,15 +150,6 @@ export function draftFromCatalog(
       secretTouched: field.secret !== undefined,
     })),
   };
-}
-
-/** Resolve the bundled SSH server's absolute path, or null when it is missing. */
-export async function resolveSshServerPath(): Promise<string | null> {
-  const { path } = await requestAgentJson(
-    "/api/agent/connectors/ssh-server-path",
-    Schema.decodeUnknownSync(ConnectorSshPathResponseSchema),
-  );
-  return path;
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;

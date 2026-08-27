@@ -14,27 +14,6 @@ const Io = std.Io;
 const http = std.http;
 const mask = "••••••••";
 
-pub fn sshPathPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8) ![]u8 {
-    if (mode == .standalone) return sshPathLocal(allocator, io);
-    var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;
-    defer target.deinit();
-    return node_transport.get(allocator, client, &target, "/internal/node/v1/connectors/ssh-server-path") catch |failure| switch (failure) {
-        error.NodeUnavailable => error.ConnectorNodeUnavailable,
-        else => failure,
-    };
-}
-
-pub fn sshPathLocal(allocator: std.mem.Allocator, io: Io) ![]u8 {
-    const executable = try std.process.executablePathAlloc(io, allocator);
-    defer allocator.free(executable);
-    var output: Io.Writer.Allocating = .init(allocator);
-    errdefer output.deinit();
-    try output.writer.writeAll("{\"path\":");
-    try std.json.Stringify.value(executable, .{}, &output.writer);
-    try output.writer.writeAll(",\"args\":[\"mcp-ssh\"]}");
-    return output.toOwnedSlice();
-}
-
 pub fn listPayload(allocator: std.mem.Allocator, io: Io, mode: config.Mode, client: *http.Client, database: *sqlite.Database, preferred_node: ?[]const u8) ![]u8 {
     if (mode == .standalone) return listLocal(allocator, io, database);
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", preferred_node)) orelse return error.ConnectorNodeRequired;

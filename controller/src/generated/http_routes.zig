@@ -10,7 +10,7 @@ pub const Route = struct {
     streaming: Streaming,
 };
 
-pub const route_count: usize = 283;
+pub const route_count: usize = 281;
 
 pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/docs", .ownership = .shared, .streaming = .never },
@@ -188,7 +188,6 @@ pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/agent/connectors/call", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/connectors/call", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/connectors/test", .ownership = .head, .streaming = .never },
-    .{ .method = .GET, .path = "/api/agent/connectors/ssh-server-path", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/skills", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/skills/load", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/prompt-templates", .ownership = .head, .streaming = .never },
@@ -257,7 +256,6 @@ pub const routes = [_]Route{
     .{ .method = .POST, .path = "/internal/node/v1/connector-call", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/node/v1/connector-test", .ownership = .worker, .streaming = .never },
     .{ .method = .POST, .path = "/internal/node/v1/messaging/react", .ownership = .head, .streaming = .never },
-    .{ .method = .GET, .path = "/internal/node/v1/connectors/ssh-server-path", .ownership = .worker, .streaming = .never },
     .{ .method = .GET, .path = "/internal/node/v1/skills", .ownership = .worker, .streaming = .never },
     .{ .method = .GET, .path = "/internal/node/v1/skills/load", .ownership = .worker, .streaming = .never },
     .{ .method = .GET, .path = "/internal/node/v1/prompt-templates", .ownership = .worker, .streaming = .never },
