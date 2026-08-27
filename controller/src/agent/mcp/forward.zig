@@ -1,10 +1,11 @@
 const std = @import("std");
 const client_runtime = @import("client.zig");
+const oauth_store = @import("../../accounts/mcp_oauth/store.zig");
 
 const Io = std.Io;
 const max_document_bytes = 8 * 1024 * 1024;
 
-pub fn run(init: std.process.Init, url: []const u8, protocol_era: []const u8) !void {
+pub fn run(init: std.process.Init, url: []const u8, protocol_era: []const u8, provider: ?[]const u8, account: ?[]const u8) !void {
     var client: std.http.Client = .{ .allocator = init.gpa, .io = init.io };
     defer client.deinit();
     var connector = try Connector.init(init.gpa, init.environ_map, url, protocol_era);
@@ -17,7 +18,14 @@ pub fn run(init: std.process.Init, url: []const u8, protocol_era: []const u8) !v
         const line = std.mem.trim(u8, line_value, " \t\r");
         if (line.len == 0) continue;
         if (line.len > max_document_bytes) return error.McpRequestTooLarge;
-        const response = handle(init.gpa, init.io, &client, connector.value, line) catch |failure| try errorResponse(init.gpa, line, failure);
+        const authorization = if (provider != null and account != null)
+            try oauth_store.authorizationHeader(init.gpa, init.io, &client, init.environ_map.get("LOCAL_STUDIO_DATA_DIR") orelse return error.McpOAuthDataDirectoryRequired, provider.?, account.?)
+        else
+            null;
+        defer if (authorization) |value| init.gpa.free(value);
+        var invocation = try connector.invocation(init.gpa, authorization);
+        defer invocation.deinit();
+        const response = handle(init.gpa, init.io, &client, invocation.value, line) catch |failure| try errorResponse(init.gpa, line, failure);
         defer init.gpa.free(response);
         if (response.len == 0) continue;
         try output.interface.writeAll(response);
@@ -53,6 +61,34 @@ const Connector = struct {
     fn deinit(connector: *Connector) void {
         connector.arena.deinit();
         connector.* = undefined;
+    }
+
+    fn invocation(connector: *Connector, allocator: std.mem.Allocator, authorization: ?[]const u8) !Invocation {
+        var value: std.json.ObjectMap = .empty;
+        errdefer value.deinit(allocator);
+        var iterator = connector.value.iterator();
+        while (iterator.next()) |entry| try value.put(allocator, entry.key_ptr.*, entry.value_ptr.*);
+        var headers: std.json.ObjectMap = .empty;
+        errdefer headers.deinit(allocator);
+        if (connector.value.get("headers")) |configured| if (configured == .object) {
+            var header_iterator = configured.object.iterator();
+            while (header_iterator.next()) |entry| try headers.put(allocator, entry.key_ptr.*, entry.value_ptr.*);
+        };
+        if (authorization) |header| try headers.put(allocator, "Authorization", .{ .string = header });
+        if (headers.count() > 0) try value.put(allocator, "headers", .{ .object = headers });
+        return .{ .allocator = allocator, .value = value, .headers = headers };
+    }
+};
+
+const Invocation = struct {
+    allocator: std.mem.Allocator,
+    value: std.json.ObjectMap,
+    headers: std.json.ObjectMap,
+
+    fn deinit(invocation: *Invocation) void {
+        invocation.headers.deinit(invocation.allocator);
+        invocation.value.deinit(invocation.allocator);
+        invocation.* = undefined;
     }
 };
 

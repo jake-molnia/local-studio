@@ -4,6 +4,7 @@ const sqlite = @import("../../storage/sqlite.zig");
 const agent_connectors = @import("../../agent/connectors/service.zig");
 const harness_nodes = @import("../../agent/harness/nodes.zig");
 const node_transport = @import("../../topology/node_transport.zig");
+const mcp_oauth = @import("../mcp_oauth/service.zig");
 
 const Io = std.Io;
 const http = std.http;
@@ -38,24 +39,32 @@ pub const State = struct {
     mutex: Io.Mutex = .init,
     pending: ?Pending = null,
     last_error: ?[]u8 = null,
+    remote: mcp_oauth.State,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, environment: *const std.process.Environ.Map) !State {
+        var remote = try mcp_oauth.State.init(allocator, io, data_dir, environment);
+        errdefer remote.deinit();
         return .{
             .allocator = allocator,
             .io = io,
             .data_dir = try allocator.dupe(u8, data_dir),
             .environment = environment,
+            .remote = remote,
         };
     }
 
     pub fn deinit(state: *State) void {
         if (state.pending) |*value| value.deinit();
         if (state.last_error) |value| state.allocator.free(value);
+        state.remote.deinit();
         state.allocator.free(state.data_dir);
         state.* = undefined;
     }
 
-    pub fn authorizePayload(state: *State, client: *http.Client, document: []const u8) ![]u8 {
+    pub fn authorizePayload(state: *State, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
+        const connector_id = try connectorFromDocument(state.allocator, document);
+        defer state.allocator.free(connector_id);
+        if (!std.mem.eql(u8, connector_id, "github")) return state.remote.authorizePayload(client, database, document);
         try requireGithubDocument(state.allocator, document, false);
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
@@ -104,7 +113,14 @@ pub const State = struct {
         return output.toOwnedSlice();
     }
 
-    pub fn cancelPayload(state: *State) ![]u8 {
+    pub fn cancelPayload(state: *State, document: []const u8) ![]u8 {
+        const connector_id = try connectorFromDocument(state.allocator, document);
+        defer state.allocator.free(connector_id);
+        return state.cancelConnectorPayload(connector_id);
+    }
+
+    pub fn cancelConnectorPayload(state: *State, connector_id: []const u8) ![]u8 {
+        if (!std.mem.eql(u8, connector_id, "github")) return state.remote.cancelProviderPayload(connector_id);
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
         state.clearFlowLocked();
@@ -112,6 +128,7 @@ pub const State = struct {
     }
 
     pub fn statusPayload(state: *State, client: *http.Client, database: *sqlite.Database, connector_id: []const u8) ![]u8 {
+        if (!std.mem.eql(u8, connector_id, "github")) return state.remote.statusPayload(connector_id);
         try requireGithub(connector_id);
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
@@ -120,6 +137,9 @@ pub const State = struct {
     }
 
     pub fn clientPayload(state: *State, database: *sqlite.Database, document: []const u8) ![]u8 {
+        const connector_id = try connectorFromDocument(state.allocator, document);
+        defer state.allocator.free(connector_id);
+        if (!std.mem.eql(u8, connector_id, "github")) return state.remote.clientPayload(database, document);
         const client_id = try githubClientFromDocument(state.allocator, document);
         defer state.allocator.free(client_id);
         try state.mutex.lock(state.io);
@@ -139,6 +159,7 @@ pub const State = struct {
     }
 
     pub fn disconnectPayload(state: *State, database: *sqlite.Database, connector_id: []const u8, account: ?[]const u8) ![]u8 {
+        if (!std.mem.eql(u8, connector_id, "github")) return state.remote.disconnectPayload(database, connector_id, account);
         try requireGithub(connector_id);
         try state.mutex.lock(state.io);
         defer state.mutex.unlock(state.io);
@@ -319,6 +340,10 @@ pub const State = struct {
     }
 };
 
+pub fn connectorIdFromPayload(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
+    return connectorFromDocument(allocator, document);
+}
+
 pub fn forward(allocator: std.mem.Allocator, io: Io, client: *http.Client, database: *sqlite.Database, path: []const u8, method: http.Method, document: ?[]const u8) ![]u8 {
     var target = (try harness_nodes.selectCapability(allocator, io, database, "mcp", null)) orelse return error.ConnectorNodeRequired;
     defer target.deinit();
@@ -382,6 +407,14 @@ fn requireGithubDocument(allocator: std.mem.Allocator, document: []const u8, req
     if (parsed.value != .object) return error.InvalidOAuthPayload;
     try requireGithub(stringField(parsed.value.object, "connectorId") orelse return error.ConnectorIdRequired);
     if (require_client and stringField(parsed.value.object, "clientId") == null) return error.OAuthClientRequired;
+}
+
+fn connectorFromDocument(allocator: std.mem.Allocator, document: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidOAuthPayload;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidOAuthPayload;
+    const connector_id = stringField(parsed.value.object, "connectorId") orelse return error.ConnectorIdRequired;
+    return allocator.dupe(u8, connector_id);
 }
 
 fn githubClientFromDocument(allocator: std.mem.Allocator, document: []const u8) ![]u8 {

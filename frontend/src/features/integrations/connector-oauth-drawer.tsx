@@ -252,7 +252,7 @@ const failureMessage = (error: unknown, fallback: string): string =>
 async function saveClientAction(context: ActionContext): Promise<boolean> {
   const trimmed = context.getSeededDraft().trim();
   if (!trimmed) return false;
-  const next = await requestAgentJson(statusUrl(context.entryId), decodeStatus, {
+  const next = await requestAgentJson("/api/agent/oauth/client", decodeStatus, {
     ...jsonBody({ connectorId: context.entryId, clientId: trimmed }),
     method: "PUT",
   });

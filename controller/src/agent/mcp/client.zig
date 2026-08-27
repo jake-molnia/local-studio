@@ -44,6 +44,7 @@ pub const StdioSession = struct {
         const launch = try connector_runtime.resolve(launch_arena.allocator(), io, environment, connector);
         var child_environment = try minimalEnvironment(allocator, environment, connector);
         defer child_environment.deinit();
+        try child_environment.put("LOCAL_STUDIO_DATA_DIR", data_dir);
         try connector_runtime.addEnvironment(allocator, io, &child_environment, data_dir, connector, launch.kind);
         try oauth_connector_store.injectEnvironment(allocator, io, data_dir, connector, &child_environment);
         try account_store.injectEnvironment(allocator, io, data_dir, connector, environment, &child_environment);

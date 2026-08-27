@@ -28,7 +28,28 @@ const Entry = struct {
     unavailable_reason: ?[]const u8 = null,
 };
 
-const bearer = [_]EnvironmentField{.{ .key = "MCP_AUTHORIZATION", .label = "Authorization header", .placeholder = "Bearer …", .secret = true }};
+pub const OAuthRemote = struct {
+    id: []const u8,
+    name: []const u8,
+    url: []const u8,
+    protocol_era: []const u8,
+    client_id_env: ?[]const u8 = null,
+};
+
+const oauth_remotes = [_]OAuthRemote{
+    .{ .id = "notion", .name = "Notion", .url = "https://mcp.notion.com/mcp", .protocol_era = "auto" },
+    .{ .id = "linear", .name = "Linear", .url = "https://mcp.linear.app/mcp", .protocol_era = "auto" },
+    .{ .id = "atlassian", .name = "Atlassian Rovo", .url = "https://mcp.atlassian.com/v1/mcp/authv2", .protocol_era = "auto" },
+    .{ .id = "cloudflare", .name = "Cloudflare API", .url = "https://mcp.cloudflare.com/mcp", .protocol_era = "modern" },
+    .{ .id = "cloudflare-bindings", .name = "Cloudflare Bindings", .url = "https://bindings.mcp.cloudflare.com/mcp", .protocol_era = "modern" },
+    .{ .id = "cloudflare-builds", .name = "Cloudflare Builds", .url = "https://builds.mcp.cloudflare.com/mcp", .protocol_era = "modern" },
+    .{ .id = "cloudflare-observability", .name = "Cloudflare Observability", .url = "https://observability.mcp.cloudflare.com/mcp", .protocol_era = "modern" },
+    .{ .id = "vercel", .name = "Vercel", .url = "https://mcp.vercel.com", .protocol_era = "auto" },
+    .{ .id = "railway", .name = "Railway", .url = "https://mcp.railway.com", .protocol_era = "auto" },
+    .{ .id = "supabase", .name = "Supabase", .url = "https://mcp.supabase.com/mcp", .protocol_era = "auto" },
+    .{ .id = "stripe", .name = "Stripe", .url = "https://mcp.stripe.com", .protocol_era = "auto" },
+    .{ .id = "x-api", .name = "X API", .url = "https://api.x.com/mcp", .protocol_era = "auto", .client_id_env = "LOCAL_STUDIO_X_CLIENT_ID" },
+};
 
 const entries = [_]Entry{
     .{
@@ -54,11 +75,11 @@ const entries = [_]Entry{
     remote("linear", "Linear", "Linear", "Issues, projects, cycles, initiatives, comments, and workspace search", "https://mcp.linear.app/mcp", "auto", true),
     remote("atlassian", "Atlassian Rovo", "Atlassian", "Jira and Confluence search, issues, projects, pages, and comments", "https://mcp.atlassian.com/v1/mcp/authv2", "auto", true),
     remote("cloudflare", "Cloudflare API", "Cloudflare", "Search and execute across the Cloudflare API", "https://mcp.cloudflare.com/mcp", "modern", true),
-    remote("cloudflare-docs", "Cloudflare Documentation", "Cloudflare", "Search current Cloudflare product and developer documentation", "https://docs.mcp.cloudflare.com/mcp", "modern", false),
+    publicRemote("cloudflare-docs", "Cloudflare Documentation", "Cloudflare", "Search current Cloudflare product and developer documentation", "https://docs.mcp.cloudflare.com/mcp", "modern"),
     remote("cloudflare-bindings", "Cloudflare Bindings", "Cloudflare", "Build Workers applications with Cloudflare bindings and resources", "https://bindings.mcp.cloudflare.com/mcp", "modern", false),
     remote("cloudflare-builds", "Cloudflare Builds", "Cloudflare", "Inspect Workers builds and deployment failures", "https://builds.mcp.cloudflare.com/mcp", "modern", false),
     remote("cloudflare-observability", "Cloudflare Observability", "Cloudflare", "Inspect logs, traces, errors, and operational health", "https://observability.mcp.cloudflare.com/mcp", "modern", true),
-    remote("cloudflare-radar", "Cloudflare Radar", "Cloudflare", "Query public Internet traffic, routing, security, and outage data", "https://radar.mcp.cloudflare.com/mcp", "modern", false),
+    publicRemote("cloudflare-radar", "Cloudflare Radar", "Cloudflare", "Query public Internet traffic, routing, security, and outage data", "https://radar.mcp.cloudflare.com/mcp", "modern"),
     remote("vercel", "Vercel", "Vercel", "Projects, deployments, logs, domains, teams, and documentation", "https://mcp.vercel.com", "auto", true),
     remote("railway", "Railway", "Railway", "Projects, services, deployments, variables, logs, and infrastructure", "https://mcp.railway.com", "auto", true),
     remote("supabase", "Supabase", "Supabase", "Projects, databases, SQL, migrations, logs, and edge functions", "https://mcp.supabase.com/mcp", "auto", true),
@@ -84,9 +105,14 @@ fn remote(comptime id: []const u8, comptime name: []const u8, comptime company: 
         .description = description,
         .args = &.{ "mcp-forward", url, upstream_era },
         .recommended = recommended,
-        .required_configuration = &.{"authorization"},
-        .env_fields = &bearer,
+        .required_configuration = &.{"oauth"},
+        .auth_provider = id,
     };
+}
+
+pub fn oauthRemote(id: []const u8) ?OAuthRemote {
+    for (oauth_remotes) |remote_entry| if (std.mem.eql(u8, remote_entry.id, id)) return remote_entry;
+    return null;
 }
 
 fn publicRemote(comptime id: []const u8, comptime name: []const u8, comptime company: []const u8, comptime description: []const u8, comptime url: []const u8, comptime upstream_era: []const u8) Entry {

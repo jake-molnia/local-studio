@@ -93,6 +93,14 @@ pub fn attach(database: *sqlite.Database, worker_id: []const u8, provider_id: []
     if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
 }
 
+pub fn setProvider(database: *sqlite.Database, worker_id: []const u8, provider_id: []const u8) !void {
+    var statement = try database.prepare("UPDATE agent_cloud_workers SET provider_id = ?, status = 'starting', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?");
+    defer statement.deinit();
+    try statement.bindText(1, provider_id);
+    try statement.bindText(2, worker_id);
+    if (try statement.step() != .done) return error.DatabaseUnexpectedRow;
+}
+
 pub fn setStatus(database: *sqlite.Database, worker_id: []const u8, status: []const u8, message: ?[]const u8) !void {
     var statement = try database.prepare("UPDATE agent_cloud_workers SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?");
     defer statement.deinit();

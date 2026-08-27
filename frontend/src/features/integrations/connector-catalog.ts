@@ -10,11 +10,30 @@ export type CatalogEntry = Omit<McpCatalogEntry, "command" | "args"> & {
   auth?: OAuthConnectorAuthDefinition;
 };
 
+const remoteOAuthDefinition = (provider: string): OAuthConnectorAuthDefinition => ({
+  kind: "oauth-pkce",
+  clientIdEnv: provider === "x-api" ? "LOCAL_STUDIO_X_CLIENT_ID" : "",
+  tokenUrl: "",
+  scopes: [],
+  tokenEnv: "",
+  identityUrl: "",
+  identityField: "",
+  createClientUrl:
+    provider === "x-api" ? "https://developer.x.com/en/portal/projects-and-apps" : "",
+  setupHint:
+    provider === "x-api"
+      ? "Create an OAuth 2.0 public client with a localhost callback, then paste its public Client ID."
+      : "",
+});
+
 export const hydrateConnectorCatalog = (entries: readonly McpCatalogEntry[]): CatalogEntry[] =>
   entries.map((entry) => {
     const provider = entry.authProvider ? oauthConnectorProvider(entry.authProvider) : null;
     const hydrated = { ...entry, command: entry.command ?? "", args: entry.args ?? [] };
-    return provider ? { ...hydrated, auth: provider.auth } : hydrated;
+    if (provider) return { ...hydrated, auth: provider.auth };
+    return entry.authProvider
+      ? { ...hydrated, auth: remoteOAuthDefinition(entry.authProvider) }
+      : hydrated;
   });
 
 export function renderCommandLine(command: string, args: readonly string[]): string {

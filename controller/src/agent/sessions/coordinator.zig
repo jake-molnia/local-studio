@@ -4,6 +4,7 @@ const records = @import("control_store.zig");
 const execution = @import("../execution/store.zig");
 const cloud_store = @import("../cloud/store.zig");
 const daytona_runtime = @import("../cloud/daytona.zig");
+const agent_code_storage = @import("../../accounts/code_storage/service.zig");
 const sqlite = @import("../../storage/sqlite.zig");
 const harness_nodes = @import("../harness/nodes.zig");
 const harness_catalog = @import("../harness/catalog.zig");
@@ -147,6 +148,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
     const requested_placement = optionalString(object, "placement");
+    const requested_sandbox_account_id = optionalString(object, "sandboxAccountId");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
@@ -161,9 +163,20 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     else
         project_path == null and (explicit_harness == null or std.mem.eql(u8, explicit_harness.?, "chat"));
     if (kind_value != null and !is_chat and !std.mem.eql(u8, kind_value.?, "project")) return error.InvalidSessionKind;
+    const existing_cloud = if (existing) |session| std.mem.startsWith(u8, session.node_id, "daytona-") else false;
+    if (existing != null and requested_placement != null and !is_chat) {
+        const requests_cloud = std.mem.eql(u8, requested_placement.?, "daytona");
+        if (requests_cloud != existing_cloud) return error.SessionPlacementMismatch;
+    }
+    const use_daytona = !is_chat and mode == .head and if (requested_placement) |value| std.mem.eql(u8, value, "daytona") else existing_cloud;
+    if (requested_placement) |value| if (!std.mem.eql(u8, value, "local") and !std.mem.eql(u8, value, "node") and !std.mem.eql(u8, value, "daytona")) return error.InvalidAgentPlacement;
+    if (is_chat and requested_placement != null and !std.mem.eql(u8, requested_placement.?, "head")) return error.InvalidChatPlacement;
+    const cloud_workspace = if (use_daytona) try daytona_runtime.workspacePath(allocator, session_id) else null;
+    defer if (cloud_workspace) |value| allocator.free(value);
+    const session_workspace = cloud_workspace orelse project_path;
     const project_id = if (is_chat) "chats" else requested_project_id;
     if (is_chat and project_path != null) return error.InvalidChatSession;
-    if (!is_chat and project_path == null) return error.ProjectWorkspaceRequired;
+    if (!is_chat and session_workspace == null) return error.ProjectWorkspaceRequired;
     if (!is_chat and explicit_harness != null and std.mem.eql(u8, explicit_harness.?, "chat")) return error.InvalidProjectHarness;
     const requested_harness = if (is_chat) "chat" else explicit_harness orelse if (existing) |session| session.harness else return error.ProjectHarnessRequired;
     if (existing) |session| if (!std.mem.eql(u8, session.harness, requested_harness)) return error.SessionHarnessMismatch;
@@ -197,19 +210,10 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     }
     const dispatch_document = detached_document orelse routed_document;
     if (!is_chat and !std.mem.eql(u8, requested_harness, "pi") and !std.mem.eql(u8, requested_harness, "fx") and !std.mem.eql(u8, requested_harness, "opencode") and !std.mem.eql(u8, requested_harness, "codex") and !std.mem.eql(u8, requested_harness, "claude")) return error.HarnessDriverUnavailable;
-    const existing_cloud = if (existing) |session| std.mem.startsWith(u8, session.node_id, "daytona-") else false;
-    if (existing != null and requested_placement != null and !is_chat) {
-        const requests_cloud = std.mem.eql(u8, requested_placement.?, "daytona");
-        if (requests_cloud != existing_cloud) return error.SessionPlacementMismatch;
-    }
-    const use_daytona = !is_chat and mode == .head and if (requested_placement) |value| std.mem.eql(u8, value, "daytona") else existing_cloud;
-    if (requested_placement) |value| if (!std.mem.eql(u8, value, "local") and !std.mem.eql(u8, value, "node") and !std.mem.eql(u8, value, "daytona")) return error.InvalidAgentPlacement;
-    if (is_chat and requested_placement != null and !std.mem.eql(u8, requested_placement.?, "head")) return error.InvalidChatPlacement;
-
     try lockedEnsureExecution(io, database, .{
         .id = session_id,
         .kind = if (is_chat) .chat else .project,
-        .workspace = project_path,
+        .workspace = session_workspace,
         .harness = if (is_chat) null else requested_harness,
         .project_id = project_id,
         .model_id = model_id,
@@ -221,12 +225,16 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const turn_attempt = try lockedBeginExecution(io, database, session_id, message, if (is_chat) .head else if (mode == .standalone) .local else if (use_daytona) .daytona else .node, if (target) |node| node.id else null, if (is_chat) "head" else if (mode == .standalone) "local" else if (target) |node| node.id else "daytona");
     if (use_daytona and target == null) {
         const cloud = daytona orelse return error.DaytonaPlacementUnavailable;
-        const account_id = optionalString(object, "sandboxAccountId") orelse return error.SandboxAccountRequired;
-        const configured_image = try cloud.defaultImage();
-        defer allocator.free(configured_image);
-        const image = configured_image;
-        const worker_id = try lockedCreateCloudWorker(io, database, session_id, turn_attempt.attempt_id[0..], account_id, requested_harness, image);
-        var provisioned = cloud.provision(client, database, worker_id[0..], session_id, account_id, requested_harness, image) catch |failure| {
+        const account_id = requested_sandbox_account_id orelse return error.SandboxAccountRequired;
+        const checkout = agent_code_storage.forward(allocator, io, client, database, "/internal/node/v1/projects/cloud-checkout", .POST, routed_document) catch |failure| {
+            try lockedExecutionStatus(io, database, session_id, "failed", null, @errorName(failure));
+            return failure;
+        };
+        defer allocator.free(checkout);
+        const snapshot = try cloud.defaultSnapshot();
+        defer allocator.free(snapshot);
+        const worker_id = try lockedCreateCloudWorker(io, database, session_id, turn_attempt.attempt_id[0..], account_id, requested_harness, snapshot);
+        var provisioned = cloud.provision(client, database, worker_id[0..], session_id, account_id, requested_harness, snapshot, checkout) catch |failure| {
             try lockedCloudWorkerStatus(io, database, worker_id[0..], "failed", @errorName(failure));
             try lockedExecutionStatus(io, database, session_id, "failed", null, @errorName(failure));
             return failure;
@@ -249,7 +257,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
         .node_id = node_id,
         .native_session_id = resume_native_session_id,
         .project_id = project_id,
-        .project_path = project_path,
+        .project_path = session_workspace,
         .model_id = model_id,
         .model_route_id = model_route_id,
         .status = "queued",
@@ -266,10 +274,13 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
         try lockedTranscript(io, database, session_id, source_key, transcript);
     }
 
+    const remote_document = if (cloud_workspace) |value| try documentWithWorkspace(allocator, dispatch_document, value) else null;
+    defer if (remote_document) |value| allocator.free(value);
+    const effective_document = remote_document orelse dispatch_document;
     const payload = if (mode == .standalone or is_chat)
-        harness.turnPayloadAt(dispatch_document, if (existing) |session| session.event_cursor else 0, resume_native_session_id)
+        harness.turnPayloadAt(effective_document, if (existing) |session| session.event_cursor else 0, resume_native_session_id)
     else
-        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", dispatch_document);
+        remotePost(allocator, client, &target.?, "/internal/harness/v1/turn", effective_document);
     const response = payload catch |failure| {
         try lockedFinish(io, database, command_id[0..], "rejected", @errorName(failure));
         try lockedRuntime(io, database, session_id, "unavailable", null, null);
@@ -782,6 +793,14 @@ fn serialize(allocator: std.mem.Allocator, value: std.json.Value) ![]u8 {
     errdefer output.deinit();
     try std.json.Stringify.value(value, .{}, &output.writer);
     return output.toOwnedSlice();
+}
+
+fn documentWithWorkspace(allocator: std.mem.Allocator, document: []const u8, workspace: []const u8) ![]u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, document, .{}) catch return error.InvalidTurnPayload;
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidTurnPayload;
+    try parsed.value.object.put(parsed.arena.allocator(), "cwd", .{ .string = workspace });
+    return serialize(allocator, parsed.value);
 }
 
 fn runtimeStatusPresent(allocator: std.mem.Allocator, document: []const u8) bool {

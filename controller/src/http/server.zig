@@ -636,15 +636,23 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.startsWith(u8, route.path, "/api/agent/oauth")) {
-        const document = if (request.head.method == .POST or request.head.method == .PUT or std.mem.eql(u8, route.path, "/api/agent/oauth/authorize")) try readBoundedJsonBody(allocator, request) else null;
+        const method = request.head.method;
+        const authorize_route = std.mem.eql(u8, route.path, "/api/agent/oauth/authorize");
+        const remote_suffix = if (mode != .standalone) try allocator.dupe(u8, request.head.target["/api/agent/oauth".len..]) else null;
+        defer if (remote_suffix) |value| allocator.free(value);
+        const document = if (method == .POST or method == .PUT or authorize_route) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
         const response = if (mode != .standalone) remote: {
-            const suffix = request.head.target["/api/agent/oauth".len..];
-            const internal_path = try std.fmt.allocPrint(allocator, "/internal/node/v1/oauth{s}", .{suffix});
+            const connector_id = if (authorize_route and method == .DELETE) try agent_oauth.connectorIdFromPayload(allocator, document orelse return false) else null;
+            defer if (connector_id) |value| allocator.free(value);
+            const internal_path = if (connector_id) |value|
+                try std.fmt.allocPrint(allocator, "/internal/node/v1/oauth/authorize?connectorId={s}", .{value})
+            else
+                try std.fmt.allocPrint(allocator, "/internal/node/v1/oauth{s}", .{remote_suffix.?});
             defer allocator.free(internal_path);
-            break :remote agent_oauth.forward(allocator, io, client, database, internal_path, request.head.method, document);
-        } else if (std.mem.eql(u8, route.path, "/api/agent/oauth/authorize"))
-            if (request.head.method == .POST) oauth.authorizePayload(client, document orelse return false) else oauth.cancelPayload()
+            break :remote agent_oauth.forward(allocator, io, client, database, internal_path, method, if (connector_id == null) document else null);
+        } else if (authorize_route)
+            if (method == .POST) oauth.authorizePayload(client, database, document orelse return false) else oauth.cancelPayload(document orelse return false)
         else if (std.mem.eql(u8, route.path, "/api/agent/oauth/status")) local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
@@ -728,14 +736,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer if (document) |value| allocator.free(value);
         const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
-        const response = if (mode != .standalone) remote: {
-            const internal_path = if (account_id) |value|
-                try std.fmt.allocPrint(allocator, "/internal/node/v1/accounts/sandboxes?accountId={s}", .{value})
-            else
-                try allocator.dupe(u8, "/internal/node/v1/accounts/sandboxes");
-            defer allocator.free(internal_path);
-            break :remote agent_code_storage.forward(allocator, io, client, database, internal_path, request.head.method, document);
-        } else switch (request.head.method) {
+        const response = switch (request.head.method) {
             .GET => code_storage.sandboxAccountsPayload(),
             .POST => code_storage.connectSandboxPayload(document orelse return false),
             .DELETE => code_storage.disconnectSandboxPayload(account_id orelse return respondDownloadError(request, .bad_request, "accountId is required")),
@@ -1131,6 +1132,14 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/internal/node/v1/projects/cloud-checkout")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const payload = code_storage.cloudCheckoutPayload(database, document) catch |failure| return respondProjectFailure(request, failure);
+        defer allocator.free(payload);
+        try request.respond(payload, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return request.head.keep_alive;
+    }
     if (std.mem.eql(u8, route.path, "/internal/node/v1/projects/refs")) {
         const project_id = try request_tools.queryParameter(allocator, request.head.target, "projectId");
         defer if (project_id) |value| allocator.free(value);
@@ -1182,15 +1191,23 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         return request.head.keep_alive;
     }
     if (std.mem.startsWith(u8, route.path, "/internal/node/v1/oauth")) {
-        const document = if (request.head.method == .POST or request.head.method == .PUT or std.mem.eql(u8, route.path, "/internal/node/v1/oauth/authorize")) try readBoundedJsonBody(allocator, request) else null;
+        const method = request.head.method;
+        const authorize_route = std.mem.eql(u8, route.path, "/internal/node/v1/oauth/authorize");
+        const status_route = std.mem.eql(u8, route.path, "/internal/node/v1/oauth/status");
+        const client_route = std.mem.eql(u8, route.path, "/internal/node/v1/oauth/client");
+        const document = if (method == .POST or method == .PUT) try readBoundedJsonBody(allocator, request) else null;
         defer if (document) |value| allocator.free(value);
-        const response = if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/authorize"))
-            if (request.head.method == .POST) oauth.authorizePayload(client, document orelse return false) else oauth.cancelPayload()
-        else if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/status")) local: {
+        const response = if (authorize_route)
+            if (method == .POST) oauth.authorizePayload(client, database, document orelse return false) else local: {
+                const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
+                defer if (connector_id) |value| allocator.free(value);
+                break :local oauth.cancelConnectorPayload(connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
+            }
+        else if (status_route) local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
             defer if (connector_id) |value| allocator.free(value);
             break :local oauth.statusPayload(client, database, connector_id orelse return respondOAuthFailure(request, error.ConnectorIdRequired));
-        } else if (std.mem.eql(u8, route.path, "/internal/node/v1/oauth/client"))
+        } else if (client_route)
             oauth.clientPayload(database, document orelse return false)
         else local: {
             const connector_id = try request_tools.queryParameter(allocator, request.head.target, "connectorId");
@@ -2604,20 +2621,24 @@ fn respondOAuthFailure(request: *http.Server.Request, failure: anyerror) !bool {
     const status: http.Status = switch (failure) {
         error.ConnectorIdRequired, error.InvalidOAuthPayload => .bad_request,
         error.OAuthConnectorNotFound => .not_found,
-        error.OAuthClientRequired, error.ConnectorNodeRequired => .conflict,
-        error.NodeUnavailable, error.NodeRequestRejected, error.OAuthProviderRejected, error.InvalidOAuthProviderResponse => .bad_gateway,
+        error.OAuthClientRequired, error.OAuthClientNotConfigurable, error.ConnectorNodeRequired => .conflict,
+        error.NodeUnavailable, error.NodeRequestRejected, error.OAuthProviderRejected, error.InvalidOAuthProviderResponse, error.McpOAuthDiscoveryRejected, error.McpOAuthRegistrationRejected, error.McpOAuthChallengeRequired, error.McpOAuthResourceMetadataRequired, error.InvalidMcpOAuthMetadata, error.InvalidMcpOAuthResponse => .bad_gateway,
         else => .internal_server_error,
     };
     const detail: []const u8 = switch (failure) {
         error.ConnectorIdRequired => "connectorId is required",
         error.InvalidOAuthPayload => "Invalid OAuth request",
         error.OAuthConnectorNotFound => "The connector does not support OAuth",
-        error.OAuthClientRequired => "Register an OAuth client for GitHub first",
+        error.OAuthClientRequired => "Register an OAuth client for this provider first",
+        error.OAuthClientNotConfigurable => "This provider manages OAuth client registration automatically",
         error.ConnectorNodeRequired => "No enrolled node offers MCP connectors",
         error.NodeUnavailable => "The connector node is unavailable",
         error.NodeRequestRejected => "The connector node rejected the OAuth request",
         error.OAuthProviderRejected => "GitHub refused the sign-in request",
         error.InvalidOAuthProviderResponse => "GitHub returned an invalid OAuth response",
+        error.McpOAuthDiscoveryRejected, error.McpOAuthChallengeRequired, error.McpOAuthResourceMetadataRequired, error.InvalidMcpOAuthMetadata => "The MCP server did not provide valid OAuth discovery metadata",
+        error.McpOAuthRegistrationRejected => "The MCP authorization server rejected client registration",
+        error.InvalidMcpOAuthResponse => "The MCP authorization server returned an invalid response",
         else => @errorName(failure),
     };
     return respondDownloadError(request, status, detail);
@@ -3314,7 +3335,10 @@ fn serveHeadInference(allocator: std.mem.Allocator, io: Io, configuration: *cons
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
         const public_protocol: openai_protocol.Protocol = if (std.mem.startsWith(u8, captured.target, "/v1/responses")) .responses else .chat_completions;
-        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch return false;
+        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, public_protocol, inference_body, requested_stream, request) catch |failure| {
+            std.log.err("Codex gateway failed: {t}", .{failure});
+            return false;
+        };
         persistInferenceUsage(io, database, model_id, "openai-codex", sample, requested_stream);
         return false;
     }
@@ -3589,7 +3613,10 @@ fn serveLocalPassthrough(allocator: std.mem.Allocator, io: Io, configuration: *c
         var credential = (try head_provider_state.credential(client, "openai-codex")) orelse return respondDownloadError(request, .unauthorized, "OpenAI Codex is not connected on this Standalone node");
         defer credential.deinit();
         const requested_stream = if (parsed.value.object.get("stream")) |stream_value| stream_value == .bool and stream_value.bool else false;
-        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch return false;
+        const sample = codex_gateway.serve(allocator, client, &credential, upstream_model, .responses, inference_body, requested_stream, request) catch |failure| {
+            std.log.err("Codex gateway failed: {t}", .{failure});
+            return false;
+        };
         persistInferenceUsage(io, database, requested_model, "openai-codex", sample, requested_stream);
         return false;
     }

@@ -216,6 +216,7 @@ in
     env = {
       LOCAL_STUDIO_CONTROLLER_MODE = "head";
       LOCAL_STUDIO_DATA_DIR = headDataDir;
+      LOCAL_STUDIO_DAYTONA_SNAPSHOT = "local-studio-worker-2.1.1-nightly.20260827T134631Z.g43e988e7";
       LOCAL_STUDIO_MODELS_DIR = modelsDir;
       LOCAL_STUDIO_PORT = toString controllerPort;
     };

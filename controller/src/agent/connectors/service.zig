@@ -207,6 +207,49 @@ pub fn disconnectAllOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *
     try repository.deleteConnectorGrants(database, "github");
 }
 
+pub fn connectRemoteOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, provider: []const u8, account: []const u8, label: []const u8, resource: []const u8, protocol_era: []const u8) !void {
+    const id = try remoteOAuthConnectorId(allocator, provider, account);
+    defer allocator.free(id);
+    const executable = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(executable);
+    var document: Io.Writer.Allocating = .init(allocator);
+    defer document.deinit();
+    try document.writer.writeAll("{\"id\":");
+    try std.json.Stringify.value(id, .{}, &document.writer);
+    try document.writer.writeAll(",\"name\":");
+    try std.json.Stringify.value(label, .{}, &document.writer);
+    try document.writer.writeAll(",\"transport\":\"stdio\",\"command\":");
+    try std.json.Stringify.value(executable, .{}, &document.writer);
+    try document.writer.writeAll(",\"args\":[\"mcp-forward\",");
+    try std.json.Stringify.value(resource, .{}, &document.writer);
+    try document.writer.writeByte(',');
+    try std.json.Stringify.value(protocol_era, .{}, &document.writer);
+    try document.writer.writeByte(',');
+    try std.json.Stringify.value(provider, .{}, &document.writer);
+    try document.writer.writeByte(',');
+    try std.json.Stringify.value(account, .{}, &document.writer);
+    try document.writer.writeAll("],\"protocolEra\":\"modern\",\"auth\":{\"type\":\"oauth\",\"provider\":");
+    try std.json.Stringify.value(provider, .{}, &document.writer);
+    try document.writer.writeAll(",\"account\":");
+    try std.json.Stringify.value(account, .{}, &document.writer);
+    try document.writer.writeAll("},\"origin\":{\"kind\":\"account-adapter\",\"id\":");
+    try std.json.Stringify.value(account, .{}, &document.writer);
+    try document.writer.writeAll(",\"binding\":");
+    try std.json.Stringify.value(provider, .{}, &document.writer);
+    try document.writer.writeAll("},\"enabled\":true}");
+    const response = try upsertLocal(allocator, io, database, document.writer.buffered());
+    allocator.free(response);
+}
+
+pub fn disconnectRemoteOAuthLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, provider: []const u8, account: []const u8) !void {
+    const id = try remoteOAuthConnectorId(allocator, provider, account);
+    defer allocator.free(id);
+    try database.lock(io);
+    defer database.unlock(io);
+    try repository.delete(database, id);
+    try repository.deleteConnectorGrants(database, id);
+}
+
 pub fn connectGoogleLocal(allocator: std.mem.Allocator, io: Io, database: *sqlite.Database, service: []const u8, account_key: []const u8, email: []const u8) !void {
     const slug = if (std.mem.eql(u8, service, "gmail")) "gmail" else if (std.mem.eql(u8, service, "google-calendar")) "calendar" else return error.InvalidGoogleService;
     const id = try std.fmt.allocPrint(allocator, "account-google-{s}-{s}", .{ slug, account_key });
@@ -793,6 +836,21 @@ fn githubConnectorId(allocator: std.mem.Allocator, account: []const u8) ![]u8 {
     for (account[0..length], prefix.len..) |character, index| {
         id[index] = if (std.ascii.isAlphanumeric(character)) std.ascii.toLower(character) else '-';
     }
+    if (!validId(id)) return error.InvalidConnectorId;
+    return id;
+}
+
+fn remoteOAuthConnectorId(allocator: std.mem.Allocator, provider: []const u8, account: []const u8) ![]u8 {
+    const prefix = "account-";
+    const separator = "-";
+    const provider_length = @min(provider.len, 20);
+    const account_length = @min(account.len, 64 - prefix.len - separator.len - provider_length);
+    const id = try allocator.alloc(u8, prefix.len + provider_length + separator.len + account_length);
+    @memcpy(id[0..prefix.len], prefix);
+    for (provider[0..provider_length], prefix.len..) |character, index| id[index] = if (std.ascii.isAlphanumeric(character)) std.ascii.toLower(character) else '-';
+    const separator_index = prefix.len + provider_length;
+    id[separator_index] = '-';
+    for (account[0..account_length], separator_index + 1..) |character, index| id[index] = if (std.ascii.isAlphanumeric(character)) std.ascii.toLower(character) else '-';
     if (!validId(id)) return error.InvalidConnectorId;
     return id;
 }

@@ -12,7 +12,7 @@ pub fn main(init: std.process.Init) !void {
     if (arguments.next()) |command| {
         if (std.mem.eql(u8, command, "mcp-bridge")) return mcp_bridge.run(init);
         if (std.mem.eql(u8, command, "mcp-code-storage")) return mcp_code_storage.run(init);
-        if (std.mem.eql(u8, command, "mcp-forward")) return mcp_forward.run(init, arguments.next() orelse return error.McpForwardUrlRequired, arguments.next() orelse "auto");
+        if (std.mem.eql(u8, command, "mcp-forward")) return mcp_forward.run(init, arguments.next() orelse return error.McpForwardUrlRequired, arguments.next() orelse "auto", arguments.next(), arguments.next());
     }
     var settings = try config.Config.load(init);
     errdefer settings.deinit();
