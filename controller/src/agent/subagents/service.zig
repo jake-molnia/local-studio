@@ -140,6 +140,8 @@ fn stoppedResponse(allocator: std.mem.Allocator, io: Io, database: *sqlite.Datab
 fn writeRun(writer: *Io.Writer, run: *const repository.Run, include_report: bool, usage_total: u64) !void {
     try writer.writeAll("{\"id\":");
     try std.json.Stringify.value(run.id, .{}, writer);
+    try writer.writeAll(",\"runtimeSessionId\":");
+    try std.json.Stringify.value(run.runtime_session_id, .{}, writer);
     try writer.writeAll(",\"name\":");
     try std.json.Stringify.value(run.name, .{}, writer);
     try writer.writeAll(",\"task\":");

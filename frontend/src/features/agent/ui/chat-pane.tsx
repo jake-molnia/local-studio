@@ -141,6 +141,7 @@ function ChatTranscript({
   cwd,
   loadEarlierHistory,
   subagents,
+  hideUserMessages,
 }: {
   composerOnly: boolean;
   terminalView: boolean;
@@ -152,9 +153,13 @@ function ChatTranscript({
   cwd: string;
   loadEarlierHistory: () => Promise<void>;
   subagents: readonly SubagentRun[];
+  hideUserMessages: boolean;
 }) {
   const viewKey = activeTab?.piSessionId ?? activeTab?.id ?? null;
   const viewAlias = activeTab?.piSessionId ? activeTab.id : null;
+  const messages = hideUserMessages
+    ? (activeTab?.messages ?? []).filter((message) => message.role !== "user")
+    : (activeTab?.messages ?? []);
   if (composerOnly) return null;
   return (
     <div className={terminalView ? "hidden" : "flex min-h-0 min-w-0 flex-1"}>
@@ -165,7 +170,7 @@ function ChatTranscript({
           key={activeTab?.id ?? "empty"}
           stickToBottom={stickToBottom}
           onStickToBottomChange={setStickToBottom}
-          messages={activeTab?.messages ?? []}
+          messages={messages}
           running={running}
           cwd={cwd || null}
           viewKey={viewKey}
@@ -701,6 +706,7 @@ export function ChatPane({
         cwd={workspaceCwd}
         loadEarlierHistory={loadEarlierHistory}
         subagents={subagents}
+        hideUserMessages={readOnly && readOnlyVariant === "subagent"}
       />
       <div className={terminalView && !chatWorkspace ? "hidden" : "contents"}>
         {diffDrawerOpen && !chatWorkspace ? (

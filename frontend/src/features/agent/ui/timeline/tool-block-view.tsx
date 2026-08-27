@@ -168,6 +168,8 @@ function browserDomain(url: string | null): string | null {
 
 function browserToolLabel(block: ToolBlock): string {
   const running = block.status === "running";
+  const query = toolArg(block, ["query", "q"]);
+  if (query) return running ? "Searching the web" : "Searched the web";
   if (Array.isArray(block.args?.search_query))
     return running ? "Searching the web" : "Searched the web";
   if (Array.isArray(block.args?.image_query))

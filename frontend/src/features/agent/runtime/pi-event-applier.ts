@@ -834,11 +834,7 @@ function reduceFinalAssistantMessageEvent(
     const patched = patchAssistantMessage(
       target.session,
       target.targetId,
-      (current) => ({
-        ...current,
-        text,
-        blocks,
-      }),
+      (current) => reconcileFinalAssistantMessage(current, text, blocks),
       ctx.replay,
     );
     ctx.liveAssistantIds.delete(session.id);

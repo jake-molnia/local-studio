@@ -181,7 +181,15 @@ fn writeCodexToolEvent(writer: *Io.Writer, item: std.json.ObjectMap, item_id: []
         try std.json.Stringify.value(tool_name, .{}, writer);
         if (item.get(arguments_field)) |arguments| {
             try writer.writeAll(",\"arguments\":");
-            try std.json.Stringify.value(arguments, .{}, writer);
+            if (arguments == .object) {
+                try std.json.Stringify.value(arguments, .{}, writer);
+            } else {
+                try writer.writeAll("{");
+                try std.json.Stringify.value(arguments_field, .{}, writer);
+                try writer.writeAll(":");
+                try std.json.Stringify.value(arguments, .{}, writer);
+                try writer.writeAll("}");
+            }
         }
     } else {
         const failed = std.mem.eql(u8, stringField(item, "status") orelse "", "failed");

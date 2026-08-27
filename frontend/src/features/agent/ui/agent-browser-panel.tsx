@@ -22,7 +22,7 @@ import { PersistentTerminals } from "@/features/agent/ui/persistent-terminals";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import { useWorkbenchProjection } from "@/features/workbench/controller-state";
-import { piSessionIdFromSubagentResource } from "@/features/agent/ui/subagent-activity";
+import { sessionIdFromSubagentResource } from "@/features/agent/ui/subagent-activity";
 
 type AgentBrowserPanelHandles = Pick<
   WorkspaceHandles,
@@ -48,12 +48,12 @@ function createSideChatSession(
   resourceTitle?: string,
 ): Session {
   const tab = makeFreshTab();
-  const subagentPiSessionId = piSessionIdFromSubagentResource(resourceId);
+  const subagentSessionId = sessionIdFromSubagentResource(resourceId);
   return {
     ...tab,
-    ...(resourceId ? { id: resourceId } : {}),
+    ...(resourceId ? { id: subagentSessionId ?? resourceId } : {}),
     title: resourceTitle ?? "Side chat",
-    piSessionId: subagentPiSessionId,
+    piSessionId: subagentSessionId,
     cwd: focusedSession?.cwd ?? activeProject?.path,
     projectId: focusedSession?.projectId ?? activeProject?.id,
     modelId: focusedSession?.modelId ?? activeModelId,

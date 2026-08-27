@@ -7,6 +7,7 @@ import { useMountSubscription } from "@/hooks/use-mount-subscription";
 
 const SubagentRunSchema = Schema.Struct({
   id: Schema.String,
+  runtimeSessionId: Schema.String,
   name: Schema.String,
   task: Schema.String,
   piSessionId: Schema.NullOr(Schema.String),
@@ -41,7 +42,7 @@ export function subagentResourceId(piSessionId: string): string {
   return `${SUBAGENT_RESOURCE_PREFIX}${encodeURIComponent(piSessionId)}`;
 }
 
-export function piSessionIdFromSubagentResource(resourceId: string | undefined): string | null {
+export function sessionIdFromSubagentResource(resourceId: string | undefined): string | null {
   if (!resourceId?.startsWith(SUBAGENT_RESOURCE_PREFIX)) return null;
   try {
     return decodeURIComponent(resourceId.slice(SUBAGENT_RESOURCE_PREFIX.length)) || null;
@@ -107,12 +108,10 @@ export function SubagentActivityRows({ runs }: { runs: readonly SubagentRun[] })
           <button
             key={run.id}
             type="button"
-            disabled={!run.piSessionId}
             onClick={() => {
-              if (!run.piSessionId) return;
               openWorkbenchResource({
                 kind: "chat",
-                resourceId: subagentResourceId(run.piSessionId),
+                resourceId: subagentResourceId(run.runtimeSessionId),
                 title: run.name,
               });
             }}
