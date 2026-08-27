@@ -16,7 +16,7 @@ ARG OPENCODE_VERSION=0.0.0-beta-18286
 ARG CLAUDE_VERSION=2.1.232
 ARG FX_VERSION=0.0.6
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates chromium curl git openssh-client && rm -rf /var/lib/apt/lists/* && useradd --uid 1000 --create-home studio
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates chromium curl git openssh-client && rm -rf /var/lib/apt/lists/*
 RUN npm install --global "@mariozechner/pi-coding-agent@${PI_VERSION}" "@openai/codex@${CODEX_VERSION}" && npm cache clean --force
 RUN set -eu; \
     case "$TARGETARCH" in \
@@ -48,7 +48,7 @@ ENV LOCAL_STUDIO_BUNDLED_CHROMIUM_PATH=/usr/bin/chromium
 
 EXPOSE 8080
 
-USER studio
-WORKDIR /home/studio
+USER node
+WORKDIR /home/node
 
 ENTRYPOINT ["local-studio-controller"]
