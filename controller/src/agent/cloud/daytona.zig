@@ -3,6 +3,7 @@ const account_repository = @import("../../accounts/store.zig");
 const cloud_store = @import("store.zig");
 const cloud_types = @import("types.zig");
 const enrollments = @import("../../topology/enrollments.zig");
+const model_relay = @import("../harness/model_relay.zig");
 const sqlite = @import("../../storage/sqlite.zig");
 
 const Io = std.Io;
@@ -27,28 +28,45 @@ pub const Manager = struct {
     io: Io,
     data_dir: []u8,
     environment: *const std.process.Environ.Map,
+    head_origin: []u8,
+    head_api_key: ?[]u8,
+    links: Io.Group = .init,
 
-    pub fn init(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, environment: *const std.process.Environ.Map) !Manager {
+    pub fn init(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, environment: *const std.process.Environ.Map, head_port: u16, head_api_key: ?[]const u8) !Manager {
+        const owned_data_dir = try allocator.dupe(u8, data_dir);
+        errdefer allocator.free(owned_data_dir);
+        const head_origin = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}", .{head_port});
+        errdefer allocator.free(head_origin);
+        const owned_head_api_key = if (head_api_key) |value| try allocator.dupe(u8, value) else null;
+        errdefer if (owned_head_api_key) |value| allocator.free(value);
         return .{
             .allocator = allocator,
             .io = io,
-            .data_dir = try allocator.dupe(u8, data_dir),
+            .data_dir = owned_data_dir,
             .environment = environment,
+            .head_origin = head_origin,
+            .head_api_key = owned_head_api_key,
         };
     }
 
     pub fn deinit(manager: *Manager) void {
+        manager.links.cancel(manager.io);
         manager.allocator.free(manager.data_dir);
+        manager.allocator.free(manager.head_origin);
+        if (manager.head_api_key) |value| manager.allocator.free(value);
         manager.* = undefined;
     }
 
     pub fn provision(manager: *Manager, client: *http.Client, database: *sqlite.Database, worker_id: []const u8, session_id: []const u8, account_id: []const u8, requested_harness: []const u8, snapshot: []const u8, vcpus: u8, memory_gib: u16, storage_gib: u16, checkout: []const u8) !cloud_types.Provisioned {
+        _ = vcpus;
+        _ = memory_gib;
+        _ = storage_gib;
         var account_credential = try manager.loadCredential(account_id);
         defer account_credential.deinit();
         var controller_key_bytes: [32]u8 = undefined;
         manager.io.random(&controller_key_bytes);
         const controller_key = std.fmt.bytesToHex(controller_key_bytes, .lower);
-        const create_document = try manager.createDocument(worker_id, session_id, snapshot, vcpus, memory_gib, storage_gib, controller_key[0..]);
+        const create_document = try manager.createDocument(worker_id, session_id, snapshot, controller_key[0..]);
         defer manager.allocator.free(create_document);
         const created = manager.request(client, account_credential.endpoint, account_credential.api_key, "/sandbox", .POST, create_document) catch return error.DaytonaSandboxCreateRejected;
         defer manager.allocator.free(created);
@@ -58,7 +76,6 @@ pub const Manager = struct {
         try lockedProvider(manager.io, database, worker_id, provider_id);
         try manager.waitForStarted(client, &account_credential, provider_id);
         try manager.waitForToolbox(client, &account_credential, provider_id);
-        try manager.verifyHead(client, &account_credential, provider_id);
         try manager.startController(client, &account_credential, provider_id);
         const preview_path = try std.fmt.allocPrint(manager.allocator, "/sandbox/{s}/ports/{d}/preview-url", .{ provider_id, controller_port });
         defer manager.allocator.free(preview_path);
@@ -69,6 +86,7 @@ pub const Manager = struct {
         const catalog = try manager.waitForCatalog(client, address, controller_key[0..]);
         defer manager.allocator.free(catalog);
         if (!catalogHasHarness(manager.allocator, catalog, requested_harness)) return error.CloudHarnessUnavailable;
+        try model_relay.startClient(&manager.links, manager.allocator, manager.io, client, address, controller_key[0..], manager.head_origin, manager.head_api_key);
         const workspace = try manager.cloneWorkspace(client, &account_credential, provider_id, session_id, checkout);
         errdefer manager.allocator.free(workspace);
         const node_id = try std.fmt.allocPrint(manager.allocator, "daytona-{s}", .{worker_id[0..@min(worker_id.len, 20)]});
@@ -179,14 +197,13 @@ pub const Manager = struct {
         };
     }
 
-    fn createDocument(manager: *Manager, worker_id: []const u8, session_id: []const u8, snapshot: []const u8, vcpus: u8, memory_gib: u16, storage_gib: u16, controller_key: []const u8) ![]u8 {
+    fn createDocument(manager: *Manager, worker_id: []const u8, session_id: []const u8, snapshot: []const u8, controller_key: []const u8) ![]u8 {
         if (!validSnapshot(snapshot)) return error.DaytonaSnapshotRequired;
-        if (vcpus == 0 or memory_gib == 0 or storage_gib == 0) return error.InvalidSandboxProfile;
         var output: Io.Writer.Allocating = .init(manager.allocator);
         errdefer output.deinit();
         try output.writer.writeAll("{\"snapshot\":");
         try std.json.Stringify.value(snapshot, .{}, &output.writer);
-        try output.writer.print(",\"cpu\":{d},\"memory\":{d},\"disk\":{d},\"public\":true,\"autoStopInterval\":60,\"autoDeleteInterval\":30,\"ttlMinutes\":1440,\"name\":", .{ vcpus, memory_gib, storage_gib });
+        try output.writer.writeAll(",\"public\":true,\"autoStopInterval\":60,\"autoDeleteInterval\":30,\"ttlMinutes\":1440,\"name\":");
         const name = try std.fmt.allocPrint(manager.allocator, "local-studio-{s}", .{worker_id[0..@min(worker_id.len, 20)]});
         defer manager.allocator.free(name);
         try std.json.Stringify.value(name, .{}, &output.writer);
@@ -200,30 +217,10 @@ pub const Manager = struct {
             try output.writer.writeAll(",\"LOCAL_STUDIO_SECRETSPEC_PROVIDER\":");
             try std.json.Stringify.value(provider, .{}, &output.writer);
         }
-        if (manager.environment.get("LOCAL_STUDIO_DAYTONA_HEAD_URL")) |head_url| {
-            try output.writer.writeAll(",\"LOCAL_STUDIO_HEAD_URL\":");
-            try std.json.Stringify.value(head_url, .{}, &output.writer);
-        }
-        if (manager.environment.get("LOCAL_STUDIO_DAYTONA_HEAD_API_KEY")) |head_api_key| {
-            try output.writer.writeAll(",\"LOCAL_STUDIO_HEAD_API_KEY\":");
-            try std.json.Stringify.value(head_api_key, .{}, &output.writer);
-        }
         try output.writer.writeByte('}');
         if (manager.environment.get("LOCAL_STUDIO_DAYTONA_SECRETSPEC_SECRETS")) |document| try writeSecretReferences(manager.allocator, &output.writer, document);
         try output.writer.writeByte('}');
         return output.toOwnedSlice();
-    }
-
-    fn verifyHead(manager: *Manager, client: *http.Client, account_credential: *const Credential, provider_id: []const u8) !void {
-        if (manager.environment.get("LOCAL_STUDIO_DAYTONA_HEAD_URL") == null) return error.DaytonaHeadEndpointRequired;
-        const response = try manager.toolboxRequest(client, account_credential, provider_id, "/process/execute", .POST, "{\"command\":\"curl --fail --silent --show-error --max-time 20 \\\"$LOCAL_STUDIO_HEAD_URL/health\\\" >/dev/null\",\"cwd\":\"/home/node\",\"timeout\":30}");
-        defer manager.allocator.free(response);
-        var parsed = std.json.parseFromSlice(std.json.Value, manager.allocator, response, .{}) catch return error.InvalidDaytonaResponse;
-        defer parsed.deinit();
-        if (parsed.value != .object) return error.InvalidDaytonaResponse;
-        const exit_code = parsed.value.object.get("exitCode") orelse parsed.value.object.get("code") orelse return error.InvalidDaytonaResponse;
-        if (exit_code != .integer) return error.InvalidDaytonaResponse;
-        if (exit_code.integer != 0) return error.DaytonaHeadUnavailable;
     }
 
     fn request(manager: *Manager, client: *http.Client, endpoint: []const u8, api_key: []const u8, path: []const u8, method: http.Method, payload: ?[]const u8) ![]u8 {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const account_repository = @import("../../accounts/store.zig");
+const config = @import("../../app/config.zig");
 const cloud_store = @import("store.zig");
 const cloud_types = @import("types.zig");
 const daytona = @import("daytona.zig");
@@ -34,15 +35,15 @@ pub const Manager = struct {
     daytona: daytona.Manager,
     vercel: vercel.Manager,
 
-    pub fn init(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, environment: *const std.process.Environ.Map) !Manager {
-        var daytona_manager = try daytona.Manager.init(allocator, io, data_dir, environment);
+    pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config.Config) !Manager {
+        var daytona_manager = try daytona.Manager.init(allocator, io, configuration.data_dir, configuration.environment, configuration.port, configuration.api_key);
         errdefer daytona_manager.deinit();
-        var vercel_manager = try vercel.Manager.init(allocator, io, data_dir, environment);
+        var vercel_manager = try vercel.Manager.init(allocator, io, configuration.data_dir, configuration.environment);
         errdefer vercel_manager.deinit();
         return .{
             .allocator = allocator,
             .io = io,
-            .data_dir = try allocator.dupe(u8, data_dir),
+            .data_dir = try allocator.dupe(u8, configuration.data_dir),
             .daytona = daytona_manager,
             .vercel = vercel_manager,
         };
@@ -114,7 +115,7 @@ const Resources = struct {
 };
 
 fn profileResources(object: std.json.ObjectMap, profile_id: []const u8, provider: Provider) !Resources {
-    const profiles = object.get("profiles") orelse return error.InvalidSandboxProfile;
+    const profiles = object.get("profiles") orelse return defaultProfileResources(profile_id, provider);
     if (profiles != .array) return error.InvalidSandboxProfile;
     for (profiles.array.items) |profile| {
         if (profile != .object) continue;
@@ -133,6 +134,22 @@ fn profileResources(object: std.json.ObjectMap, profile_id: []const u8, provider
         return .{ .vcpus = @intCast(cpu), .memory_gib = memory, .storage_gib = storage_gib };
     }
     return error.InvalidSandboxProfile;
+}
+
+fn defaultProfileResources(profile_id: []const u8, provider: Provider) !Resources {
+    const vcpus: u8 = if (std.mem.eql(u8, profile_id, "light"))
+        1
+    else if (std.mem.eql(u8, profile_id, "standard"))
+        2
+    else if (std.mem.eql(u8, profile_id, "large"))
+        4
+    else
+        return error.InvalidSandboxProfile;
+    return .{
+        .vcpus = vcpus,
+        .memory_gib = @as(u16, vcpus) * 2,
+        .storage_gib = if (provider == .daytona) @as(u16, vcpus) * 10 else null,
+    };
 }
 
 fn positiveInteger(value: std.json.Value, maximum: u16) !u16 {

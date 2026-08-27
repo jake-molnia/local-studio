@@ -812,6 +812,36 @@
     },
     {
       "method": "POST",
+      "path": "/internal/head-link/v1/poll",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/head-link/v1/complete",
+      "ownership": "worker",
+      "streaming": "never"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/head-link/v1/chat/completions",
+      "ownership": "worker",
+      "streaming": "conditional"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/head-link/v1/responses",
+      "ownership": "worker",
+      "streaming": "conditional"
+    },
+    {
+      "method": "POST",
+      "path": "/internal/head-link/v1/messages",
+      "ownership": "worker",
+      "streaming": "conditional"
+    },
+    {
+      "method": "POST",
       "path": "/internal/harness/v1/turn",
       "ownership": "worker",
       "streaming": "never"

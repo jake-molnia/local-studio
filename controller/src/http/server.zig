@@ -144,7 +144,7 @@ pub const HttpServer = struct {
         errdefer browser.deinit();
         var mcp = try agent_mcp_runtime.Manager.init(allocator, io, config.environment, config.data_dir);
         errdefer mcp.deinit();
-        var sandboxes = try agent_sandboxes.Manager.init(allocator, io, config.data_dir, config.environment);
+        var sandboxes = try agent_sandboxes.Manager.init(allocator, io, &config);
         errdefer sandboxes.deinit();
         var messaging = try agent_messaging.Manager.init(allocator, io, &config);
         errdefer messaging.deinit();
@@ -322,6 +322,26 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
             });
             return request.head.keep_alive;
         },
+    }
+
+    if (std.mem.eql(u8, route.path, "/internal/head-link/v1/poll")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        allocator.free(document);
+        const response = harness.relayPollPayload() catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return false;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/head-link/v1/complete")) {
+        const document = try readBoundedAgentBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        const response = harness.relayCompletePayload(document) catch |failure| return respondHarnessFailure(request, failure);
+        defer allocator.free(response);
+        try request.respond(response, .{ .keep_alive = false, .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
+        return false;
+    }
+    if (std.mem.eql(u8, route.path, "/internal/head-link/v1/chat/completions") or std.mem.eql(u8, route.path, "/internal/head-link/v1/responses") or std.mem.eql(u8, route.path, "/internal/head-link/v1/messages")) {
+        return harness.serveRelayedModel(route.path, request) catch |failure| return respondHarnessFailure(request, failure);
     }
 
     if (std.mem.eql(u8, route.path, "/health")) {

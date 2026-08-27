@@ -3,6 +3,7 @@ const config_module = @import("../../app/config.zig");
 const harness_catalog = @import("catalog.zig");
 const harness_events = @import("events.zig");
 const pi_model_route = @import("pi_model_route.zig");
+const model_relay = @import("model_relay.zig");
 const harness_session_id = @import("session_id.zig");
 const runtime_limits = @import("../runtime/limits.zig");
 const runtime_window = @import("../runtime/window.zig");
@@ -95,12 +96,14 @@ pub const Manager = struct {
     opencode: harness_catalog.Installation,
     claude: harness_catalog.Installation,
     model_route: pi_model_route.Config,
+    model_relay: model_relay.Manager,
     mutex: Io.Mutex = .init,
     tasks: Io.Group = .init,
     sessions: std.StringHashMapUnmanaged(*Session) = .empty,
     pub fn init(allocator: std.mem.Allocator, io: Io, configuration: *const config_module.Config) !Manager {
         var model_route = try pi_model_route.Config.init(allocator, io, configuration);
         errdefer model_route.deinit();
+        const relay = model_relay.Manager.init(allocator, io, configuration.mode);
         var pi = try harness_catalog.discoverPi(allocator, io, configuration);
         errdefer pi.deinit();
         var codex = try harness_catalog.discoverCodex(allocator, io, configuration);
@@ -130,6 +133,7 @@ pub const Manager = struct {
             .opencode = opencode,
             .claude = claude,
             .model_route = model_route,
+            .model_relay = relay,
         };
     }
     pub fn deinit(manager: *Manager) void {
@@ -146,7 +150,20 @@ pub const Manager = struct {
         manager.opencode.deinit();
         manager.claude.deinit();
         manager.model_route.deinit();
+        manager.model_relay.deinit();
         manager.* = undefined;
+    }
+
+    pub fn serveRelayedModel(manager: *Manager, target: []const u8, request: *std.http.Server.Request) !bool {
+        return manager.model_relay.serveModel(target, request);
+    }
+
+    pub fn relayPollPayload(manager: *Manager) ![]u8 {
+        return manager.model_relay.pollPayload();
+    }
+
+    pub fn relayCompletePayload(manager: *Manager, document: []const u8) ![]u8 {
+        return manager.model_relay.completePayload(document);
     }
     pub fn setupPayload(manager: *Manager) ![]u8 {
         const available = manager.piIsAvailable();
