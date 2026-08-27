@@ -8,7 +8,7 @@ const Io = std.Io;
 const http = std.http;
 const max_response_bytes = 16 * 1024 * 1024;
 const controller_port = 8080;
-const worker_image = "ghcr.io/jake-molnia/local-studio-controller:main";
+const worker_image = "ghcr.io/jake-molnia/local-studio-controller:nightly";
 
 pub const Provisioned = struct {
     allocator: std.mem.Allocator,
@@ -182,7 +182,7 @@ pub const Manager = struct {
         try std.json.Stringify.value(session_id, .{}, &output.writer);
         try output.writer.writeAll("},\"env\":{\"LOCAL_STUDIO_CONTROLLER_MODE\":\"worker\",\"LOCAL_STUDIO_HOST\":\"0.0.0.0\",\"LOCAL_STUDIO_PORT\":\"8080\",\"LOCAL_STUDIO_API_KEY\":");
         try std.json.Stringify.value(controller_key, .{}, &output.writer);
-        try output.writer.writeAll(",\"LOCAL_STUDIO_DATA_DIR\":\"/home/studio/.local-studio\",\"LOCAL_STUDIO_MODELS_DIR\":\"/home/studio/models\",\"LOCAL_STUDIO_CLOUD_SESSION_ID\":");
+        try output.writer.writeAll(",\"LOCAL_STUDIO_DATA_DIR\":\"/home/node/.local-studio\",\"LOCAL_STUDIO_MODELS_DIR\":\"/home/node/models\",\"LOCAL_STUDIO_CLOUD_SESSION_ID\":");
         try std.json.Stringify.value(session_id, .{}, &output.writer);
         if (manager.environment.get("LOCAL_STUDIO_DAYTONA_SECRETSPEC_PROVIDER")) |provider| {
             try output.writer.writeAll(",\"LOCAL_STUDIO_SECRETSPEC_PROVIDER\":");
@@ -231,7 +231,7 @@ pub const Manager = struct {
 
 fn fetch(allocator: std.mem.Allocator, client: *http.Client, url: []const u8, method: http.Method, payload: ?[]const u8, headers: []const http.Header) ![]u8 {
     const storage = try allocator.alloc(u8, max_response_bytes);
-    errdefer allocator.free(storage);
+    defer allocator.free(storage);
     var output: Io.Writer = .fixed(storage);
     const response = try client.fetch(.{
         .location = .{ .url = url },
@@ -243,14 +243,9 @@ fn fetch(allocator: std.mem.Allocator, client: *http.Client, url: []const u8, me
         .extra_headers = headers,
         .response_writer = &output,
     });
-    if (response.status.class() != .success) {
-        allocator.free(storage);
-        return error.DaytonaRequestRejected;
-    }
+    if (response.status.class() != .success) return error.DaytonaRequestRejected;
     const body = output.buffered();
-    const owned = try allocator.dupe(u8, body);
-    allocator.free(storage);
-    return owned;
+    return allocator.dupe(u8, body);
 }
 
 fn requiredResponseString(allocator: std.mem.Allocator, document: []const u8, name: []const u8) ![]u8 {

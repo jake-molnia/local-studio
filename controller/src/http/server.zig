@@ -709,14 +709,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         defer if (document) |value| allocator.free(value);
         const account_id = if (request.head.method == .DELETE) try request_tools.queryParameter(allocator, request.head.target, "accountId") else null;
         defer if (account_id) |value| allocator.free(value);
-        const response = if (mode != .standalone) remote: {
-            const internal_path = if (account_id) |value|
-                try std.fmt.allocPrint(allocator, "/internal/node/v1/accounts/sandboxes?accountId={s}", .{value})
-            else
-                try allocator.dupe(u8, "/internal/node/v1/accounts/sandboxes");
-            defer allocator.free(internal_path);
-            break :remote agent_code_storage.forward(allocator, io, client, database, internal_path, request.head.method, document);
-        } else switch (request.head.method) {
+        const response = switch (request.head.method) {
             .GET => code_storage.sandboxAccountsPayload(),
             .POST => code_storage.connectSandboxPayload(document orelse return false),
             .DELETE => code_storage.disconnectSandboxPayload(account_id orelse return respondDownloadError(request, .bad_request, "accountId is required")),

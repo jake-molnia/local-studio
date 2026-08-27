@@ -147,6 +147,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const requested_native_session_id = optionalString(object, "nativeSessionId") orelse optionalString(object, "piSessionId");
     const requested_node = optionalString(object, "nodeId");
     const requested_placement = optionalString(object, "placement");
+    const requested_sandbox_account_id = optionalString(object, "sandboxAccountId");
     const command_kind = optionalString(object, "mode") orelse "prompt";
     if (!validSessionId(session_id)) return error.InvalidSessionId;
 
@@ -221,7 +222,7 @@ fn turnPayloadInternal(allocator: std.mem.Allocator, io: Io, mode: config.Mode, 
     const turn_attempt = try lockedBeginExecution(io, database, session_id, message, if (is_chat) .head else if (mode == .standalone) .local else if (use_daytona) .daytona else .node, if (target) |node| node.id else null, if (is_chat) "head" else if (mode == .standalone) "local" else if (target) |node| node.id else "daytona");
     if (use_daytona and target == null) {
         const cloud = daytona orelse return error.DaytonaPlacementUnavailable;
-        const account_id = optionalString(object, "sandboxAccountId") orelse return error.SandboxAccountRequired;
+        const account_id = requested_sandbox_account_id orelse return error.SandboxAccountRequired;
         const configured_image = try cloud.defaultImage();
         defer allocator.free(configured_image);
         const image = configured_image;
