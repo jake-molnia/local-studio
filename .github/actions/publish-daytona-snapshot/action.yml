@@ -69,12 +69,25 @@ runs:
         response="$RUNNER_TEMP/daytona-snapshot-response.json"
         encoded_name="$(jq -rn --arg value "$SNAPSHOT_NAME" '$value | @uri')"
 
+        if ! status="$(curl --silent --show-error --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 --output "$response" --write-out '%{http_code}' --header "Authorization: Bearer $DAYTONA_API_KEY" "$endpoint/api-keys/current")"; then
+          echo "Unable to validate Daytona API key" >&2
+          exit 1
+        fi
+        if [[ ! "$status" =~ ^20[0-9]$ ]]; then
+          echo "DAYTONA_API_KEY is invalid or belongs to a different Daytona organization" >&2
+          exit 1
+        fi
+        if ! jq -e '.permissions | index("write:snapshots") != null' "$response" >/dev/null; then
+          echo "DAYTONA_API_KEY requires the write:snapshots permission" >&2
+          exit 1
+        fi
+
         if ! status="$(curl --silent --show-error --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 --output "$response" --write-out '%{http_code}' --header "Authorization: Bearer $DAYTONA_API_KEY" "$endpoint/snapshots/$encoded_name")"; then
           echo "Unable to query Daytona snapshot" >&2
           exit 1
         fi
         if [[ "$status" == "403" ]]; then
-          echo "DAYTONA_API_KEY requires Snapshots Read and Write permissions" >&2
+          echo "DAYTONA_API_KEY cannot read snapshots in its Daytona organization" >&2
           exit 1
         fi
 
@@ -85,7 +98,7 @@ runs:
             exit 1
           fi
           if [[ "$status" == "403" ]]; then
-            echo "DAYTONA_API_KEY requires Snapshots Read and Write permissions" >&2
+            echo "DAYTONA_API_KEY cannot create snapshots in its Daytona organization" >&2
             exit 1
           fi
           if [[ "$status" == "409" ]]; then
