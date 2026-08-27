@@ -393,7 +393,7 @@ var init_check_conventional_commits = __esm(() => {
     if (!range)
       fail("Usage: check-conventional-commits.mjs --message-file <path> | --range <base..head>");
     else {
-      let excludedRef = excludedRefIndex === -1 ? void 0 : args[excludedRefIndex + 1], logArgs = excludedRef ? ["log", "--format=%s", range, "--not", excludedRef] : ["log", "--format=%s", range], output2 = execFileSync2("git", logArgs, { encoding: "utf8" }).trim();
+      let excludedRef = excludedRefIndex === -1 ? void 0 : args[excludedRefIndex + 1], logArgs = excludedRef ? ["log", "--first-parent", "--format=%s", range, "--not", excludedRef] : ["log", "--first-parent", "--format=%s", range], output2 = execFileSync2("git", logArgs, { encoding: "utf8" }).trim();
       (output2 ? output2.split(/\r?\n/) : []).forEach((subject, index) => validateSubject(subject, `commit ${index + 1}`));
     }
   }
