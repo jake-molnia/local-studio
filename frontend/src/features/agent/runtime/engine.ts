@@ -307,6 +307,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               startedAt,
               modelId: replayModelId,
               tokenStats,
+              usageTotals,
             } = foldSessionEvents(replayEvents);
             const replaySeq = replayCursorAfterRuntimeHydration(
               runtimeStatus,
@@ -333,7 +334,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               tokenStats: tokenStats ?? undefined,
               // Lifetime spend is computed server-side from the whole rollout,
               // so it survives both compaction and the tail load's cutoff.
-              usageTotals: meta?.usage ?? session.usageTotals,
+              usageTotals: meta?.usage ?? usageTotals ?? session.usageTotals,
               contextUsage: api.runtimeContextUsage(runtimeStatus, session.contextUsage),
               status: runtimeActive ? "running" : "idle",
               activeAssistantId: undefined,
@@ -561,7 +562,7 @@ function runtimeEventsInOrder(
     .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
     .flatMap((entry) => {
       if (entry.event && typeof entry.event === "object") {
-        return [entry.event];
+        return [entry.timestamp ? { ...entry.event, timestamp: entry.timestamp } : entry.event];
       }
       return [];
     });
