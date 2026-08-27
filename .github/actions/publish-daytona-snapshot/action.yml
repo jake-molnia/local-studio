@@ -73,11 +73,19 @@ runs:
           echo "Unable to query Daytona snapshot" >&2
           exit 1
         fi
+        if [[ "$status" == "403" ]]; then
+          echo "DAYTONA_API_KEY requires Snapshots Read and Write permissions" >&2
+          exit 1
+        fi
 
         if [[ "$status" == "404" ]]; then
           payload="$(jq -cn --arg name "$SNAPSHOT_NAME" --arg image "$SNAPSHOT_IMAGE" --arg sandbox_class "$SNAPSHOT_SANDBOX_CLASS" '{name: $name, imageName: $image, sandboxClass: $sandbox_class}')"
           if ! status="$(curl --silent --show-error --connect-timeout 15 --max-time 120 --output "$response" --write-out '%{http_code}' --request POST --header "Authorization: Bearer $DAYTONA_API_KEY" --header 'Content-Type: application/json' --data "$payload" "$endpoint/snapshots")"; then
             echo "Unable to create Daytona snapshot" >&2
+            exit 1
+          fi
+          if [[ "$status" == "403" ]]; then
+            echo "DAYTONA_API_KEY requires Snapshots Read and Write permissions" >&2
             exit 1
           fi
           if [[ "$status" == "409" ]]; then
