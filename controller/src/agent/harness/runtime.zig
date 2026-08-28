@@ -315,10 +315,7 @@ pub const Manager = struct {
         try output.writer.writeAll(",\"entries\":[");
         for (session.events.values(), 0..) |event, index| {
             if (index > 0) try output.writer.writeByte(',');
-            if (session.harness == .codex)
-                try harness_events.writeCanonical(manager.allocator, &output.writer, "codex", event.document)
-            else
-                try output.writer.writeAll(event.document);
+            try harness_events.writeTranscriptEvent(manager.allocator, &output.writer, session.harness.name(), event.timestamp[0..], event.document);
         }
         try output.writer.writeAll("],\"leafId\":");
         if (session.events.values().len > 0) try output.writer.print("\"{d}\"", .{session.event_seq}) else try output.writer.writeAll("null");

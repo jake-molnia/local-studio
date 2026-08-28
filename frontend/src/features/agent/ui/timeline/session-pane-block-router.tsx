@@ -16,11 +16,13 @@ import {
 const MemoContentBlock = memo(function MemoContentBlock({
   block,
   cwd,
+  streaming,
 }: {
   block: TextBlock;
   cwd: string | null;
+  streaming: boolean;
 }) {
-  return <AssistantMarkdown text={block.text} cwd={cwd} />;
+  return <AssistantMarkdown text={block.text} cwd={cwd} streaming={streaming} />;
 });
 
 function EventBlockView({ block }: { block: EventBlock }) {
@@ -63,10 +65,6 @@ const AssistantBlocks = memo(function AssistantBlocks({
     [routedBlocks],
   );
   const showActions = !running && copyText.trim().length > 0 && lastContentIndex >= 0;
-  const hasActivity = routedBlocks.some((item) => item.kind === "activity-group");
-  const lastActivityIndex = routedBlocks.findLastIndex((item) => item.kind === "activity-group");
-  // The work phase ends the moment the final response starts streaming.
-  const working = live && lastContentIndex === -1;
 
   if (routedBlocks.length === 0) {
     return <article className="min-w-0" />;
@@ -80,15 +78,15 @@ const AssistantBlocks = memo(function AssistantBlocks({
           key={item.id}
           segments={item.segments}
           live={live && index === routedBlocks.length - 1}
-          latest={index === lastActivityIndex}
         />,
       );
       return;
     }
     if (item.kind === "content") {
+      const streaming = live && index === lastContentIndex && index === routedBlocks.length - 1;
       nodes.push(
         <div key={item.block.id} className="min-w-0">
-          <MemoContentBlock block={item.block} cwd={cwd} />
+          <MemoContentBlock block={item.block} cwd={cwd} streaming={streaming} />
           {showActions && index === lastContentIndex ? (
             <AssistantMessageActions copyText={copyText} />
           ) : null}

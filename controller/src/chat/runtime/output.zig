@@ -71,13 +71,13 @@ pub const Output = struct {
     pub fn writeToolCall(output: *Output, call: protocol.ToolCall) !void {
         var document: std.Io.Writer.Allocating = .init(output.allocator);
         defer document.deinit();
-        try document.writer.writeAll("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"toolcall_end\",\"toolCall\":{\"id\":");
+        try document.writer.writeAll("{\"type\":\"tool_execution_start\",\"toolCallId\":");
         try std.json.Stringify.value(call.id, .{}, &document.writer);
-        try document.writer.writeAll(",\"name\":");
+        try document.writer.writeAll(",\"toolName\":");
         try std.json.Stringify.value(call.name, .{}, &document.writer);
         try document.writer.writeAll(",\"arguments\":");
         try document.writer.writeAll(call.arguments_json);
-        try document.writer.writeAll("}}}");
+        try document.writer.writeByte('}');
         try output.sink.emit(document.writer.buffered());
     }
 

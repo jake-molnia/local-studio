@@ -25,6 +25,16 @@ pub fn canonicalDocument(allocator: std.mem.Allocator, harness: []const u8, docu
     return output.toOwnedSlice();
 }
 
+pub fn writeTranscriptEvent(allocator: std.mem.Allocator, writer: *Io.Writer, harness: []const u8, timestamp: []const u8, document: []const u8) !void {
+    const canonical = try canonicalDocument(allocator, harness, document);
+    defer allocator.free(canonical);
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, canonical, .{}) catch return writer.writeAll(canonical);
+    defer parsed.deinit();
+    if (parsed.value != .object) return writer.writeAll(canonical);
+    if (parsed.value.object.get("timestamp") == null) try parsed.value.object.put(parsed.arena.allocator(), "timestamp", .{ .string = timestamp });
+    try std.json.Stringify.value(parsed.value, .{}, writer);
+}
+
 pub fn writeCanonical(allocator: std.mem.Allocator, writer: *Io.Writer, harness: []const u8, document: []const u8) !void {
     if (std.mem.eql(u8, harness, "codex")) return writeCodexCanonical(allocator, writer, document);
     if (!isAcp(harness)) return writer.writeAll(document);

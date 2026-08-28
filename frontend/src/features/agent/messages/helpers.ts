@@ -155,8 +155,13 @@ export function messageText(
 }
 
 export function replayCursorAfterRuntimeHydration(
-  runtimeStatus: { active?: boolean; piSessionId?: string | null; eventSeq?: number } | null,
-  piSessionId: string,
+  runtimeStatus: {
+    active?: boolean;
+    nativeSessionId?: string | null;
+    piSessionId?: string | null;
+    eventSeq?: number;
+  } | null,
+  nativeSessionId: string,
 ): number | undefined {
   // loadAndReplay hydrates messages from the canonical session log, which
   // already contains everything the matched runtime session has in its event
@@ -168,8 +173,9 @@ export function replayCursorAfterRuntimeHydration(
   // cursor is not adopted; an active one keeps the historical behavior of
   // being treated as this session's runtime.
   if (!runtimeStatus) return undefined;
-  const matchesSession = runtimeStatus.piSessionId === piSessionId;
-  const activeUnclaimed = runtimeStatus.active === true && !runtimeStatus.piSessionId;
+  const runtimeSessionId = runtimeStatus.nativeSessionId ?? runtimeStatus.piSessionId;
+  const matchesSession = runtimeSessionId === nativeSessionId;
+  const activeUnclaimed = runtimeStatus.active === true && !runtimeSessionId;
   return matchesSession || activeUnclaimed ? runtimeStatus.eventSeq : undefined;
 }
 

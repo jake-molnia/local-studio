@@ -3,14 +3,10 @@ import {
   assistantPiEventAffectsBlocks,
   asRecord,
   blocksFromMessageContent,
-  blocksFromTurnSnapshots,
   finalizeRunningToolBlocks,
-  mergeExistingToolState,
   messageTextFromBlocks,
   piSessionIdFromEvent,
-  toolCallSnapshotFromUpdate,
   upsertTool,
-  usefulToolArgsText,
   type AssistantBlock,
   type ChatMessage,
   type QueuedMessage,
@@ -95,7 +91,7 @@ function reduceExecutionLifecycleEvent(
           finalizeRunningToolBlocks(current.blocks ?? [], "error"),
           message,
         );
-        return { ...current, blocks, streamCalls: undefined, text: messageTextFromBlocks(blocks) };
+        return { ...current, blocks, text: messageTextFromBlocks(blocks) };
       },
       ctx.replay,
     );
@@ -193,11 +189,6 @@ export function reduceSessionEvent(
   const afterToolResult = reduceToolResultMessageEvent(next, ctx, event);
   if (afterToolResult) return afterToolResult;
 
-  // Assistant message lifecycle -> rebuild blocks from accumulated per-call
-  // snapshots (NOT from token deltas). This owns message_start/update/end.
-  const afterSnapshot = reduceAssistantSnapshotEvent(next, ctx, event);
-  if (afterSnapshot) return afterSnapshot;
-
   // Turn finished: settle any still-"running" tool badges and drop the
   // transient per-call snapshots. Also un-dim any steer bubble still marked
   // pending — once the turn is over there is no further echo coming, so a
@@ -214,7 +205,6 @@ export function reduceSessionEvent(
       (msg) => ({
         ...msg,
         blocks: finalizeRunningToolBlocks(msg.blocks ?? []),
-        streamCalls: undefined,
       }),
       ctx.replay,
     );
@@ -471,224 +461,6 @@ function patchAssistantMessage(
   return { ...session, messages };
 }
 
-// Accumulate one content snapshot per LLM call and rebuild the bubble's blocks
-// from all of them. `message_start` opens a new call slot; `message_update` /
-// `message_end` replace the current slot with the call's full accumulated
-// content. Tool results (from tool_execution_* events) are preserved across
-// rebuilds via mergeExistingToolState.
-function reduceAssistantSnapshotEvent(
-  session: Session,
-  ctx: SessionStreamContext,
-  event: Record<string, unknown>,
-): Session | null {
-  const type = event.type;
-  if (type !== "message_start" && type !== "message_update" && type !== "message_end") return null;
-  // On canonical replay a `message_end` is a settled message, not a streaming
-  // frame: it closes the target bubble like `message` does (the settled branch
-  // below), so the next settled message opens a fresh bubble.
-  if (ctx.replay && type === "message_end") return null;
-  const message = asRecord(event.message);
-  if (message?.role !== "assistant") return null;
-  const target = resolveAssistantTarget(session, ctx);
-  session = target.session;
-  const targetId = target.targetId;
-  const content = assistantSnapshotContent(event, message);
-
-  const stopReason = typeof message.stopReason === "string" ? message.stopReason : "";
-  // An aborted turn is a deliberate stop (user pressed Stop, navigated away) —
-  // NOT an error. It must settle cleanly: keep whatever streamed, settle tool
-  // badges, and never surface an error block or session error. Only a genuine
-  // "error" stopReason is a failure.
-  const callErrored = type === "message_end" && stopReason === "error";
-  const callAborted = type === "message_end" && stopReason === "aborted";
-  const failureText = callErrored ? assistantFailureText(message, stopReason) : "";
-
-  let next = patchAssistantMessage(
-    session,
-    targetId,
-    (current) => {
-      const streamCalls = nextStreamCalls(current.streamCalls, type, content);
-      const existingBlocks = current.blocks ?? [];
-      let blocks = mergeExistingToolState(existingBlocks, blocksFromTurnSnapshots(streamCalls));
-      blocks = applyLegacyToolCallDeltaIfSnapshotMissedIt(blocks, existingBlocks, event, content);
-      // Carry over any tool block created from tool_execution_*/toolcall_* events
-      // that the latest content snapshot doesn't list — for EVERY update, not just
-      // toolcall_* ones. Without this, the model's closing text-only summary after
-      // a tool-heavy turn rebuilds blocks from a tool-free snapshot and
-      // mergeExistingToolState silently drops the completed tools (they vanish from
-      // the bubble).
-      blocks = preserveMissingToolBlocks(blocks, existingBlocks);
-      // A call that ended (errored or aborted) won't execute its declared tools —
-      // settle them so they don't show a perpetual "running" badge. An error marks
-      // them errored; an abort just settles them done.
-      if (callErrored) blocks = finalizeRunningToolBlocks(blocks, "error");
-      else if (callAborted) blocks = finalizeRunningToolBlocks(blocks, "done");
-      if (failureText) blocks = appendFailureBlock(blocks, failureText);
-      return { ...current, streamCalls, blocks, text: messageTextFromBlocks(blocks) };
-    },
-    ctx.replay,
-  );
-  if (failureText) next = { ...next, error: failureText };
-  return next;
-}
-
-function assistantSnapshotContent(
-  event: Record<string, unknown>,
-  message: Record<string, unknown>,
-): Array<Record<string, unknown>> {
-  const messageContent = recordArray(message.content);
-  if (event.type !== "message_update") return messageContent;
-
-  const partial = asRecord(asRecord(event.assistantMessageEvent)?.partial);
-  const partialContent = partial?.role === "assistant" ? recordArray(partial.content) : [];
-  if (partialContent.length === 0) return messageContent;
-
-  const messageHasTool = hasToolCallPart(messageContent);
-  const partialHasTool = hasToolCallPart(partialContent);
-  if (messageContent.length === 0) return partialContent;
-  if (partialHasTool && !messageHasTool) return partialContent;
-  if (
-    partialHasTool &&
-    messageHasTool &&
-    partialContent.length >= messageContent.length &&
-    contentPayloadLength(partialContent) > contentPayloadLength(messageContent)
-  ) {
-    return partialContent;
-  }
-  return messageContent;
-}
-
-function recordArray(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((part): Array<Record<string, unknown>> => {
-    const record = asRecord(part);
-    return record ? [record] : [];
-  });
-}
-
-function hasToolCallPart(content: Array<Record<string, unknown>>): boolean {
-  return content.some((part) => part.type === "toolCall");
-}
-
-// Cheap structural size proxy for comparing two snapshots of the same growing
-// content ("which frame is further along"). Both call sites only ever compare
-// snapshots of one logical message, where growth means longer text/thinking,
-// longer streamed tool arguments, or more parts — all captured below without
-// JSON.stringify-ing multi-MB cumulative content on every streamed frame.
-function contentPayloadLength(content: Array<Record<string, unknown>>): number {
-  let total = 0;
-  for (const part of content) {
-    total += 1;
-    if (typeof part.text === "string") total += part.text.length;
-    if (typeof part.thinking === "string") total += part.thinking.length;
-    const args = part.arguments;
-    if (typeof args === "string") {
-      total += args.length;
-    } else if (args && typeof args === "object") {
-      for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-        total += key.length + 1;
-        if (typeof value === "string") total += value.length;
-      }
-    }
-  }
-  return total;
-}
-
-function snapshotToolArgsText(
-  content: Array<Record<string, unknown>>,
-  toolCallId: string,
-): string | null {
-  for (const part of content) {
-    if (part.type !== "toolCall" || part.id !== toolCallId) continue;
-    const args = part.arguments;
-    if (typeof args === "string") {
-      const text = usefulToolArgsText(args);
-      if (text) return text;
-      continue;
-    }
-    if (args && typeof args === "object" && Object.keys(args).length > 0) {
-      try {
-        return JSON.stringify(args, null, 2);
-      } catch {
-        return String(args);
-      }
-    }
-  }
-  return null;
-}
-
-function applyLegacyToolCallDeltaIfSnapshotMissedIt(
-  blocks: AssistantBlock[],
-  existingBlocks: AssistantBlock[],
-  event: Record<string, unknown>,
-  content: Array<Record<string, unknown>>,
-): AssistantBlock[] {
-  if (event.type !== "message_update") return blocks;
-  const assistantMessageEvent = asRecord(event.assistantMessageEvent);
-  const eventType = assistantMessageEvent?.type;
-  if (
-    eventType !== "toolcall_start" &&
-    eventType !== "toolcall_delta" &&
-    eventType !== "toolcall_end"
-  ) {
-    return blocks;
-  }
-  const snapshot = toolCallSnapshotFromUpdate(assistantMessageEvent ?? undefined, event.message);
-  if (snapshot?.id) {
-    const snapshotArgsText = snapshotToolArgsText(content, snapshot.id);
-    const existingTool = existingBlocks.find(
-      (block): block is Extract<AssistantBlock, { kind: "tool" }> =>
-        block.kind === "tool" && block.id === snapshot.id,
-    );
-    const existingArgsText = usefulToolArgsText(existingTool?.argsText);
-    if (snapshotArgsText && snapshotArgsText.length > existingArgsText.length) return blocks;
-  }
-  const blocksWithPreviousTools = preserveMissingToolBlocks(blocks, existingBlocks);
-  return applyAssistantPiEventToBlocks(blocksWithPreviousTools, event) ?? blocksWithPreviousTools;
-}
-
-function preserveMissingToolBlocks(
-  blocks: AssistantBlock[],
-  existingBlocks: AssistantBlock[],
-): AssistantBlock[] {
-  const ids = new Set(blocks.filter((block) => block.kind === "tool").map((block) => block.id));
-  const missingTools = existingBlocks.filter(
-    (block) => block.kind === "tool" && !ids.has(block.id),
-  );
-  return missingTools.length ? [...blocks, ...missingTools] : blocks;
-}
-
-function nextStreamCalls(
-  prev: Array<Array<Record<string, unknown>>> | undefined,
-  type: string,
-  content: Array<Record<string, unknown>>,
-): Array<Array<Record<string, unknown>>> {
-  const calls = prev ? prev.slice() : [];
-  if (type === "message_start") {
-    calls.push(content);
-    return calls;
-  }
-  if (calls.length === 0) {
-    calls.push(content);
-    return calls;
-  }
-  if (type === "message_update") {
-    // Monotonic slot: a message_update may carry a snapshot that momentarily LAGS
-    // the previous frame (assistantSnapshotContent flips between message.content
-    // and assistantMessageEvent.partial.content, which don't advance in lockstep).
-    // Overwriting the current call with a shorter snapshot shrinks the rendered
-    // bubble for one frame — a visible flicker — before the next update re-grows
-    // it. Keep whichever snapshot has the larger payload so the slot never regresses.
-    const existing = calls[calls.length - 1];
-    calls[calls.length - 1] =
-      contentPayloadLength(content) >= contentPayloadLength(existing) ? content : existing;
-    return calls;
-  }
-  // message_end carries the call's settled, authoritative content.
-  calls[calls.length - 1] = content;
-  return calls;
-}
-
 function reduceUserMessageEvent(
   session: Session,
   ctx: SessionStreamContext,
@@ -813,22 +585,14 @@ function reduceFinalAssistantMessageEvent(
   ctx: SessionStreamContext,
   event: Record<string, unknown>,
 ): Session | null {
-  // Live `message_end` is owned by the snapshot path; this handles the
-  // canonical `message` shape (replayed/settled messages) — plus `message_end`
-  // on canonical replay, where it is a settled message too.
-  if (event.type !== "message" && !(ctx.replay && event.type === "message_end")) return null;
+  if (event.type !== "message" && event.type !== "message_end") return null;
   const msg = asRecord(event.message);
   if (msg?.role !== "assistant") return null;
   const content = finalMessageContent(msg.content);
   const stopReason = typeof msg.stopReason === "string" ? msg.stopReason : undefined;
 
   if (ctx.replay) {
-    // Canonical replay grouping: a settled `message` fills the still-open
-    // bubble when one exists (streamed reattach / tool-result fallback) and
-    // otherwise renders as its own bubble; either way it closes the target so
-    // the NEXT settled message opens a fresh one — one bubble per settled
-    // message, matching the on-disk log.
-    const blocks = blocksFromMessageContent(content, { stopReason });
+    const blocks = blocksFromMessageContent(content);
     const text = messageTextFromBlocks(blocks);
     const target = resolveAssistantTarget(session, ctx);
     const patched = patchAssistantMessage(
@@ -842,7 +606,7 @@ function reduceFinalAssistantMessageEvent(
   }
 
   const errorMessage = assistantFailureText(msg, stopReason);
-  const blocks = blocksFromMessageContent(content, { stopReason, errorMessage });
+  const blocks = blocksFromMessageContent(content, { errorMessage });
   const text = messageTextFromBlocks(blocks);
   const target = resolveAssistantTarget(session, ctx);
   let next = patchAssistantMessage(
@@ -902,64 +666,69 @@ function reconcileFinalAssistantMessage(
   if (!assistantHasGeneratedBlocks(existingBlocks)) {
     return { ...current, text, blocks: incomingBlocks };
   }
-  if (finalMessageCoversExistingBlocks(existingBlocks, incomingBlocks)) {
-    return { ...current, text, blocks: mergeExistingToolState(existingBlocks, incomingBlocks) };
+  let blocks = reconcileMissingTools(existingBlocks, incomingBlocks);
+  blocks = reconcileSettledTextKind(blocks, incomingBlocks, "thinking");
+  blocks = reconcileSettledTextKind(blocks, incomingBlocks, "text");
+  for (const block of incomingBlocks) {
+    if (block.kind !== "event") continue;
+    if (blocks.some((existing) => existing.kind === "event" && existing.text === block.text)) {
+      continue;
+    }
+    blocks = [...blocks, block];
   }
-  // A tool-free settled message that does NOT "cover" the bubble is the model's
-  // closing summary arriving as its own LLM call after a tool-heavy turn (some
-  // backends emit it as a bare `message`, not a streamed snapshot). Replacing
-  // the bubble would drop the accumulated tool blocks; rejecting it — as this
-  // used to — drops the summary, so the turn renders a trailing tool call and
-  // no final words. Append the unseen text/thinking instead, tools untouched.
-  if (incomingBlocks.some((block) => block.kind === "tool")) return current;
-  const appended = appendUnseenTextBlocks(existingBlocks, incomingBlocks);
-  return appended === existingBlocks
+  return blocks === existingBlocks
     ? current
-    : { ...current, blocks: appended, text: messageTextFromBlocks(appended) };
+    : { ...current, blocks, text: messageTextFromBlocks(blocks) };
 }
 
-function appendUnseenTextBlocks(
+function reconcileMissingTools(
   existingBlocks: AssistantBlock[],
   incomingBlocks: AssistantBlock[],
 ): AssistantBlock[] {
-  const shown = existingBlocks
-    .filter((block) => block.kind === "text" || block.kind === "thinking")
-    .map((block) => block.text.trim())
-    .filter(Boolean);
-  const alreadyShown = (value: string) =>
-    shown.some((existing) => existing === value || existing.includes(value));
-  const additions = incomingBlocks.filter(
-    (block) =>
-      (block.kind === "text" || block.kind === "thinking") &&
-      isMeaningfulAssistantText(block.text) &&
-      !alreadyShown(block.text.trim()),
+  const existingIds = new Set(
+    existingBlocks.filter((block) => block.kind === "tool").map((block) => block.id),
   );
-  return additions.length ? [...existingBlocks, ...additions] : existingBlocks;
+  const missing = incomingBlocks.filter(
+    (block) => block.kind === "tool" && !existingIds.has(block.id),
+  );
+  return missing.length ? [...existingBlocks, ...missing] : existingBlocks;
 }
 
-function finalMessageCoversExistingBlocks(
-  existingBlocks: AssistantBlock[],
-  incomingBlocks: AssistantBlock[],
-): boolean {
-  if (incomingBlocks.length === 0) return false;
-  const existingHasTool = existingBlocks.some((block) => block.kind === "tool");
-  const incomingHasTool = incomingBlocks.some((block) => block.kind === "tool");
-  if (existingHasTool && !incomingHasTool) return false;
-
-  return (
-    blockTextCoversExisting(existingBlocks, incomingBlocks, "text") ||
-    blockTextCoversExisting(existingBlocks, incomingBlocks, "thinking")
-  );
-}
-
-function blockTextCoversExisting(
+function reconcileSettledTextKind(
   existingBlocks: AssistantBlock[],
   incomingBlocks: AssistantBlock[],
   kind: "text" | "thinking",
-): boolean {
+): AssistantBlock[] {
   const existing = joinedBlockText(existingBlocks, kind);
   const incoming = joinedBlockText(incomingBlocks, kind);
-  return Boolean(existing && incoming && (incoming === existing || incoming.startsWith(existing)));
+  if (!incoming || incoming === existing || existing.includes(incoming)) return existingBlocks;
+  if (!existing) {
+    const additions = incomingBlocks.filter((block) => block.kind === kind);
+    return additions.length ? [...existingBlocks, ...additions] : existingBlocks;
+  }
+  const matchingIndex = existingBlocks.findLastIndex(
+    (block) => block.kind === kind && incoming.startsWith(block.text),
+  );
+  const matchingBlock = existingBlocks[matchingIndex];
+  if (matchingBlock && (matchingBlock.kind === "text" || matchingBlock.kind === "thinking")) {
+    const suffix = incoming.slice(matchingBlock.text.length);
+    if (!suffix) return existingBlocks;
+    const next = existingBlocks.slice();
+    next[matchingIndex] = { ...matchingBlock, text: matchingBlock.text + suffix };
+    return next;
+  }
+  if (!incoming.startsWith(existing)) {
+    const addition = incomingBlocks.find((block) => block.kind === kind);
+    return addition ? [...existingBlocks, addition] : existingBlocks;
+  }
+  const suffix = incoming.slice(existing.length);
+  if (!suffix) return existingBlocks;
+  const index = existingBlocks.findLastIndex((block) => block.kind === kind);
+  const block = existingBlocks[index];
+  if (!block || (block.kind !== "text" && block.kind !== "thinking")) return existingBlocks;
+  const next = existingBlocks.slice();
+  next[index] = { ...block, text: block.text + suffix };
+  return next;
 }
 
 function joinedBlockText(blocks: AssistantBlock[], kind: "text" | "thinking"): string {
