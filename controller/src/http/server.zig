@@ -84,6 +84,51 @@ const max_chat_request_bytes = 16 * 1024 * 1024;
 const max_agent_request_bytes = 16 * 1024 * 1024;
 const max_settings_request_bytes = 64 * 1024;
 
+const ProjectImportStream = struct {
+    body: *http.BodyWriter,
+    failed: bool = false,
+
+    fn report(context: *anyopaque, stage: []const u8, message: []const u8, progress: ?u8) void {
+        const stream: *ProjectImportStream = @ptrCast(@alignCast(context));
+        stream.writeProgress(stage, message, progress) catch {
+            stream.failed = true;
+        };
+    }
+
+    fn writeProgress(stream: *ProjectImportStream, stage: []const u8, message: []const u8, progress: ?u8) !void {
+        if (stream.failed) return;
+        try stream.body.writer.writeAll("event: progress\ndata: {\"stage\":");
+        try std.json.Stringify.value(stage, .{}, &stream.body.writer);
+        try stream.body.writer.writeAll(",\"message\":");
+        try std.json.Stringify.value(message, .{}, &stream.body.writer);
+        try stream.body.writer.writeAll(",\"progress\":");
+        if (progress) |value| try stream.body.writer.print("{d}", .{value}) else try stream.body.writer.writeAll("null");
+        try stream.body.writer.writeAll("}\n\n");
+        try stream.flush();
+    }
+
+    fn writeComplete(stream: *ProjectImportStream, payload: []const u8) !void {
+        if (stream.failed) return;
+        try stream.body.writer.print("event: complete\ndata: {s}\n\n", .{payload});
+        try stream.flush();
+    }
+
+    fn writeFailure(stream: *ProjectImportStream, failure: anyerror) !void {
+        if (stream.failed) return;
+        try stream.body.writer.writeAll("event: error\ndata: {\"error\":");
+        try std.json.Stringify.value(@errorName(failure), .{}, &stream.body.writer);
+        try stream.body.writer.writeAll(",\"detail\":");
+        try std.json.Stringify.value(projectFailureDetail(failure), .{}, &stream.body.writer);
+        try stream.body.writer.writeAll("}\n\n");
+        try stream.flush();
+    }
+
+    fn flush(stream: *ProjectImportStream) !void {
+        try stream.body.writer.flush();
+        try stream.body.flush();
+    }
+};
+
 const ConnectionLimiter = struct {
     active: std.atomic.Value(usize) = .init(0),
 
@@ -565,6 +610,12 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         try request.respond(response, .{ .extra_headers = &.{.{ .name = "Content-Type", .value = "application/json" }} });
         return request.head.keep_alive;
     }
+    if (std.mem.eql(u8, route.path, "/api/agent/projects/import")) {
+        const document = try readBoundedJsonBody(allocator, request) orelse return false;
+        defer allocator.free(document);
+        serveProjectImport(allocator, io, mode, code_storage, client, database, document, request) catch {};
+        return false;
+    }
     if (std.mem.eql(u8, route.path, "/api/agent/projects/repositories")) {
         const response = if (mode != .standalone)
             agent_code_storage.forward(allocator, io, client, database, "/internal/node/v1/projects/repositories", .GET, null)
@@ -616,7 +667,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
                 if (mode != .standalone)
                     agent_code_storage.forward(allocator, io, client, database, "/internal/node/v1/projects", .POST, document.?)
                 else
-                    code_storage.importProjectPayload(client, database, document.?)
+                    code_storage.importProjectPayload(client, database, document.?, null)
             else if (std.mem.indexOf(u8, document.?, "\"create\":true") != null)
                 if (mode != .standalone)
                     agent_code_storage.forward(allocator, io, client, database, "/internal/node/v1/projects", .POST, document.?)
@@ -1207,7 +1258,7 @@ fn serveRequest(allocator: std.mem.Allocator, io: Io, mode: Mode, configuration:
         const response = switch (request.head.method) {
             .GET => agent_projects.listLocal(allocator, io, configuration, database),
             .POST => if (std.mem.indexOf(u8, document orelse return false, "\"import\":true") != null)
-                code_storage.importProjectPayload(client, database, document.?)
+                code_storage.importProjectPayload(client, database, document.?, null)
             else if (std.mem.indexOf(u8, document.?, "\"create\":true") != null)
                 code_storage.createProjectPayload(client, database, document.?)
             else if (std.mem.indexOf(u8, document.?, "\"repository\"") != null)
@@ -2616,12 +2667,16 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
     const status: http.Status = switch (failure) {
         error.ProjectPathRequired, error.ProjectPathMustBeAbsolute, error.ProjectPathNotFound, error.ProjectPathNotDirectory, error.ProjectPathOutsideRoots, error.ProjectIdRequired, error.InvalidProjectId, error.InvalidProjectPayload, error.CodeStorageAccountRequired, error.CodeStorageRepositoryRequired, error.InvalidCodeStorageRepository, error.CodeStoragePathMustBeAbsolute, error.ProjectDefaultBranchRequired, error.CodeStorageDefaultBranchRequired, error.CodeStorageDefaultBranchNotFound => .bad_request,
         error.CodeStorageAccountNotFound => .not_found,
-        error.ProjectNodeRequired, error.ProjectNodeRejected, error.CodeStorageRepositoryAlreadyAdded, error.ProjectWorkspaceInvalid, error.ProjectRefNotFound, error.ProjectWorkspaceDirty => .conflict,
-        error.ProjectNodeUnavailable => .service_unavailable,
+        error.ProjectNodeRequired, error.ProjectNodeRejected, error.CodeStorageRepositoryAlreadyAdded, error.CodeStorageRepositoryAlreadyExists, error.ProjectWorkspaceInvalid, error.ProjectRefNotFound, error.ProjectWorkspaceDirty, error.DatabaseConstraint => .conflict,
+        error.ProjectNodeUnavailable, error.DatabaseBusy, error.DatabaseLocked => .service_unavailable,
         error.CodeStorageRequestRejected, error.CodeStorageGitFailed => .bad_gateway,
         else => .internal_server_error,
     };
-    const detail: []const u8 = switch (failure) {
+    return respondDownloadError(request, status, projectFailureDetail(failure));
+}
+
+fn projectFailureDetail(failure: anyerror) []const u8 {
+    return switch (failure) {
         error.ProjectPathRequired => "path is required",
         error.ProjectPathMustBeAbsolute => "Project path must be absolute",
         error.ProjectPathNotFound => "Project path does not exist",
@@ -2639,6 +2694,7 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.CodeStorageDefaultBranchRequired => "The imported repository is detached; choose its default branch",
         error.CodeStorageDefaultBranchNotFound => "The selected default branch does not exist in the imported repository",
         error.CodeStorageRepositoryAlreadyAdded => "That Code.Storage repository is already a project",
+        error.CodeStorageRepositoryAlreadyExists => "That code.storage repository already exists and was not created by this import",
         error.CodeStorageRequestRejected => "Code.Storage could not create the repository",
         error.CodeStorageGitFailed => "Git history could not be mirrored to Code.Storage",
         error.ProjectNodeRequired => "No enrolled node offers project storage",
@@ -2653,9 +2709,10 @@ fn respondProjectFailure(request: *http.Server.Request, failure: anyerror) !bool
         error.ProjectWorktreeCreateFailed => "Git could not create the task worktree at the selected branch",
         error.ProjectWorktreeRemoveFailed => "Git could not replace the existing task worktree",
         error.ProjectWorktreePruneFailed => "Git could not prune archived task worktrees",
+        error.DatabaseBusy, error.DatabaseLocked => "The project database is busy; the import can be resumed safely",
+        error.DatabaseConstraint => "That project path or code.storage repository is already registered",
         else => @errorName(failure),
     };
-    return respondDownloadError(request, status, detail);
 }
 
 fn respondConnectorFailure(request: *http.Server.Request, failure: anyerror) !bool {
@@ -3966,6 +4023,35 @@ fn serveWorkerProxy(allocator: std.mem.Allocator, io: Io, client: *http.Client, 
     defer target.deinit();
     try reverse_proxy.serveWorker(allocator, client, target.address, target.api_key, target.id, request);
     return false;
+}
+
+fn serveProjectImport(allocator: std.mem.Allocator, io: Io, mode: Mode, code_storage: *agent_code_storage.State, client: *http.Client, database: *sqlite.Database, document: []const u8, request: *http.Server.Request) !void {
+    var write_buffer: [16 * 1024]u8 = undefined;
+    var body = try request.respondStreaming(&write_buffer, .{
+        .respond_options = .{
+            .keep_alive = false,
+            .extra_headers = &.{
+                .{ .name = "Content-Type", .value = "text/event-stream; charset=utf-8" },
+                .{ .name = "Cache-Control", .value = "no-cache, no-transform" },
+                .{ .name = "X-Accel-Buffering", .value = "no" },
+            },
+        },
+    });
+    var stream = ProjectImportStream{ .body = &body };
+    const reporter = agent_code_storage.ImportProgress{ .context = &stream, .update = ProjectImportStream.report };
+    stream.writeProgress("preparing", "Starting repository sync", 3) catch {};
+    const response = if (mode != .standalone) remote: {
+        stream.writeProgress("uploading", "Syncing Git history through the project node", null) catch {};
+        break :remote agent_code_storage.forward(allocator, io, client, database, "/internal/node/v1/projects", .POST, document);
+    } else code_storage.importProjectPayload(client, database, document, reporter);
+    const payload = response catch |failure| {
+        stream.writeFailure(failure) catch {};
+        body.end() catch {};
+        return;
+    };
+    defer allocator.free(payload);
+    stream.writeComplete(payload) catch {};
+    body.end() catch {};
 }
 
 fn serveSse(io: Io, request: *http.Server.Request) !void {

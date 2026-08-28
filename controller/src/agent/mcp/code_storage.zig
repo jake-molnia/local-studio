@@ -21,6 +21,20 @@ pub const MirrorResult = struct {
     }
 };
 
+pub const CreateRepositoryResult = enum {
+    created,
+    existing,
+};
+
+pub const MirrorProgress = struct {
+    context: *anyopaque,
+    update: *const fn (context: *anyopaque, message: []const u8) void,
+
+    pub fn report(progress: MirrorProgress, message: []const u8) void {
+        progress.update(progress.context, message);
+    }
+};
+
 pub fn validateMirrorSource(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8) !void {
     if (!std.fs.path.isAbsolute(path)) return error.CodeStoragePathMustBeAbsolute;
     const head = try gitOutput(allocator, io, environment, path, &.{ "rev-parse", "--verify", "HEAD" }, null);
@@ -28,48 +42,19 @@ pub fn validateMirrorSource(allocator: std.mem.Allocator, io: Io, environment: *
 }
 
 pub fn sourceDefaultBranch(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, fallback: ?[]const u8) ![]u8 {
-    const result = try std.process.run(allocator, io, .{
-        .argv = &.{ "git", "-c", git_policy.hooks_disabled, "symbolic-ref", "--quiet", "--short", "HEAD" },
-        .cwd = .{ .path = path },
-        .environ_map = environment,
-        .stdout_limit = .limited(max_git_output_bytes),
-        .stderr_limit = .limited(max_git_output_bytes),
-        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
-    });
-    defer allocator.free(result.stdout);
-    defer allocator.free(result.stderr);
-    const ok = switch (result.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-    if (ok) {
-        const branch = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (fallback) |branch| {
         try validateRef(branch);
+        if (!try branchExists(allocator, io, environment, path, branch)) return error.CodeStorageDefaultBranchNotFound;
         return allocator.dupe(u8, branch);
     }
-    const branch = fallback orelse return error.CodeStorageDefaultBranchRequired;
-    try validateRef(branch);
-    const ref = try std.fmt.allocPrint(allocator, "refs/heads/{s}", .{branch});
-    defer allocator.free(ref);
-    const verify = try std.process.run(allocator, io, .{
-        .argv = &.{ "git", "-c", git_policy.hooks_disabled, "show-ref", "--verify", "--quiet", ref },
-        .cwd = .{ .path = path },
-        .environ_map = environment,
-        .stdout_limit = .limited(max_git_output_bytes),
-        .stderr_limit = .limited(max_git_output_bytes),
-        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
-    });
-    defer allocator.free(verify.stdout);
-    defer allocator.free(verify.stderr);
-    const exists = switch (verify.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
-    if (!exists) return error.CodeStorageDefaultBranchNotFound;
-    return allocator.dupe(u8, branch);
+    if (try symbolicBranch(allocator, io, environment, path, "refs/remotes/origin/HEAD")) |branch| return branch;
+    if (try branchExists(allocator, io, environment, path, "main")) return allocator.dupe(u8, "main");
+    if (try branchExists(allocator, io, environment, path, "master")) return allocator.dupe(u8, "master");
+    if (try symbolicBranch(allocator, io, environment, path, "HEAD")) |branch| return branch;
+    return error.CodeStorageDefaultBranchRequired;
 }
 
-pub fn mirrorRepository(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8, path: []const u8, session_id: []const u8) !MirrorResult {
+pub fn mirrorRepository(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8, path: []const u8, session_id: []const u8, progress: ?MirrorProgress) !MirrorResult {
     try auth.validateRepository(repository);
     if (!std.fs.path.isAbsolute(path)) return error.CodeStoragePathMustBeAbsolute;
     const token = try auth.mint(allocator, io, organization, account_id, private_key, repository, &.{ "git:read", "git:write" });
@@ -109,7 +94,14 @@ pub fn mirrorRepository(allocator: std.mem.Allocator, io: Io, environment: *cons
     const checkpoint_ref = try std.fmt.allocPrint(allocator, "refs/local-studio/checkpoints/{s}/{s}", .{ session_hex[0..16], suffix[0..] });
     errdefer allocator.free(checkpoint_ref);
     try gitRequired(allocator, io, environment, path, &.{ "update-ref", checkpoint_ref, checkpoint_sha }, null);
-    try gitRequired(allocator, io, environment, path, &.{ "push", "--no-verify", remote, "--mirror" }, token);
+    const checkpoint_refspec = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ checkpoint_ref, checkpoint_ref });
+    defer allocator.free(checkpoint_refspec);
+    if (progress) |reporter| reporter.report("Uploading recovery checkpoint");
+    try gitRequired(allocator, io, environment, path, &.{ "push", "--no-verify", "--atomic", remote, checkpoint_refspec }, token);
+    if (progress) |reporter| reporter.report("Uploading all local branches");
+    try gitRequired(allocator, io, environment, path, &.{ "push", "--no-verify", "--atomic", "--all", remote }, token);
+    if (progress) |reporter| reporter.report("Uploading tags");
+    try gitRequired(allocator, io, environment, path, &.{ "push", "--no-verify", "--atomic", "--tags", remote }, token);
     return .{ .allocator = allocator, .checkpoint_ref = checkpoint_ref, .checkpoint_sha = checkpoint_sha, .repository_url = repository_url };
 }
 
@@ -269,7 +261,7 @@ pub fn repositories(allocator: std.mem.Allocator, io: Io, client: *std.http.Clie
     return allocator.dupe(u8, body.buffered());
 }
 
-pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8, name: []const u8, default_branch: []const u8) !void {
+pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8, name: []const u8, default_branch: []const u8) !CreateRepositoryResult {
     try auth.validateRepository(name);
     try validateRef(default_branch);
     const token = try auth.mint(allocator, io, organization, account_id, private_key, name, &.{"repo:write"});
@@ -296,7 +288,21 @@ pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.
         .extra_headers = &.{ .{ .name = "Authorization", .value = authorization }, .{ .name = "Content-Type", .value = "application/json" }, .{ .name = "Accept", .value = "application/json" }, .{ .name = "Code-Storage-Agent", .value = "local-studio" } },
         .response_writer = &output,
     });
-    if (response.status.class() != .success) return error.CodeStorageRequestRejected;
+    if (response.status.class() == .success) return .created;
+    if (response.status == .conflict) return .existing;
+    return error.CodeStorageRequestRejected;
+}
+
+pub fn canResumeRepository(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8, path: []const u8) !bool {
+    try auth.validateRepository(repository);
+    const token = try auth.mint(allocator, io, organization, account_id, private_key, repository, &.{ "git:read", "git:write" });
+    defer allocator.free(token);
+    const remote = try std.fmt.allocPrint(allocator, "https://t:{s}@{s}.code.storage/{s}.git", .{ token, organization, repository });
+    defer allocator.free(remote);
+    const refs = try gitOutput(allocator, io, environment, path, &.{ "ls-remote", remote }, token);
+    defer allocator.free(refs);
+    const trimmed = std.mem.trim(u8, refs, " \t\r\n");
+    return trimmed.len == 0 or std.mem.indexOf(u8, trimmed, "refs/local-studio/checkpoints/") != null;
 }
 
 pub fn references(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8) ![]u8 {
@@ -430,6 +436,47 @@ fn gitOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.proce
 fn gitRequired(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, args: []const []const u8, redaction: ?[]const u8) !void {
     const output = try gitOutput(allocator, io, environment, path, args, redaction);
     allocator.free(output);
+}
+
+fn symbolicBranch(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, ref: []const u8) !?[]u8 {
+    const output = try gitOptionalOutput(allocator, io, environment, path, &.{ "symbolic-ref", "--quiet", "--short", ref }) orelse return null;
+    defer allocator.free(output);
+    const value = std.mem.trim(u8, output, " \t\r\n");
+    const branch = if (std.mem.startsWith(u8, value, "origin/")) value["origin/".len..] else value;
+    try validateRef(branch);
+    if (!try branchExists(allocator, io, environment, path, branch)) return null;
+    return @as(?[]u8, try allocator.dupe(u8, branch));
+}
+
+fn branchExists(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, branch: []const u8) !bool {
+    const ref = try std.fmt.allocPrint(allocator, "refs/heads/{s}", .{branch});
+    defer allocator.free(ref);
+    const output = try gitOptionalOutput(allocator, io, environment, path, &.{ "show-ref", "--verify", "--quiet", ref }) orelse return false;
+    allocator.free(output);
+    return true;
+}
+
+fn gitOptionalOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, args: []const []const u8) !?[]u8 {
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "git", "-c", git_policy.hooks_disabled });
+    try argv.appendSlice(allocator, args);
+    const result = try std.process.run(allocator, io, .{
+        .argv = argv.items,
+        .cwd = .{ .path = path },
+        .environ_map = environment,
+        .stdout_limit = .limited(max_git_output_bytes),
+        .stderr_limit = .limited(max_git_output_bytes),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
+    });
+    defer allocator.free(result.stderr);
+    const ok = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (ok) return result.stdout;
+    allocator.free(result.stdout);
+    return null;
 }
 
 fn toolResult(allocator: std.mem.Allocator, id: std.json.Value, text: []const u8, is_error: bool) ![]u8 {
