@@ -64,6 +64,10 @@ const AssistantBlocks = memo(function AssistantBlocks({
     () => routedBlocks.findLastIndex((item) => item.kind === "content"),
     [routedBlocks],
   );
+  const lastActivityIndex = useMemo(
+    () => routedBlocks.findLastIndex((item) => item.kind === "activity-group"),
+    [routedBlocks],
+  );
   const showActions = !running && copyText.trim().length > 0 && lastContentIndex >= 0;
 
   if (routedBlocks.length === 0) {
@@ -78,6 +82,7 @@ const AssistantBlocks = memo(function AssistantBlocks({
           key={item.id}
           segments={item.segments}
           live={live && index === routedBlocks.length - 1}
+          latest={index === lastActivityIndex}
         />,
       );
       return;

@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { PreviewScroll } from "@/ui";
 import { PREVIEW_HEIGHT_PX, type PreviewHeight } from "@/ui/preview-scroll";
 import {
@@ -207,7 +207,7 @@ function browserToolDetail(block: ToolBlock): string | null {
   const deltaY = block.args?.deltaY;
   if (stringValue) return stringValue;
   if (typeof deltaY === "number") return `deltaY ${deltaY}`;
-  return null;
+  return compactToolText(block.resultText, 110);
 }
 
 function durationLabel(block: ToolBlock): string | null {
@@ -243,6 +243,8 @@ function ProviderMark({ provider }: { provider: string }) {
   );
 }
 
+const ToolAutoOpenContext = createContext(false);
+
 function ToolSummary({
   block,
   filePath,
@@ -256,6 +258,9 @@ function ToolSummary({
   const running = block.status === "running";
   const kind = classifyTool(block);
   const Icon = TOOL_ICONS[kind];
+  const autoOpen = useContext(ToolAutoOpenContext) || block.status === "error";
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? autoOpen;
   const duration = durationLabel(block);
   const resolvedPath =
     filePath ?? toolArg(block, ["path", "file_path", "filePath", "file", "filename"]);
@@ -266,7 +271,13 @@ function ToolSummary({
     : null;
   return (
     <div className="min-w-0 py-0.5">
-      <div className="group flex min-h-7 w-full min-w-0 items-center gap-2 px-1 text-left">
+      <button
+        type="button"
+        disabled={!children}
+        aria-expanded={children ? open : undefined}
+        onClick={() => children && setManualOpen(!open)}
+        className="group flex min-h-7 w-full min-w-0 items-center gap-2 px-1 text-left disabled:cursor-default"
+      >
         {meta.provider ? (
           <ProviderMark provider={meta.provider} />
         ) : zig ? (
@@ -303,8 +314,8 @@ function ToolSummary({
         {block.status === "error" ? (
           <span className="shrink-0 text-[length:var(--fs-xs)] text-(--err)">failed</span>
         ) : null}
-      </div>
-      {children ? <div className="min-w-0 pt-0.5">{children}</div> : null}
+      </button>
+      {children && open ? <div className="min-w-0 pt-0.5">{children}</div> : null}
     </div>
   );
 }
@@ -327,35 +338,6 @@ function ShellBlock({ output, status }: { output: string | null; status: ToolBlo
           {trimmedOutput}
         </pre>
       </PreviewScroll>
-    </div>
-  );
-}
-
-function ShellActivity({
-  command,
-  output,
-  status,
-}: {
-  command: string;
-  output: string | null;
-  status: ToolBlock["status"];
-}) {
-  const failed = status === "error";
-  return (
-    <div className="min-w-0 py-0.5">
-      <div
-        className={`flex min-w-0 items-start gap-2 border bg-(--color-input) px-3 py-2.5 font-mono text-[length:var(--fs-sm)] leading-[1.6] ${
-          output ? "rounded-t-md" : "rounded-md"
-        } ${failed ? "border-(--err)/35" : "border-(--border)"}`}
-      >
-        <span
-          className={`shrink-0 select-none ${failed ? "text-(--err)" : "text-(--color-terminal-green)"}`}
-        >
-          $
-        </span>
-        <pre className="min-w-0 whitespace-pre-wrap break-words text-(--fg)/88">{command}</pre>
-      </div>
-      {output ? <ShellBlock output={output} status={status} /> : null}
     </div>
   );
 }
@@ -703,7 +685,13 @@ function ToolPreviewHeightProvider({ kind, children }: { kind: ToolKind; childre
   );
 }
 
-export const ToolBlockView = memo(function ToolBlockView({ block }: { block: ToolBlock }) {
+export function ToolBlockView({
+  block,
+  autoOpen = false,
+}: {
+  block: ToolBlock;
+  autoOpen?: boolean;
+}) {
   useFilesystemRefresh(block);
   const kind = classifyTool(block);
   const fileWritePreview = FILE_WRITE_TOOL_NAMES.has(block.name.toLowerCase())
@@ -711,44 +699,58 @@ export const ToolBlockView = memo(function ToolBlockView({ block }: { block: Too
     : null;
   if (fileWritePreview) {
     return (
-      <ToolPreviewHeightProvider kind={kind}>
-        <FileWritePreview block={block} {...fileWritePreview} />
-      </ToolPreviewHeightProvider>
+      <ToolAutoOpenContext.Provider value={autoOpen}>
+        <ToolPreviewHeightProvider kind={kind}>
+          <FileWritePreview block={block} {...fileWritePreview} />
+        </ToolPreviewHeightProvider>
+      </ToolAutoOpenContext.Provider>
     );
   }
   const diffPreview = diffPreviewData(block);
   if (diffPreview) {
     return (
-      <ToolPreviewHeightProvider kind={kind}>
-        <DiffPreview block={block} diffText={diffPreview} />
-      </ToolPreviewHeightProvider>
+      <ToolAutoOpenContext.Provider value={autoOpen}>
+        <ToolPreviewHeightProvider kind={kind}>
+          <DiffPreview block={block} diffText={diffPreview} />
+        </ToolPreviewHeightProvider>
+      </ToolAutoOpenContext.Provider>
     );
   }
   if (kind === "exec") {
     const command = execCommand(block) ?? humanizeToolName(block.name);
     const output = block.resultText || null;
     return (
-      <ToolPreviewHeightProvider kind={kind}>
-        <ShellActivity command={command} output={output} status={block.status} />
-      </ToolPreviewHeightProvider>
+      <ToolAutoOpenContext.Provider value={autoOpen}>
+        <ToolPreviewHeightProvider kind={kind}>
+          <ToolSummary block={{ ...block, args: { ...block.args, command } }}>
+            {output ? <ShellBlock output={output} status={block.status} /> : null}
+          </ToolSummary>
+        </ToolPreviewHeightProvider>
+      </ToolAutoOpenContext.Provider>
     );
   }
   if (kind === "browser") {
     return (
-      <ToolPreviewHeightProvider kind={kind}>
-        <BrowserPreview block={block} />
-      </ToolPreviewHeightProvider>
+      <ToolAutoOpenContext.Provider value={autoOpen}>
+        <ToolPreviewHeightProvider kind={kind}>
+          <BrowserPreview block={block} />
+        </ToolPreviewHeightProvider>
+      </ToolAutoOpenContext.Provider>
     );
   }
 
   const display =
     block.resultText || (block.text && block.text !== block.argsText ? block.text : "");
   return (
-    <ToolPreviewHeightProvider kind={kind}>
-      <ToolSummary block={block}>{display ? <ToolOutput>{display}</ToolOutput> : null}</ToolSummary>
-    </ToolPreviewHeightProvider>
+    <ToolAutoOpenContext.Provider value={autoOpen}>
+      <ToolPreviewHeightProvider kind={kind}>
+        <ToolSummary block={block}>
+          {display ? <ToolOutput>{display}</ToolOutput> : null}
+        </ToolSummary>
+      </ToolPreviewHeightProvider>
+    </ToolAutoOpenContext.Provider>
   );
-});
+}
 
 function useFilesystemRefresh(block: ToolBlock): void {
   const refreshesFilesystem =
