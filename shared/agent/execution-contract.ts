@@ -43,13 +43,16 @@ export const AgentToolStartedEventSchema = Schema.Struct({
   toolName: Schema.String,
   arguments: Schema.optional(Schema.Unknown),
   kind: Schema.optional(Schema.String),
+  timestamp: Schema.optional(Schema.String),
 });
 
 export const AgentToolUpdatedEventSchema = Schema.Struct({
   type: Schema.Literal("tool_execution_update"),
   toolCallId: Schema.String,
   status: Schema.optional(Schema.String),
+  partialResult: Schema.optional(Schema.Unknown),
   result: Schema.optional(Schema.Unknown),
+  timestamp: Schema.optional(Schema.String),
 });
 
 export const AgentToolCompletedEventSchema = Schema.Struct({
@@ -58,6 +61,7 @@ export const AgentToolCompletedEventSchema = Schema.Struct({
   status: Schema.optional(Schema.String),
   isError: Schema.Boolean,
   result: Schema.optional(Schema.Unknown),
+  timestamp: Schema.optional(Schema.String),
 });
 
 export const AgentToolLifecycleEventSchema = Schema.Union([

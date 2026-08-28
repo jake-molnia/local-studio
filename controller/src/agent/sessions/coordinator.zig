@@ -565,7 +565,13 @@ fn ingestRuntimeDocument(allocator: std.mem.Allocator, io: Io, database: *sqlite
         try records.appendEvent(database, session_id, sequence, session_harness, serialized);
         try execution.observeHarnessEvent(database, session_id, session_harness, event);
         if (event.object.get("event")) |canonical| {
-            const canonical_document = try serialize(allocator, canonical);
+            var canonical_event = canonical;
+            if (canonical_event == .object and canonical_event.object.get("timestamp") == null) {
+                if (optionalString(event.object, "timestamp")) |timestamp| {
+                    try canonical_event.object.put(parsed.arena.allocator(), "timestamp", .{ .string = timestamp });
+                }
+            }
+            const canonical_document = try serialize(allocator, canonical_event);
             defer allocator.free(canonical_document);
             const source_key = try std.fmt.allocPrint(allocator, "event:{d}", .{sequence});
             defer allocator.free(source_key);

@@ -152,7 +152,11 @@ pub fn initialize(database: *sqlite.Database) !void {
     try database.execute(
         \\UPDATE agent_transcript_entries AS transcript
         \\SET document = (
-        \\  SELECT json_extract(event.document, '$.event')
+        \\  SELECT json_set(
+        \\    json_extract(event.document, '$.event'),
+        \\    '$.timestamp',
+        \\    json_extract(event.document, '$.timestamp')
+        \\  )
         \\  FROM agent_events AS event
         \\  WHERE event.session_id = transcript.session_id
         \\    AND event.sequence = CAST(substr(transcript.source_key, 7) AS INTEGER)
