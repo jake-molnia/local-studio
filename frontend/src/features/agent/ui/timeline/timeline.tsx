@@ -179,14 +179,17 @@ export function Timeline({
           keyExtractor={timelineMessageKey}
           getItemType={timelineMessageType}
           renderItem={renderItem}
+          recycleItems={false}
           estimatedItemSize={144}
           initialScrollAtEnd
           maintainScrollAtEnd={stickToBottom ? TIMELINE_MAINTAIN_SCROLL_AT_END : false}
-          maintainVisibleContentPosition={TIMELINE_MAINTAIN_VISIBLE_CONTENT_POSITION}
+          maintainVisibleContentPosition={
+            stickToBottom ? false : TIMELINE_MAINTAIN_VISIBLE_CONTENT_POSITION
+          }
           ListHeaderComponent={listHeader}
           ListFooterComponent={listFooter}
           data-timeline-scroller
-          className="agent-chat-scroller min-h-0 min-w-0 flex-1 overflow-y-auto bg-(--agent-bg) px-3 pb-0 pt-1.5 [overflow-anchor:auto] [overscroll-behavior:contain] [scroll-behavior:auto] [scrollbar-gutter:stable] sm:px-4"
+          className="agent-chat-scroller min-h-0 min-w-0 flex-1 overflow-y-auto bg-(--agent-bg) px-3 pb-0 pt-1.5 [overflow-anchor:none] [overscroll-behavior:contain] [scroll-behavior:auto] [scrollbar-gutter:stable] sm:px-4"
         />
         {!stickToBottom && visibleMessages.length > 0 ? (
           <ScrollToBottomButton
@@ -492,13 +495,16 @@ function useTimelineScrollEffects({
         restoreScrollTop();
         if (pendingRestoreTop !== null) return;
       }
+      if (stickRef.current) {
+        persist();
+        return;
+      }
       if (atBottom()) {
         if (Date.now() < userHoldUntilRef.current) return;
         setStick(true);
         persist();
         return;
       }
-      setStick(false);
       persist();
     };
 

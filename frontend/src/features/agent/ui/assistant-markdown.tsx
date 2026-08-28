@@ -519,7 +519,15 @@ function FileLink({
   );
 }
 
-function AssistantMarkdownInner({ text, cwd = null }: { text: string; cwd?: string | null }) {
+function AssistantMarkdownInner({
+  text,
+  cwd = null,
+  streaming = false,
+}: {
+  text: string;
+  cwd?: string | null;
+  streaming?: boolean;
+}) {
   // Actions-only subscription: tools state churn (browser typing, selections)
   // never re-renders frozen markdown blocks.
   const tools = useToolsActions();
@@ -539,6 +547,13 @@ function AssistantMarkdownInner({ text, cwd = null }: { text: string; cwd?: stri
       ),
     [cwd, tools.setComputerOpen, tools.setComputerTab, tools.setBrowserUrl, tools.requestFileOpen],
   );
+  if (streaming) {
+    return (
+      <div className="min-w-0 max-w-full whitespace-pre-wrap break-words leading-[inherit] [overflow-wrap:anywhere]">
+        {normalizedText}
+      </div>
+    );
+  }
   return (
     <div className="chat-markdown min-w-0 max-w-full overflow-x-hidden [overflow-wrap:anywhere]">
       <MarkdownErrorBoundary
