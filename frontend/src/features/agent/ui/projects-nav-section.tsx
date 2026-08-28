@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState, type DragEvent, type ReactNode 
 import { useRouter } from "next/navigation";
 import { Button, UiModal, UiModalBody, UiModalFooter, UiModalHeader } from "@/ui";
 import { PlusIcon } from "@/ui/icons";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import {
   useProjectsNavAddProjectEffect,
   useProjectsNavSessionPrefs,
@@ -14,7 +15,11 @@ import {
   useSessionActivity,
 } from "@/features/agent/session-index";
 import { useProjects } from "@/features/agent/projects/context";
-import { addProjectFromPath, openProjectDirectory } from "@/features/agent/projects/api";
+import {
+  addProjectFromPath,
+  openProjectDirectory,
+  type ProjectImportProgress,
+} from "@/features/agent/projects/api";
 import { isChatsProject, type Project as ProjectEntry } from "@/features/agent/projects/types";
 import type { NavView } from "@/features/shell/left-sidebar-lazy";
 import { ProjectDirectoryPickerModal } from "./projects-nav/directory-picker-modal";
@@ -25,6 +30,10 @@ import { PinnedSection } from "./projects-nav/pinned-section";
 import { RecentSessionsSection } from "./projects-nav/recent-sessions-section";
 import { NewChatPlusButton, ProjectRow, ProjectSessions } from "./projects-nav/session-rows";
 import { AddProjectMenu } from "./projects-nav/add-project-menu";
+import {
+  ProjectImportToast,
+  type ProjectImportToastState,
+} from "./projects-nav/project-import-toast";
 
 export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view: NavView }) {
   const router = useRouter();
@@ -46,37 +55,97 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [chatsExpanded, setChatsExpanded] = useState(true);
   const [dragProjectId, setDragProjectId] = useState<string | null>(null);
+  const [importToast, setImportToast] = useState<ProjectImportToastState | null>(null);
   const addProjectButtonRef = useRef<HTMLButtonElement>(null);
+  const importInFlightRef = useRef(false);
+  const importToastTimerRef = useRef<number | null>(null);
   const removal = useProjectRemoval(projectsContext.removeProject, setOpenIds, setAddError);
+
+  const clearImportToastTimer = useCallback(() => {
+    if (importToastTimerRef.current === null) return;
+    window.clearTimeout(importToastTimerRef.current);
+    importToastTimerRef.current = null;
+  }, []);
+
+  useMountSubscription(() => clearImportToastTimer, [clearImportToastTimer]);
+
+  const reportImportProgress = useCallback(
+    (progress: ProjectImportProgress) => {
+      clearImportToastTimer();
+      setImportToast(progress);
+    },
+    [clearImportToastTimer],
+  );
+
+  const finishImport = useCallback(
+    (project: ProjectEntry) => {
+      clearImportToastTimer();
+      setImportToast({
+        stage: "complete",
+        message: `${project.name} is ready to use`,
+        progress: 100,
+      });
+      importToastTimerRef.current = window.setTimeout(() => setImportToast(null), 4000);
+    },
+    [clearImportToastTimer],
+  );
+
+  const failImport = useCallback(
+    (error: unknown) => {
+      clearImportToastTimer();
+      const message = error instanceof Error ? error.message : "Failed to sync repository";
+      setImportToast({ stage: "error", message, progress: 100 });
+      setAddError(message);
+    },
+    [clearImportToastTimer],
+  );
 
   const handleUseFolder = useCallback(
     async (accountId: string) => {
+      if (importInFlightRef.current) return;
       setAddError("");
       setDirectoryAccountId(accountId);
+      importInFlightRef.current = true;
       try {
-        const result = await openProjectDirectory(accountId);
+        const result = await openProjectDirectory(accountId, reportImportProgress);
         if (result.source === "fallback") {
           setDirectoryModalOpen(true);
           return;
         }
-        if (result.project) upsertProject(result.project);
+        if (result.project) {
+          upsertProject(result.project);
+          finishImport(result.project);
+          void refreshProjects();
+        }
       } catch (error) {
-        setAddError(error instanceof Error ? error.message : "Failed to add project");
+        failImport(error);
+      } finally {
+        importInFlightRef.current = false;
       }
     },
-    [upsertProject],
+    [failImport, finishImport, refreshProjects, reportImportProgress, upsertProject],
   );
   useProjectsNavAddProjectEffect(() => setAddMenuOpen(true));
 
   const handleDirectoryPicked = async (directoryPath: string) => {
-    if (!directoryAccountId) return;
+    if (!directoryAccountId || importInFlightRef.current) return;
     setAddError("");
+    clearImportToastTimer();
+    importInFlightRef.current = true;
+    setDirectoryModalOpen(false);
     try {
-      upsertProject(await addProjectFromPath(directoryPath, directoryAccountId));
-      setDirectoryModalOpen(false);
+      const project = await addProjectFromPath(
+        directoryPath,
+        directoryAccountId,
+        reportImportProgress,
+      );
+      upsertProject(project);
+      finishImport(project);
       void refreshProjects();
     } catch (error) {
-      setAddError(error instanceof Error ? error.message : "Failed to add project");
+      failImport(error);
+    } finally {
+      importInFlightRef.current = false;
     }
   };
 
@@ -247,6 +316,13 @@ export function ProjectsNavSection({ expanded, view }: { expanded: boolean; view
         removing={removal.removing}
         onCancel={removal.cancel}
         onConfirm={removal.confirm}
+      />
+      <ProjectImportToast
+        state={importToast}
+        onDismiss={() => {
+          clearImportToastTimer();
+          setImportToast(null);
+        }}
       />
       <PinnedSection
         pinned={pinned}

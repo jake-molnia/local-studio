@@ -1,5 +1,5 @@
 import { safeJson } from "@/features/agent/safe-json";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { GitAction, GitBranch, GitState } from "@/features/agent/contracts";
 import type { GitSummary, Project, RepositoryOption } from "@/features/agent/projects/types";
 
@@ -27,6 +27,33 @@ const PreparedWorkspaceSchema = Schema.Struct({
 
 const ProjectRefsSchema = Schema.Struct({ refs: Schema.Array(Schema.String) });
 
+const ProjectSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  path: Schema.String,
+  addedAt: Schema.String,
+  exists: Schema.Boolean,
+  hasGit: Schema.Boolean,
+  branch: Schema.NullOr(Schema.String),
+  accountId: Schema.optional(Schema.String),
+  organization: Schema.optional(Schema.String),
+  repository: Schema.optional(Schema.String),
+  repositoryUrl: Schema.optional(Schema.String),
+  defaultBranch: Schema.String,
+});
+
+const ProjectImportProgressSchema = Schema.Struct({
+  stage: Schema.Literals(["preparing", "creating", "uploading", "saving"]),
+  message: Schema.String,
+  progress: Schema.NullOr(Schema.Number),
+});
+
+const ProjectEnvelopeSchema = Schema.Struct({ project: ProjectSchema });
+const ProjectImportFailureSchema = Schema.Struct({
+  error: Schema.String,
+  detail: Schema.optional(Schema.String),
+});
+
 type DesktopBridge = {
   openDirectory?: () => Promise<string | null>;
 };
@@ -44,14 +71,27 @@ export type OpenProjectDirectoryResult =
   | { source: "desktop"; project: Project | null }
   | { source: "fallback" };
 
-export async function openProjectDirectory(accountId: string): Promise<OpenProjectDirectoryResult> {
+export type ProjectImportProgress = Schema.Schema.Type<typeof ProjectImportProgressSchema>;
+export type ProjectImportProgressHandler = (progress: ProjectImportProgress) => void;
+
+export async function openProjectDirectory(
+  accountId: string,
+  onProgress?: ProjectImportProgressHandler,
+): Promise<OpenProjectDirectoryResult> {
   const bridge = getDesktopBridge();
   if (!bridge?.openDirectory) return { source: "fallback" };
   const path = await bridge.openDirectory();
-  return { source: "desktop", project: path ? await addProjectFromPath(path, accountId) : null };
+  return {
+    source: "desktop",
+    project: path ? await addProjectFromPath(path, accountId, onProgress) : null,
+  };
 }
 
-export async function addProjectFromPath(path: string, accountId: string): Promise<Project> {
+export async function addProjectFromPath(
+  path: string,
+  accountId: string,
+  onProgress?: ProjectImportProgressHandler,
+): Promise<Project> {
   const folder = path
     .replace(/[\\/]+$/u, "")
     .split(/[\\/]/u)
@@ -60,16 +100,66 @@ export async function addProjectFromPath(path: string, accountId: string): Promi
   const repository = folder?.replace(/[^A-Za-z0-9._-]+/gu, "-").replace(/^-+|-+$/gu, "");
   if (!repository || repository === "." || repository === "..")
     throw new Error("Choose a project folder");
-  const response = await fetch("/api/agent/projects", {
+  onProgress?.({ stage: "preparing", message: "Starting repository sync", progress: 1 });
+  const response = await fetch("/api/agent/projects/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ import: true, path, accountId, repository }),
   });
-  const payload = (await response.json()) as { project?: Project; error?: string; detail?: string };
-  if (!response.ok || !payload.project) {
-    throw new Error(payload.error || payload.detail || "Failed to add project");
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      detail?: string;
+    };
+    throw new Error(payload.detail || payload.error || "Failed to add project");
   }
-  return payload.project;
+  return Effect.runPromise(readProjectImportStream(response, onProgress));
+}
+
+function readProjectImportStream(
+  response: Response,
+  onProgress?: ProjectImportProgressHandler,
+): Effect.Effect<Project, Error> {
+  return Effect.tryPromise({
+    try: async () => {
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Repository sync did not return a progress stream");
+      const decoder = new TextDecoder();
+      let pending = "";
+      let project: Project | null = null;
+      while (true) {
+        const result = await reader.read();
+        pending += decoder.decode(result.value, { stream: !result.done }).replaceAll("\r\n", "\n");
+        const frames = pending.split("\n\n");
+        pending = frames.pop() ?? "";
+        for (const frame of frames) {
+          const lines = frame.split("\n");
+          const event = lines
+            .find((line) => line.startsWith("event:"))
+            ?.slice(6)
+            .trim();
+          const data = lines
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
+          if (!event || !data) continue;
+          const value = JSON.parse(data) as unknown;
+          if (event === "progress") {
+            onProgress?.(Schema.decodeUnknownSync(ProjectImportProgressSchema)(value));
+          } else if (event === "complete") {
+            project = Schema.decodeUnknownSync(ProjectEnvelopeSchema)(value).project;
+          } else if (event === "error") {
+            const failure = Schema.decodeUnknownSync(ProjectImportFailureSchema)(value);
+            throw new Error(failure.detail || failure.error);
+          }
+        }
+        if (result.done) break;
+      }
+      if (!project) throw new Error("Repository sync ended before the project was saved");
+      return project;
+    },
+    catch: (cause) => (cause instanceof Error ? cause : new Error("Repository sync failed")),
+  });
 }
 
 export async function listRepositoryOptions(): Promise<{
