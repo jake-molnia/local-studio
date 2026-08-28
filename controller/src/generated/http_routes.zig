@@ -10,7 +10,7 @@ pub const Route = struct {
     streaming: Streaming,
 };
 
-pub const route_count: usize = 290;
+pub const route_count: usize = 291;
 
 pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/docs", .ownership = .shared, .streaming = .never },
@@ -147,6 +147,7 @@ pub const routes = [_]Route{
     .{ .method = .GET, .path = "/api/agent/projects", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/projects", .ownership = .head, .streaming = .never },
     .{ .method = .DELETE, .path = "/api/agent/projects", .ownership = .head, .streaming = .never },
+    .{ .method = .POST, .path = "/api/agent/projects/import", .ownership = .head, .streaming = .always },
     .{ .method = .GET, .path = "/api/agent/projects/repositories", .ownership = .head, .streaming = .never },
     .{ .method = .POST, .path = "/api/agent/projects/workspace", .ownership = .head, .streaming = .never },
     .{ .method = .GET, .path = "/api/agent/projects/refs", .ownership = .head, .streaming = .never },

@@ -4,6 +4,9 @@ const builtin = @import("builtin");
 const sqlite3 = opaque {};
 const sqlite3_stmt = opaque {};
 const SQLITE_OK = 0;
+const SQLITE_BUSY = 5;
+const SQLITE_LOCKED = 6;
+const SQLITE_CONSTRAINT = 19;
 const SQLITE_ROW = 100;
 const SQLITE_DONE = 101;
 const SQLITE_INTEGER = 1;
@@ -148,7 +151,15 @@ pub const Database = struct {
         const opened = handle orelse return error.DatabaseOpenFailed;
         errdefer _ = api.close_v2(opened);
         if (api.busy_timeout(opened, 5_000) != SQLITE_OK) return error.DatabaseConfigureFailed;
-        if (!std.mem.eql(u8, path, ":memory:")) _ = std.c.chmod(path_z.ptr, 0o600);
+        if (!std.mem.eql(u8, path, ":memory:")) {
+            var message: ?[*:0]u8 = null;
+            defer if (message) |allocated| api.free(allocated);
+            if (api.exec(opened, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", null, null, &message) != SQLITE_OK) {
+                std.log.err("SQLite configuration failed: {s}", .{if (message) |value| std.mem.span(value) else std.mem.span(api.errmsg(opened))});
+                return error.DatabaseConfigureFailed;
+            }
+            _ = std.c.chmod(path_z.ptr, 0o600);
+        }
         return .{ .allocator = allocator, .library = library, .api = api, .handle = opened };
     }
 
@@ -276,10 +287,20 @@ pub const Statement = struct {
     }
 
     pub fn step(statement: *Statement) !Step {
-        return switch (statement.database.api.step(statement.requiredHandle())) {
+        const result = statement.database.api.step(statement.requiredHandle());
+        return switch (result) {
             SQLITE_ROW => .row,
             SQLITE_DONE => .done,
-            else => error.DatabaseStepFailed,
+            else => {
+                const info = statement.database.errorInfo();
+                std.log.err("SQLite step failed code={d} extended={d}: {s}", .{ info.code, info.extended_code, info.message });
+                return switch (result & 0xff) {
+                    SQLITE_BUSY => error.DatabaseBusy,
+                    SQLITE_LOCKED => error.DatabaseLocked,
+                    SQLITE_CONSTRAINT => error.DatabaseConstraint,
+                    else => error.DatabaseStepFailed,
+                };
+            },
         };
     }
 

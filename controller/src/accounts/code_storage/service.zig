@@ -14,12 +14,31 @@ const agent_execution = @import("../../agent/execution/store.zig");
 const Io = std.Io;
 const http = std.http;
 
+pub const ImportProgress = struct {
+    context: *anyopaque,
+    update: *const fn (context: *anyopaque, stage: []const u8, message: []const u8, progress: ?u8) void,
+
+    pub fn report(progress: ImportProgress, stage: []const u8, message: []const u8, percent: ?u8) void {
+        progress.update(progress.context, stage, message, percent);
+    }
+};
+
+const ImportMirrorProgress = struct {
+    reporter: ?ImportProgress,
+
+    fn update(context: *anyopaque, message: []const u8) void {
+        const progress: *ImportMirrorProgress = @ptrCast(@alignCast(context));
+        if (progress.reporter) |reporter| reporter.report("uploading", message, null);
+    }
+};
+
 pub const State = struct {
     allocator: std.mem.Allocator,
     io: Io,
     data_dir: []u8,
     environment: *const std.process.Environ.Map,
     mutex: Io.Mutex = .init,
+    import_mutex: Io.Mutex = .init,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, data_dir: []const u8, environment: *const std.process.Environ.Map) !State {
         return .{ .allocator = allocator, .io = io, .data_dir = try allocator.dupe(u8, data_dir), .environment = environment };
@@ -119,7 +138,7 @@ pub const State = struct {
         state.mutex.unlock(state.io);
         defer state.allocator.free(private_key);
         defer state.allocator.free(organization);
-        try code_storage_git.createRepository(state.allocator, state.io, client, organization, account_id, private_key, name, "main");
+        if (try code_storage_git.createRepository(state.allocator, state.io, client, organization, account_id, private_key, name, "main") == .existing) return error.CodeStorageRepositoryAlreadyExists;
         var payload: Io.Writer.Allocating = .init(state.allocator);
         defer payload.deinit();
         try payload.writer.writeAll("{\"accountId\":");
@@ -130,7 +149,9 @@ pub const State = struct {
         return state.addProjectPayload(database, payload.writer.buffered());
     }
 
-    pub fn importProjectPayload(state: *State, client: *http.Client, database: *sqlite.Database, document: []const u8) ![]u8 {
+    pub fn importProjectPayload(state: *State, client: *http.Client, database: *sqlite.Database, document: []const u8, progress: ?ImportProgress) ![]u8 {
+        try state.import_mutex.lock(state.io);
+        defer state.import_mutex.unlock(state.io);
         var parsed = std.json.parseFromSlice(std.json.Value, state.allocator, document, .{}) catch return error.InvalidProjectPayload;
         defer parsed.deinit();
         if (parsed.value != .object) return error.InvalidProjectPayload;
@@ -138,6 +159,7 @@ pub const State = struct {
         const repository_name = stringField(parsed.value.object, "repository") orelse return error.CodeStorageRepositoryRequired;
         const workspace = stringField(parsed.value.object, "path") orelse return error.ProjectPathRequired;
         const requested_default_branch = stringField(parsed.value.object, "defaultBranch");
+        if (progress) |reporter| reporter.report("preparing", "Checking the local Git repository", 8);
         try code_storage_auth.validateRepository(repository_name);
         const resolved = try agent_projects.resolveAllowedPath(state.allocator, state.io, state.environment, workspace);
         defer state.allocator.free(resolved);
@@ -146,21 +168,12 @@ pub const State = struct {
         defer state.allocator.free(default_branch);
         var existing_id: ?[]u8 = null;
         defer if (existing_id) |value| state.allocator.free(value);
-        {
-            try database.lock(state.io);
-            defer database.unlock(state.io);
-            if (try project_repository.getByPath(state.allocator, database, resolved)) |existing_value| {
-                var existing = existing_value;
-                defer existing.deinit();
-                if (existing.account_id != null) return importedProjectJson(state.allocator, &existing);
-                existing_id = try state.allocator.dupe(u8, existing.id);
-            }
-            if (try project_repository.getByRepository(state.allocator, database, account_id, repository_name)) |repository_value| {
-                var existing_repository = repository_value;
-                defer existing_repository.deinit();
-                if (existing_id == null or !std.mem.eql(u8, existing_id.?, existing_repository.id)) return error.CodeStorageRepositoryAlreadyAdded;
-            }
-        }
+        var generated_id: ?[]u8 = null;
+        defer if (generated_id) |value| state.allocator.free(value);
+        var project_id: []const u8 = undefined;
+        var timestamp_buffer: [24]u8 = undefined;
+        const added_at = formatTimestamp(state.io, &timestamp_buffer);
+        if (progress) |reporter| reporter.report("creating", "Preparing the code.storage repository", 24);
         try state.mutex.lock(state.io);
         var accounts = repository.load(state.allocator, state.io, state.data_dir) catch |failure| {
             state.mutex.unlock(state.io);
@@ -194,30 +207,65 @@ pub const State = struct {
         defer state.allocator.free(private_key);
         defer state.allocator.free(organization);
         defer state.allocator.free(owned_account_id);
-        try code_storage_git.createRepository(state.allocator, state.io, client, organization, owned_account_id, private_key, repository_name, default_branch);
-        var result = try code_storage_git.mirrorRepository(state.allocator, state.io, state.environment, organization, owned_account_id, private_key, repository_name, resolved, "project-import");
-        defer result.deinit();
-        var project_id: []u8 = undefined;
-        var generated_id: ?[]u8 = null;
-        defer if (generated_id) |value| state.allocator.free(value);
-        if (existing_id) |value| {
-            project_id = value;
-        } else {
-            var random: [12]u8 = undefined;
-            state.io.random(&random);
-            const encoded = std.fmt.bytesToHex(random, .lower);
-            generated_id = try std.fmt.allocPrint(state.allocator, "proj-{s}", .{encoded[0..]});
-            project_id = generated_id.?;
+        {
+            try database.lock(state.io);
+            defer database.unlock(state.io);
+            if (try project_repository.getByPath(state.allocator, database, resolved)) |existing_value| {
+                var existing = existing_value;
+                defer existing.deinit();
+                if (existing.account_id != null) return importedProjectJson(state.allocator, &existing);
+                existing_id = try state.allocator.dupe(u8, existing.id);
+            }
+            if (try project_repository.getByRepository(state.allocator, database, account_id, repository_name)) |repository_value| {
+                var existing_repository = repository_value;
+                defer existing_repository.deinit();
+                if (existing_id == null or !std.mem.eql(u8, existing_id.?, existing_repository.id)) return error.CodeStorageRepositoryAlreadyAdded;
+            }
+            if (existing_id) |value| {
+                project_id = value;
+            } else {
+                var random: [12]u8 = undefined;
+                state.io.random(&random);
+                const encoded = std.fmt.bytesToHex(random, .lower);
+                generated_id = try std.fmt.allocPrint(state.allocator, "proj-{s}", .{encoded[0..]});
+                project_id = generated_id.?;
+                try project_repository.save(database, project_id, std.fs.path.basename(resolved), resolved, added_at);
+            }
         }
-        var timestamp_buffer: [24]u8 = undefined;
-        const added_at = formatTimestamp(state.io, &timestamp_buffer);
+        const create_result = try code_storage_git.createRepository(state.allocator, state.io, client, organization, owned_account_id, private_key, repository_name, default_branch);
+        if (create_result == .existing) {
+            if (progress) |reporter| reporter.report("creating", "Checking the existing code.storage repository", 30);
+            if (!try code_storage_git.canResumeRepository(state.allocator, state.io, state.environment, organization, owned_account_id, private_key, repository_name, resolved)) {
+                if (generated_id) |value| {
+                    try database.lock(state.io);
+                    defer database.unlock(state.io);
+                    try project_repository.delete(database, value);
+                }
+                return error.CodeStorageRepositoryAlreadyExists;
+            }
+        }
+        if (progress) |reporter| reporter.report("uploading", "Starting Git upload", null);
+        var mirror_context = ImportMirrorProgress{ .reporter = progress };
+        const mirror_progress = code_storage_git.MirrorProgress{ .context = &mirror_context, .update = ImportMirrorProgress.update };
+        var result = try code_storage_git.mirrorRepository(state.allocator, state.io, state.environment, organization, owned_account_id, private_key, repository_name, resolved, "project-import", mirror_progress);
+        defer result.deinit();
+        if (progress) |reporter| reporter.report("saving", "Saving the synced project", 92);
         try database.lock(state.io);
         defer database.unlock(state.io);
-        if (existing_id != null) {
-            try project_repository.linkRepository(database, project_id, owned_account_id, organization, repository_name, result.repository_url, default_branch);
-        } else {
-            try project_repository.saveRepository(database, project_id, std.fs.path.basename(resolved), resolved, owned_account_id, organization, repository_name, result.repository_url, default_branch, added_at);
-        }
+        project_repository.linkRepository(database, project_id, owned_account_id, organization, repository_name, result.repository_url, default_branch) catch |failure| switch (failure) {
+            error.DatabaseConstraint => {
+                if (try project_repository.getByRepository(state.allocator, database, owned_account_id, repository_name)) |repository_value| {
+                    var existing_repository = repository_value;
+                    defer existing_repository.deinit();
+                    if (!std.mem.eql(u8, existing_repository.id, project_id)) {
+                        if (generated_id) |value| try project_repository.delete(database, value);
+                        return error.CodeStorageRepositoryAlreadyAdded;
+                    }
+                }
+                return failure;
+            },
+            else => return failure,
+        };
         var project = (try project_repository.getById(state.allocator, database, project_id)).?;
         defer project.deinit();
         return importedProjectJson(state.allocator, &project);
@@ -747,7 +795,7 @@ pub const State = struct {
         defer state.allocator.free(private_key);
         defer state.allocator.free(organization);
         defer state.allocator.free(owned_account_id);
-        var result = try code_storage_git.mirrorRepository(state.allocator, state.io, state.environment, organization, owned_account_id, private_key, repository_name, resolved, session_id);
+        var result = try code_storage_git.mirrorRepository(state.allocator, state.io, state.environment, organization, owned_account_id, private_key, repository_name, resolved, session_id, null);
         defer result.deinit();
         var checkpoint_id: ?[36]u8 = null;
         {
