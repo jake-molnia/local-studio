@@ -20,7 +20,7 @@ export function appendDelta(
     idx === -1
       ? [...blocks, { kind, id: makeId(kind), text: delta }]
       : appendToTextLikeBlock(blocks, idx, delta);
-  return normalizeReasoningBeforeVisibleText(next);
+  return next;
 }
 
 function trailingBlockIndex(blocks: AssistantBlock[], kind: "text" | "thinking"): number {
@@ -36,46 +36,9 @@ function appendToTextLikeBlock(
   const block = blocks[index];
   if (!block || (block.kind !== "text" && block.kind !== "thinking")) return blocks;
   if (!delta) return blocks;
-  // pi emits text/thinking deltas as pure INCREMENTAL tokens (verified against
-  // pi-agent-core's agent loop: every text_delta carries only the new token).
-  // Both callers — reduceSessionEvent's fall-through (live and canonical fold)
-  // and the tool bridge — forward those incremental deltas, so the correct,
-  // lossless rule is to append verbatim.
-  //
-  // We deliberately do NOT try to detect a "cumulative snapshot" or "replay
-  // restart" by string-prefix matching. That guess is mathematically ambiguous
-  // for short/repeated/whitespace tokens: a row-leading "| " or a "| --- |"
-  // separator is a prefix of the already-accumulated table, so the old
-  // `block.text.startsWith(delta)` dedup silently dropped real cell separators
-  // and collapsed markdown tables onto one line (and `delta.startsWith(block.text)`
-  // mis-sliced short deltas). Snapshot/replace semantics are owned upstream — by
-  // reduceAssistantSnapshotEvent on the live path and by the settled message_end
-  // that overwrites the block — never inferred here per delta.
   const next = blocks.slice();
   next[index] = { ...block, text: block.text + delta };
   return next;
-}
-
-function normalizeReasoningBeforeVisibleText(blocks: AssistantBlock[]): AssistantBlock[] {
-  const firstToolIndex = blocks.findIndex((block) => block.kind === "tool");
-  const prefix = firstToolIndex === -1 ? blocks : blocks.slice(0, firstToolIndex);
-  const suffix = firstToolIndex === -1 ? [] : blocks.slice(firstToolIndex);
-  const thinking = mergeTextLikeBlocks(prefix.filter((block) => block.kind === "thinking"));
-  const text = mergeTextLikeBlocks(prefix.filter((block) => block.kind === "text"));
-  const other = prefix.filter((block) => block.kind !== "thinking" && block.kind !== "text");
-  return [...thinking, ...text, ...other, ...suffix];
-}
-
-function mergeTextLikeBlocks(blocks: AssistantBlock[]): AssistantBlock[] {
-  const [first, ...rest] = blocks;
-  if (!first || (first.kind !== "text" && first.kind !== "thinking")) return blocks;
-  return [
-    rest.reduce(
-      (merged, block) =>
-        block.kind === first.kind ? { ...merged, text: merged.text + block.text } : merged,
-      first,
-    ),
-  ];
 }
 
 export function upsertTool(
@@ -97,30 +60,7 @@ function upsertToolForActivity(
   patch: (tool: ToolBlock) => ToolBlock,
   fallback: () => ToolBlock,
 ): AssistantBlock[] {
-  const hasTool = blocks.some((block) => block.kind === "tool" && block.id === toolCallId);
-  return upsertTool(
-    hasTool ? blocks : convertTrailingTextToThinking(blocks),
-    toolCallId,
-    patch,
-    fallback,
-  );
-}
-
-function convertTrailingTextToThinking(blocks: AssistantBlock[]): AssistantBlock[] {
-  let start = blocks.length;
-  while (start > 0 && blocks[start - 1]?.kind === "text") {
-    start -= 1;
-  }
-  if (start === blocks.length) return blocks;
-
-  const next = blocks.slice();
-  for (let index = start; index < next.length; index += 1) {
-    const block = next[index];
-    if (block?.kind === "text") {
-      next[index] = { kind: "thinking", id: block.id, text: block.text };
-    }
-  }
-  return normalizeReasoningBeforeVisibleText(next);
+  return upsertTool(blocks, toolCallId, patch, fallback);
 }
 
 // When a turn ends, no tool can still be executing. Any block left "running"
@@ -407,7 +347,7 @@ function applyToolExecutionToBlocks(
       status: status ?? existing.status,
       finishedAt:
         status && typeof event.timestamp === "string" ? event.timestamp : existing.finishedAt,
-      resultText: resultText || existing.resultText,
+      resultText: mergeToolOutput(existing.resultText, resultText),
       text: existing.argsText || existing.text || resultText,
     }),
     () =>
@@ -418,6 +358,19 @@ function applyToolExecutionToBlocks(
         finishedAt: status && typeof event.timestamp === "string" ? event.timestamp : undefined,
       }),
   );
+}
+
+function mergeToolOutput(
+  existingValue: string | undefined,
+  incomingValue: string,
+): string | undefined {
+  const existing = existingValue ?? "";
+  if (!incomingValue) return existingValue;
+  if (!existing) return incomingValue;
+  if (incomingValue === existing || existing.endsWith(incomingValue)) return existing;
+  if (incomingValue.startsWith(existing)) return incomingValue;
+  if (existing.startsWith(incomingValue)) return existing;
+  return existing + incomingValue;
 }
 
 function toolBlock(
