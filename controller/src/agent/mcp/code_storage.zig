@@ -1,5 +1,6 @@
 const std = @import("std");
 const auth = @import("../../accounts/code_storage/auth.zig");
+const git_policy = @import("../git/policy.zig");
 
 const Io = std.Io;
 const max_line_bytes = 1024 * 1024;
@@ -24,6 +25,48 @@ pub fn validateMirrorSource(allocator: std.mem.Allocator, io: Io, environment: *
     if (!std.fs.path.isAbsolute(path)) return error.CodeStoragePathMustBeAbsolute;
     const head = try gitOutput(allocator, io, environment, path, &.{ "rev-parse", "--verify", "HEAD" }, null);
     allocator.free(head);
+}
+
+pub fn sourceDefaultBranch(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, fallback: ?[]const u8) ![]u8 {
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ "git", "-c", git_policy.hooks_disabled, "symbolic-ref", "--quiet", "--short", "HEAD" },
+        .cwd = .{ .path = path },
+        .environ_map = environment,
+        .stdout_limit = .limited(max_git_output_bytes),
+        .stderr_limit = .limited(max_git_output_bytes),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    const ok = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (ok) {
+        const branch = std.mem.trim(u8, result.stdout, " \t\r\n");
+        try validateRef(branch);
+        return allocator.dupe(u8, branch);
+    }
+    const branch = fallback orelse return error.CodeStorageDefaultBranchRequired;
+    try validateRef(branch);
+    const ref = try std.fmt.allocPrint(allocator, "refs/heads/{s}", .{branch});
+    defer allocator.free(ref);
+    const verify = try std.process.run(allocator, io, .{
+        .argv = &.{ "git", "-c", git_policy.hooks_disabled, "show-ref", "--verify", "--quiet", ref },
+        .cwd = .{ .path = path },
+        .environ_map = environment,
+        .stdout_limit = .limited(max_git_output_bytes),
+        .stderr_limit = .limited(max_git_output_bytes),
+        .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
+    });
+    defer allocator.free(verify.stdout);
+    defer allocator.free(verify.stderr);
+    const exists = switch (verify.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!exists) return error.CodeStorageDefaultBranchNotFound;
+    return allocator.dupe(u8, branch);
 }
 
 pub fn mirrorRepository(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, organization: []const u8, account_id: []const u8, private_key: []const u8, repository: []const u8, path: []const u8, session_id: []const u8) !MirrorResult {
@@ -226,22 +269,27 @@ pub fn repositories(allocator: std.mem.Allocator, io: Io, client: *std.http.Clie
     return allocator.dupe(u8, body.buffered());
 }
 
-pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8, name: []const u8) !void {
+pub fn createRepository(allocator: std.mem.Allocator, io: Io, client: *std.http.Client, organization: []const u8, account_id: []const u8, private_key: []const u8, name: []const u8, default_branch: []const u8) !void {
     try auth.validateRepository(name);
+    try validateRef(default_branch);
     const token = try auth.mint(allocator, io, organization, account_id, private_key, name, &.{"repo:write"});
     defer allocator.free(token);
     const url = try std.fmt.allocPrint(allocator, "https://api.{s}.code.storage/api/v1/repos", .{organization});
     defer allocator.free(url);
     const authorization = try std.fmt.allocPrint(allocator, "Bearer {s}", .{token});
     defer allocator.free(authorization);
-    const body = "{\"default_branch\":\"main\"}";
+    var body: Io.Writer.Allocating = .init(allocator);
+    defer body.deinit();
+    try body.writer.writeAll("{\"default_branch\":");
+    try std.json.Stringify.value(default_branch, .{}, &body.writer);
+    try body.writer.writeByte('}');
     const storage = try allocator.alloc(u8, max_response_bytes);
     defer allocator.free(storage);
     var output: Io.Writer = .fixed(storage);
     const response = try client.fetch(.{
         .location = .{ .url = url },
         .method = .POST,
-        .payload = body,
+        .payload = body.writer.buffered(),
         .redirect_behavior = .unhandled,
         .keep_alive = false,
         .headers = .{ .accept_encoding = .omit },
@@ -258,7 +306,7 @@ pub fn references(allocator: std.mem.Allocator, io: Io, environment: *const std.
     const remote = try std.fmt.allocPrint(allocator, "https://t:{s}@{s}.code.storage/{s}.git", .{ token, organization, repository });
     defer allocator.free(remote);
     const result = try std.process.run(allocator, io, .{
-        .argv = &.{ "git", "ls-remote", "--heads", remote },
+        .argv = &.{ "git", "-c", git_policy.hooks_disabled, "ls-remote", "--heads", remote },
         .cwd = .inherit,
         .environ_map = environment,
         .stdout_limit = .limited(max_git_output_bytes),
@@ -299,7 +347,7 @@ fn runGit(allocator: std.mem.Allocator, io: Io, operation: []const u8, organizat
     defer allocator.free(remote);
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(allocator);
-    try argv.append(allocator, "git");
+    try argv.appendSlice(allocator, &.{ "git", "-c", git_policy.hooks_disabled });
     if (std.mem.eql(u8, operation, "clone_repository")) {
         const destination = stringField(arguments, "destination") orelse return error.CodeStorageDestinationRequired;
         if (!std.fs.path.isAbsolute(destination)) return error.CodeStoragePathMustBeAbsolute;
@@ -351,7 +399,7 @@ fn runGit(allocator: std.mem.Allocator, io: Io, operation: []const u8, organizat
 fn gitOutput(allocator: std.mem.Allocator, io: Io, environment: *const std.process.Environ.Map, path: []const u8, args: []const []const u8, redaction: ?[]const u8) ![]u8 {
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(allocator);
-    try argv.append(allocator, "git");
+    try argv.appendSlice(allocator, &.{ "git", "-c", git_policy.hooks_disabled });
     try argv.appendSlice(allocator, args);
     const result = try std.process.run(allocator, io, .{
         .argv = argv.items,
